@@ -1,0 +1,38 @@
+.risk-panel,
+.risk-row {
+  border: 1px solid rgba(23, 32, 47, 0.12);
+  border-radius: 22px;
+  background: rgba(255, 252, 246, 0.78);
+  box-shadow: 0 18px 60px rgba(45, 51, 64, 0.1);
+}
+
+.risk-panel {
+  padding: 24px;
+}
+
+.risk-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.risk-row {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  border-left: 6px solid #7f8da3;
+}
+
+.risk-row[data-level='high'],
+.risk-row[data-level='critical'] {
+  border-left-color: #c2412d;
+}
+
+.risk-row[data-level='medium'] {
+  border-left-color: #c8841a;
+}
+
+.risk-row span,
+.risk-row small {
+  color: #657285;
+}

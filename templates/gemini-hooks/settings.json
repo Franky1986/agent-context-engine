@@ -1,0 +1,76 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "name": "agent-memory-session-start",
+            "type": "command",
+            "command": "./.gemini/hooks/hook_adapter.sh SessionStart"
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "agent-memory-before-agent",
+            "type": "command",
+            "command": "./.gemini/hooks/hook_adapter.sh BeforeAgent"
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "agent-memory-before-tool",
+            "type": "command",
+            "command": "./.gemini/hooks/hook_adapter.sh BeforeTool"
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "agent-memory-after-tool",
+            "type": "command",
+            "command": "./.gemini/hooks/hook_adapter.sh AfterTool"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "agent-memory-notification",
+            "type": "command",
+            "command": "./.gemini/hooks/hook_adapter.sh Notification"
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "agent-memory-after-agent",
+            "type": "command",
+            "command": "./.gemini/hooks/hook_adapter.sh AfterAgent"
+          }
+        ]
+      }
+    ]
+  }
+}

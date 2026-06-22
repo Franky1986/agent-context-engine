@@ -1,0 +1,40 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run package self-check
+        run: python3 scripts/check-agent-context-engine --skip-runtime-db
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Fresh install smoke
+        run: |
+          python3 scripts/agent_context_engine.py install \
+            --target /tmp/agent-context-engine-target \
+            --instance-name smoke \
+            --link-dir /tmp/agent-context-engine-bin \
+            --link-codex-memory \
+            --link-claude-memory \
+            --no-interactive \
+            --force
+          /tmp/agent-context-engine-target/docs/skills/agent-context-engine/scripts/agent-context-engine doctor

@@ -1,0 +1,82 @@
+.graph-query-panel,
+.graph-query-row {
+  border: 1px solid rgba(16, 88, 74, 0.16);
+  border-radius: 22px;
+  background: rgba(232, 248, 239, 0.84);
+  box-shadow: 0 18px 60px rgba(16, 88, 74, 0.08);
+}
+
+.graph-query-panel {
+  padding: 24px;
+}
+
+.graph-query-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.graph-query-form input {
+  border: 1px solid rgba(45, 51, 64, 0.18);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.graph-query-form button {
+  border: 0;
+  border-radius: 14px;
+  background: #12382f;
+  color: #f5fff8;
+  cursor: pointer;
+  padding: 10px 14px;
+}
+
+.graph-query-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.graph-query-results h3 {
+  margin: 0 0 10px;
+}
+
+.graph-query-row {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 14px;
+}
+
+.graph-row-button {
+  padding: 0;
+}
+
+.graph-row-button-inner {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+  color: inherit;
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+}
+
+.graph-row-button-inner:hover,
+.graph-row-button-inner:focus-visible {
+  background: rgba(14, 58, 85, 0.08);
+}
+
+.graph-query-row span {
+  color: #657285;
+}
+
+@media (max-width: 700px) {
+  .graph-query-form,
+  .graph-query-results {
+    grid-template-columns: 1fr;
+  }
+}

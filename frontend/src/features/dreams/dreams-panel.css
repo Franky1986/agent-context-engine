@@ -1,0 +1,143 @@
+.dreams-panel,
+.dream-row {
+  border: 1px solid rgba(66, 46, 16, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 249, 236, 0.82);
+  box-shadow: 0 18px 60px rgba(70, 56, 32, 0.1);
+}
+
+.dreams-panel {
+  padding: 24px;
+}
+
+.dreams-heading {
+  align-items: start;
+}
+
+.dreams-heading-meta {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.dreams-heading-meta small {
+  color: #657285;
+}
+
+.dream-table {
+  margin-top: 18px;
+}
+
+.dream-table-head {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 0.7fr)
+    minmax(0, 1.1fr)
+    minmax(0, 0.85fr)
+    minmax(0, 0.9fr)
+    minmax(0, 0.85fr)
+    minmax(0, 1.2fr);
+  gap: 12px;
+  padding: 0 14px 10px;
+  color: #657285;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dream-list {
+  display: grid;
+  gap: 8px;
+}
+
+.dream-row {
+  padding: 0;
+  overflow: hidden;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.dream-row-loading {
+  padding: 14px;
+}
+
+.dream-row-loading .dream-select {
+  padding: 0;
+  cursor: default;
+}
+
+.dream-row[data-status='failed'] {
+  border-color: rgba(143, 29, 29, 0.35);
+}
+
+.dream-row[data-selected='true'] {
+  border-color: rgba(146, 64, 14, 0.34);
+  background: linear-gradient(180deg, rgba(255, 248, 235, 0.96), rgba(255, 239, 213, 0.88));
+  box-shadow:
+    0 22px 64px rgba(146, 64, 14, 0.14),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+  transform: translateY(-1px);
+}
+
+.dream-select {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 0.7fr)
+    minmax(0, 1.1fr)
+    minmax(0, 0.85fr)
+    minmax(0, 0.9fr)
+    minmax(0, 0.85fr)
+    minmax(0, 1.2fr);
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 14px;
+  text-align: left;
+}
+
+.dream-select:hover,
+.dream-select:focus-visible {
+  background: rgba(255, 255, 255, 0.72);
+  outline: 1px solid rgba(146, 64, 14, 0.28);
+}
+
+.dream-select[data-selected='true'] {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 247, 233, 0.86));
+  outline: 1px solid rgba(146, 64, 14, 0.28);
+}
+
+.dream-row[data-selected='true'] .dream-select strong {
+  color: #8a3b12;
+}
+
+.dream-select > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.dream-select strong,
+.dream-select small {
+  min-width: 0;
+}
+
+.dream-select small {
+  color: #657285;
+}
+
+@media (max-width: 960px) {
+  .dream-table-head {
+    display: none;
+  }
+
+  .dream-select {
+    grid-template-columns: 1fr;
+  }
+}

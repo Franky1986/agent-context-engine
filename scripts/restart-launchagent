@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+
+RUNNER="deterministic"
+INTERVAL="${AGENT_MEMORY_RESTART_INTERVAL:-300}"
+GRACE_MINUTES="${AGENT_MEMORY_RESTART_GRACE_MINUTES:-5}"
+RUNNER_TIMEOUT="${AGENT_MEMORY_RESTART_RUNNER_TIMEOUT:-1800}"
+GRAPH_RUNNER="${AGENT_MEMORY_RESTART_GRAPH_RUNNER:-deterministic}"
+GRAPH_RUNNER_MODEL="${AGENT_MEMORY_RESTART_GRAPH_RUNNER_MODEL:-}"
+DREAM_ENQUEUE_LIMIT="${AGENT_MEMORY_RESTART_DREAM_ENQUEUE_LIMIT:-25}"
+DREAM_QUEUE_LIMIT="${AGENT_MEMORY_RESTART_DREAM_QUEUE_LIMIT:-5}"
+REPAIR_LIMIT="${AGENT_MEMORY_RESTART_REPAIR_MISSING_GRAPH_PATCHES_LIMIT:-0}"
+NEO4J_SYNC="${AGENT_MEMORY_RESTART_SYNC_NEO4J:-0}"
+
+declare -a EXTRA_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --runner)
+      if [[ "$2" != "deterministic" ]]; then
+        echo "scripts/restart-launchagent only supports hybrid mode: dream runner must stay deterministic. Use --graph-runner for the LLM graph step." >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --interval)
+      INTERVAL="$2"
+      shift 2
+      ;;
+    --grace-minutes)
+      GRACE_MINUTES="$2"
+      shift 2
+      ;;
+    --runner-timeout)
+      RUNNER_TIMEOUT="$2"
+      shift 2
+      ;;
+    --graph-runner)
+      GRAPH_RUNNER="$2"
+      shift 2
+      ;;
+    --graph-runner-model)
+      GRAPH_RUNNER_MODEL="$2"
+      shift 2
+      ;;
+    --dream-enqueue-limit)
+      DREAM_ENQUEUE_LIMIT="$2"
+      shift 2
+      ;;
+    --dream-queue-limit)
+      DREAM_QUEUE_LIMIT="$2"
+      shift 2
+      ;;
+    --repair-missing-graph-patches-limit)
+      REPAIR_LIMIT="$2"
+      shift 2
+      ;;
+    --sync-neo4j)
+      NEO4J_SYNC="1"
+      shift
+      ;;
+    --no-sync-neo4j)
+      NEO4J_SYNC="0"
+      shift
+      ;;
+    --help|-h)
+      cat <<'EOF'
+Usage: scripts/restart-launchagent [options] [extra install-launchagent args]
+
+Rewrites and loads the Agent Context Engine LaunchAgent with controlled defaults.
+
+Defaults:
+  dream runner deterministic (fixed)
+  --graph-runner deterministic
+  --graph-runner-model unset
+  --interval 300
+  --grace-minutes 5
+  --runner-timeout 1800
+  --repair-missing-graph-patches-limit 0
+  --dream-enqueue-limit 25
+  --dream-queue-limit 5
+  --no-sync-neo4j
+
+Environment overrides use AGENT_MEMORY_RESTART_* names, for example:
+  AGENT_MEMORY_RESTART_GRAPH_RUNNER=claude scripts/restart-launchagent
+EOF
+      exit 0
+      ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+SYNC_FLAG="--no-sync-neo4j"
+if [[ "$NEO4J_SYNC" = "1" || "$NEO4J_SYNC" = "true" || "$NEO4J_SYNC" = "yes" ]]; then
+  SYNC_FLAG="--sync-neo4j"
+fi
+
+declare -a GRAPH_ARGS=()
+if [[ -n "$GRAPH_RUNNER" ]]; then
+  GRAPH_ARGS+=(--graph-runner "$GRAPH_RUNNER")
+fi
+if [[ -n "$GRAPH_RUNNER_MODEL" ]]; then
+  GRAPH_ARGS+=(--graph-runner-model "$GRAPH_RUNNER_MODEL")
+fi
+
+exec "$SCRIPT_DIR/agent-memory" install-launchagent \
+  --load \
+  --runner "$RUNNER" \
+  --interval "$INTERVAL" \
+  --grace-minutes "$GRACE_MINUTES" \
+  --runner-timeout "$RUNNER_TIMEOUT" \
+  ${GRAPH_ARGS+"${GRAPH_ARGS[@]}"} \
+  "$SYNC_FLAG" \
+  --repair-missing-graph-patches-limit "$REPAIR_LIMIT" \
+  --dream-enqueue-limit "$DREAM_ENQUEUE_LIMIT" \
+  --dream-queue-limit "$DREAM_QUEUE_LIMIT" \
+  ${EXTRA_ARGS+"${EXTRA_ARGS[@]}"}

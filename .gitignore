@@ -1,0 +1,62 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local runtime data
+memory/
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Local harness installation artifacts for this repo as a memory root
+.codex/
+.codex-runtime/
+.claude/
+.cursor/
+.agents/
+.gemini/
+.opencode/
+.agents_probe
+docs/knowledge/
+
+# Local environment and credentials
+.env
+.env.*
+*.env
+memory/local/
+
+# Generated reports and temporary files
+analysis_reports/
+memory/analysis_reports/
+tmp/
+temp/
+*.zip
+*.tar
+*.tar.gz
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local refactor backups
+refactor-backup/
+
+# Frontend local dependencies and build artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# TypeScript incremental build artifacts
+*.tsbuildinfo
+
+# Local audit toolchain
+.audit-tools/

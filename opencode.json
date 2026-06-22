@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "ollama/kimi-k2.6:cloud",
+  "provider": {
+    "ollama": {
+      "models": {
+        "gpt-oss:20b-cloud": {
+          "name": "gpt-oss:20b-cloud"
+        }
+      },
+      "name": "Ollama (local)",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:11434/v1"
+      }
+    }
+  },
+  "small_model": "ollama/kimi-k2.6:cloud"
+}

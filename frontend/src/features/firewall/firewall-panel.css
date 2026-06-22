@@ -1,0 +1,254 @@
+.firewall-panel,
+.firewall-row,
+.firewall-card,
+.firewall-facts div {
+  border: 1px solid rgba(96, 58, 12, 0.16);
+  border-radius: 22px;
+  background:
+    linear-gradient(155deg, rgba(255, 251, 245, 0.94), rgba(255, 242, 221, 0.86)),
+    rgba(255, 246, 230, 0.84);
+  box-shadow: 0 18px 60px rgba(96, 58, 12, 0.08);
+}
+
+.firewall-panel {
+  padding: 24px;
+}
+
+.firewall-panel[data-mode='overview'] {
+  padding-top: 24px;
+}
+
+.firewall-panel[data-firewall-enabled='false'] {
+  border-color: rgba(153, 27, 27, 0.24);
+  background:
+    linear-gradient(155deg, rgba(255, 248, 248, 0.96), rgba(255, 232, 232, 0.9)),
+    rgba(255, 242, 242, 0.94);
+}
+
+.firewall-state-copy {
+  margin: 6px 0 0;
+  color: #657285;
+  max-width: 46rem;
+}
+
+.firewall-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.firewall-kpi-card {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(96, 58, 12, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 14px;
+}
+
+.firewall-kpi-card small,
+.firewall-kpi-card span {
+  color: #657285;
+}
+
+.firewall-kpi-card strong {
+  color: #18212f;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.firewall-facts,
+.firewall-subgrid {
+  display: grid;
+  gap: 12px;
+}
+
+.firewall-facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.firewall-facts div {
+  padding: 14px;
+}
+
+.firewall-facts dt {
+  color: #657285;
+  font-size: 0.82rem;
+}
+
+.firewall-facts dd {
+  margin: 4px 0 0;
+}
+
+.firewall-block {
+  margin-top: 18px;
+}
+
+.firewall-block summary {
+  display: block;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.firewall-nested {
+  margin-top: 16px;
+}
+
+.firewall-nested summary {
+  display: block;
+  cursor: pointer;
+  font-weight: 650;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.firewall-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.firewall-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.firewall-form label {
+  display: grid;
+  gap: 6px;
+  color: #657285;
+}
+
+.firewall-form input,
+.firewall-form select {
+  border: 1px solid rgba(45, 51, 64, 0.18);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.firewall-form button,
+.firewall-actions button,
+.firewall-row button {
+  border: 0;
+  border-radius: 14px;
+  background: #18212f;
+  color: #fffaf0;
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+.firewall-actions button[data-variant='safe'] {
+  background: #14532d;
+}
+
+.firewall-actions button[data-variant='warn'] {
+  background: #92400e;
+}
+
+.firewall-actions button[data-variant='danger'] {
+  background: #991b1b;
+}
+
+.firewall-actions button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.firewall-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.firewall-row,
+.firewall-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+}
+
+.firewall-row-override-active {
+  border-color: rgba(153, 27, 27, 0.28);
+  background:
+    linear-gradient(155deg, rgba(255, 244, 244, 0.98), rgba(255, 231, 231, 0.92)),
+    rgba(255, 241, 241, 0.96);
+  box-shadow: 0 18px 60px rgba(153, 27, 27, 0.08);
+}
+
+.firewall-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.firewall-row span,
+.firewall-row small,
+.firewall-card small {
+  color: #657285;
+}
+
+.firewall-override-summary {
+  font-weight: 600;
+  color: #8a4b08;
+}
+
+.firewall-row-facts {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 2px 0 0;
+}
+
+.firewall-row-facts div {
+  display: grid;
+  gap: 2px;
+}
+
+.firewall-row-facts dt {
+  color: #657285;
+  font-size: 0.8rem;
+}
+
+.firewall-row-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.firewall-inline-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.firewall-inline-list code {
+  border-radius: 999px;
+  background: rgba(24, 33, 47, 0.07);
+  padding: 4px 9px;
+}
+
+.firewall-card-wide {
+  margin-top: 12px;
+}
+
+@media (max-width: 960px) {
+  .firewall-panel[data-mode='overview'] {
+    padding-top: 24px;
+  }
+
+  .firewall-kpi-grid,
+  .firewall-facts,
+  .firewall-form,
+  .firewall-row-facts {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,2567 @@
+openapi: 3.1.0
+info:
+  title: Agent Context Engine Monitor API
+  version: 0.1.3
+  description: Incremental contract for the Agent Context Engine React monitor.
+servers:
+  - url: http://127.0.0.1:8787
+paths:
+  /api/openapi.json:
+    get:
+      operationId: getOpenApiJson
+      summary: Read the monitor OpenAPI contract as JSON.
+      responses:
+        '200':
+          description: OpenAPI JSON document.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/status:
+    get:
+      operationId: getStatus
+      summary: Read compact monitor status.
+      responses:
+        '200':
+          description: Monitor status payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitorStatus'
+  /api/runtime/reconcile:
+    post:
+      operationId: reconcileRuntime
+      summary: Reconcile launchagent runtime configuration against current repo defaults.
+      responses:
+        '200':
+          description: Runtime reconciliation result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeReconcileResponse'
+  /api/integrations:
+    get:
+      operationId: getIntegrations
+      summary: Read integration, provider, and model readiness state.
+      responses:
+        '200':
+          description: Integration status payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrationSummary'
+  /api/installation-check:
+    get:
+      operationId: getInstallationCheck
+      summary: Read the stored installation profile and current setup gaps.
+      responses:
+        '200':
+          description: Installation check payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallationCheckResponse'
+  /api/integrations-hooks:
+    post:
+      operationId: manageIntegrationHooks
+      summary: Enable or disable integration hooks for the current Agent Context Engine root.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntegrationHookMutationRequest'
+      responses:
+        '200':
+          description: Integration hook mutation result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrationHookMutationResult'
+  /api/diagnostics:
+    get:
+      operationId: getDiagnostics
+      summary: Run monitor-safe diagnostics and runtime configuration checks.
+      parameters:
+        - in: query
+          name: relocation
+          schema:
+            type: boolean
+        - in: query
+          name: codex_features
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Diagnostics payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticsStatus'
+  /api/sessions:
+    get:
+      operationId: getSessions
+      summary: Read monitor session list.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: offset
+          schema:
+            type: integer
+        - in: query
+          name: q
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session list payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+  /api/session:
+    get:
+      operationId: getSession
+      summary: Read one monitor session detail.
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session detail payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDetail'
+  /api/stats:
+    get:
+      operationId: getStats
+      summary: Read monitor statistics buckets and grouped token usage.
+      parameters:
+        - in: query
+          name: range
+          schema:
+            type: string
+        - in: query
+          name: start
+          schema:
+            type: string
+        - in: query
+          name: end
+          schema:
+            type: string
+        - in: query
+          name: client
+          schema:
+            type: string
+        - in: query
+          name: project
+          schema:
+            type: string
+        - in: query
+          name: workdir
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Statistics payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitorStatsResponse'
+  /api/risks:
+    get:
+      operationId: getRisks
+      summary: Read monitor risk event list.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: status
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Risk event list payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskListResponse'
+  /api/risk:
+    get:
+      operationId: getRisk
+      summary: Read one monitor risk event detail.
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Risk event detail payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskDetail'
+  /api/firewall-state:
+    get:
+      operationId: getFirewallState
+      summary: Read firewall state, scoped overrides, and audit rows.
+      responses:
+        '200':
+          description: Firewall state payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirewallState'
+    post:
+      operationId: setFirewallState
+      summary: Enable or disable the monitor firewall.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetFirewallStateRequest'
+      responses:
+        '200':
+          description: Updated firewall state payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirewallState'
+  /api/firewall-override:
+    post:
+      operationId: createFirewallOverride
+      summary: Create a scoped monitor firewall override.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFirewallOverrideRequest'
+      responses:
+        '200':
+          description: Created override and updated state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirewallOverrideMutationResult'
+    delete:
+      operationId: revokeFirewallOverride
+      summary: Revoke a scoped monitor firewall override.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeFirewallOverrideRequest'
+      responses:
+        '200':
+          description: Revoked override and updated state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirewallOverrideMutationResult'
+  /api/firewall-rules:
+    get:
+      operationId: getFirewallRules
+      summary: Read monitor firewall rules.
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: kind
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Firewall rules payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirewallRulesResponse'
+  /api/firewall-suggestions:
+    get:
+      operationId: getFirewallSuggestions
+      summary: Read monitor firewall rule suggestions.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Firewall suggestion payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirewallSuggestionsResponse'
+  /api/personal:
+    get:
+      operationId: getPersonalFiles
+      summary: Read personal memory file list.
+      responses:
+        '200':
+          description: Personal memory file list payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalFilesResponse'
+  /api/personal-file:
+    get:
+      operationId: getPersonalFile
+      summary: Read one personal memory markdown file.
+      parameters:
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Personal memory file payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalFile'
+    post:
+      operationId: savePersonalFile
+      summary: Save one personal memory markdown file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavePersonalFileRequest'
+      responses:
+        '200':
+          description: Saved personal memory file payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalFile'
+  /api/repo-index:
+    get:
+      operationId: getRepoIndex
+      summary: Read the local repository index markdown file.
+      responses:
+        '200':
+          description: Repository index payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoIndexFile'
+    post:
+      operationId: saveRepoIndex
+      summary: Save the local repository index markdown file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveRepoIndexRequest'
+      responses:
+        '200':
+          description: Saved repository index payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoIndexFile'
+  /api/dreams:
+    get:
+      operationId: getDreams
+      summary: Read recent dream runs.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: runner
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dream run list payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DreamRunListResponse'
+  /api/dream-queue:
+    get:
+      operationId: getDreamQueue
+      summary: Read queued dream jobs.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: session
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dream queue payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DreamQueueResponse'
+  /api/dream-v2-evaluate:
+    get:
+      operationId: evaluateDreamV2Runs
+      summary: Read Dream v2 evaluation rows.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Dream v2 evaluation payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DreamV2EvaluationResponse'
+  /api/dream-v2-fixture-evaluate:
+    post:
+      operationId: evaluateDreamV2Fixture
+      summary: Run and inspect a Dream v2 fixture evaluation.
+      responses:
+        '200':
+          description: Dream v2 fixture evaluation payload.
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/dream-graph:
+    get:
+      operationId: getDreamGraph
+      summary: Read semantic graph artifacts for one dream run.
+      parameters:
+        - in: query
+          name: dream_run_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dream graph payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DreamGraphResponse'
+  /api/graph-artifact:
+    get:
+      operationId: getGraphArtifact
+      summary: Read graph artifact detail.
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Graph artifact detail payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphArtifactDetail'
+  /api/graph-table-options:
+    get:
+      operationId: getGraphTableOptions
+      summary: Read graph table filter options and counts.
+      responses:
+        '200':
+          description: Graph table options payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphTableOptions'
+  /api/graph-entities:
+    get:
+      operationId: getGraphEntities
+      summary: Read graph entity rows.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: offset
+          schema:
+            type: integer
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: memory_view
+          schema:
+            type: string
+            enum: [both, deterministic, semantic]
+      responses:
+        '200':
+          description: Graph entity list payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphEntityListResponse'
+  /api/graph-relations:
+    get:
+      operationId: getGraphRelations
+      summary: Read graph relation rows.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: offset
+          schema:
+            type: integer
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: memory_view
+          schema:
+            type: string
+            enum: [both, deterministic, semantic]
+      responses:
+        '200':
+          description: Graph relation list payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphRelationListResponse'
+  /api/graph:
+    get:
+      operationId: queryGraph
+      summary: Query graph data for monitor visualization.
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: view
+          schema:
+            type: string
+        - in: query
+          name: source
+          schema:
+            type: string
+            enum: [sqlite, neo4j]
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: memory_view
+          schema:
+            type: string
+            enum: [both, deterministic, semantic]
+      responses:
+        '200':
+          description: Graph query payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphQueryResponse'
+  /api/storage:
+    get:
+      operationId: getStorage
+      summary: Read SQLite storage diagnostics.
+      responses:
+        '200':
+          description: Storage status payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageStatus'
+  /api/storage/neo4j:
+    get:
+      operationId: getNeo4jStorage
+      summary: Read Neo4j storage diagnostics.
+      responses:
+        '200':
+          description: Neo4j storage status payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Neo4jStorageStatus'
+components:
+  schemas:
+    InstanceMetadata:
+      type: object
+      additionalProperties: true
+      properties:
+        version:
+          type: integer
+        instance_id:
+          type: string
+        installation_root:
+          type: string
+        memory_root:
+          type: string
+        product_version:
+          type: string
+        backend_version:
+          type: string
+        monitor_version:
+          type: string
+        storage_schema_version:
+          type: integer
+        monitor_host:
+          type: string
+        monitor_port:
+          type: integer
+        language:
+          type: string
+        wrapper_prefix:
+          type: string
+        wrapper_suffix:
+          type: string
+        launchagent_label:
+          type: string
+        launchagent_path:
+          type: string
+        launchagent_env_file:
+          type: string
+        checkout_name:
+          type: string
+        checkout_branch:
+          type: string
+        checkout_commit:
+          type: string
+        checkout_remote:
+          type: string
+        checkout_dirty:
+          type: boolean
+        checkout_detected_at:
+          type: string
+        installed_at:
+          type: string
+        installed_by_version:
+          type: string
+        last_updated_at:
+          type: string
+        last_updated_by_version:
+          type: string
+        last_seen_at:
+          type: string
+        last_successful_doctor_at:
+          type: string
+        last_successful_check_at:
+          type: string
+    MonitorStatus:
+      type: object
+      additionalProperties: true
+      properties:
+        runner:
+          type: string
+        monitor_version:
+          type: string
+        project_version:
+          type: string
+        backend_version:
+          type: string
+        root:
+          type: string
+        install_root:
+          type: string
+        memory_root:
+          type: string
+        storage_schema_version:
+          type: integer
+        storage_attached_at:
+          type: string
+        storage_profile_path:
+          type: string
+        storage_instance_id:
+          type: string
+        user_state_root:
+          type: string
+        user_config_path:
+          type: string
+        instance_metadata_path:
+          type: string
+        instance_metadata:
+          $ref: '#/components/schemas/InstanceMetadata'
+        ok:
+          type: boolean
+        generated_at:
+          type: string
+        sessions:
+          type: integer
+        events:
+          type: integer
+        pending_summaries:
+          type: integer
+        pending_dreams:
+          type: integer
+        running_dreams:
+          type: integer
+        queued_events:
+          type: integer
+        firewall:
+          $ref: '#/components/schemas/FirewallState'
+        hooks:
+          $ref: '#/components/schemas/HookControlState'
+        hook_queue:
+          $ref: '#/components/schemas/HookQueueStatus'
+        integrations:
+          $ref: '#/components/schemas/IntegrationSummary'
+        monitor_process:
+          $ref: '#/components/schemas/MonitorProcessStatus'
+        launchagent:
+          $ref: '#/components/schemas/LaunchAgentStatus'
+    HookQueueStatus:
+      type: object
+      additionalProperties: true
+      properties:
+        queued_events:
+          type: integer
+        failed_events:
+          type: integer
+        oldest_queued_at:
+          type: string
+        oldest_failed_at:
+          type: string
+        degraded:
+          type: boolean
+        degradation_reasons:
+          type: array
+          items:
+            type: string
+        queue_log:
+          $ref: '#/components/schemas/HookQueueLogSummary'
+        bridge_log:
+          $ref: '#/components/schemas/HookQueueLogSummary'
+        worker:
+          $ref: '#/components/schemas/HookQueueWorkerStatus'
+    HookQueueLogSummary:
+      type: object
+      additionalProperties: true
+      properties:
+        path:
+          type: string
+        exists:
+          type: boolean
+        has_error:
+          type: boolean
+        last_at:
+          type: string
+        last_message:
+          type: string
+    HookQueueWorkerStatus:
+      type: object
+      additionalProperties: true
+      properties:
+        running:
+          type: boolean
+        pid:
+          type: integer
+        started_at:
+          type: string
+        heartbeat_at:
+          type: string
+        last_reason:
+          type: string
+        last_exit_at:
+          type: string
+        stale:
+          type: boolean
+    MonitorProcessStatus:
+      type: object
+      additionalProperties: true
+      properties:
+        pid:
+          type: integer
+        runner:
+          type: string
+        version:
+          type: string
+        root:
+          type: string
+        cwd:
+          type: string
+        python_executable:
+          type: string
+        argv:
+          type: array
+          items:
+            type: string
+        started_at_epoch:
+          type: number
+        port:
+          type: integer
+        host:
+          type: string
+        language:
+          type: string
+        latest_runtime_change_epoch:
+          type: number
+        stale:
+          type: boolean
+        stale_reason:
+          type: string
+        restart_command:
+          type: string
+    LaunchAgentSnapshot:
+      type: object
+      additionalProperties: true
+      properties:
+        label:
+          type: string
+        plist_path:
+          type: string
+        program:
+          type: string
+        program_arguments:
+          type: array
+          items:
+            type: string
+        working_directory:
+          type: string
+        interval_seconds:
+          type: integer
+        stdout_path:
+          type: string
+        stderr_path:
+          type: string
+        env_file:
+          type: string
+        managed_env:
+          type: object
+          additionalProperties:
+            type: string
+        secret_presence:
+          type: object
+          additionalProperties:
+            type: boolean
+        fingerprint:
+          type: string
+        spec_version:
+          type: string
+    LaunchAgentDrift:
+      type: object
+      additionalProperties: true
+      properties:
+        detected:
+          type: boolean
+        reasons:
+          type: array
+          items:
+            type: string
+    LaunchAgentRuntime:
+      type: object
+      additionalProperties: true
+      properties:
+        state:
+          type: string
+        runs:
+          type: integer
+        last_exit_code:
+          type: string
+        pid:
+          type: integer
+    LaunchAgentStatus:
+      type: object
+      additionalProperties: true
+      properties:
+        supported:
+          type: boolean
+        label:
+          type: string
+        expected:
+          $ref: '#/components/schemas/LaunchAgentSnapshot'
+        installed:
+          $ref: '#/components/schemas/LaunchAgentSnapshot'
+        loaded:
+          type: boolean
+        runtime:
+          $ref: '#/components/schemas/LaunchAgentRuntime'
+        drift:
+          $ref: '#/components/schemas/LaunchAgentDrift'
+        recommended_command:
+          type: string
+    RuntimeReconcileResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        status:
+          type: string
+        result:
+          type: object
+          additionalProperties: true
+    IntegrationSummary:
+      type: object
+      additionalProperties: true
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationStatusItem'
+        total:
+          type: integer
+        ready:
+          type: integer
+        not_ready:
+          type: integer
+    InstallationAction:
+      type: object
+      additionalProperties: true
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        command:
+          type: string
+    InstallationCheckResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        root:
+          type: string
+        profile:
+          type: object
+          additionalProperties: true
+        profile_path:
+          type: string
+        runtime:
+          type: object
+          additionalProperties: true
+        frontend:
+          type: object
+          additionalProperties: true
+        integrations:
+          $ref: '#/components/schemas/IntegrationSummary'
+        workflow_checks:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        findings:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        repair_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstallationAction'
+        manual_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstallationAction'
+        agent_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstallationAction'
+    IntegrationStatusItem:
+      type: object
+      additionalProperties: true
+      properties:
+        client:
+          type: string
+        label:
+          type: string
+        ingress_transport:
+          type: string
+        runner:
+          type: string
+        provider:
+          type: string
+        ready:
+          type: boolean
+        auth_status:
+          type: string
+        readiness_status:
+          type: string
+        selected_model:
+          type: string
+        selected_small_model:
+          type: string
+        recommended_model:
+          type: string
+        recommended_small_model:
+          type: string
+        wrapper_command:
+          type: string
+        global_command_name:
+          type: string
+        global_command_available:
+          type: boolean
+        global_command_path:
+          type: string
+        global_activation_command:
+          type: string
+        global_deactivation_command:
+          type: string
+        global_status_command:
+          type: string
+        wrapper_path:
+          type: string
+        wrapper_path_exists:
+          type: boolean
+        wrapper_state:
+          type: string
+        wrapper_ready:
+          type: boolean
+        prepared:
+          type: boolean
+        hooks_manageable:
+          type: boolean
+        hooks_state:
+          type: string
+        hooks_enabled:
+          type: boolean
+        hook_local_state:
+          type: string
+        hook_effective_state:
+          type: string
+        hook_config_state:
+          type: string
+        hooks_control_state:
+          type: string
+        hooks_control_source:
+          type: string
+        hooks_control_disabled_at:
+          type: string
+        hooks_control_disabled_by:
+          type: string
+        hooks_control_reason:
+          type: string
+        hook_config_path:
+          type: string
+        hook_disabled_path:
+          type: string
+        hook_script_path:
+          type: string
+        hook_binding_path:
+          type: string
+        hook_binding_state:
+          type: string
+        hook_binding_target_root:
+          type: string
+        hook_binding_target_instance:
+          type: string
+        hook_binding_target_exists:
+          type: boolean
+        hook_binding_target_cli_exists:
+          type: boolean
+        hook_binding_last_error:
+          type: string
+        expected_hook_events:
+          type: array
+          items:
+            type: string
+        active_hook_events:
+          type: array
+          items:
+            type: string
+        usage_mode:
+          type: string
+        usage_hint:
+          type: string
+        activation_command:
+          type: string
+        terminal_command:
+          type: string
+        working_root:
+          type: string
+        project_config_exists:
+          type: boolean
+        plugin_exists:
+          type: boolean
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveredModel'
+        provider_models:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveredModel'
+        errors:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        paths:
+          type: object
+          additionalProperties:
+            type: string
+        activated_project_count:
+          type: integer
+        activated_projects:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              path:
+                type: string
+              name:
+                type: string
+              exists:
+                type: boolean
+              prepared:
+                type: boolean
+              hooks_state:
+                type: string
+              hooks_enabled:
+                type: boolean
+              hook_config_path:
+                type: string
+              hook_disabled_path:
+                type: string
+              active_hook_events:
+                type: array
+                items:
+                  type: string
+        history:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              timestamp:
+                type: string
+              client:
+                type: string
+              action:
+                type: string
+              source:
+                type: string
+              actor:
+                type: string
+              root:
+                type: string
+              target_path:
+                type: string
+        last_history_entry:
+          type: object
+          additionalProperties: true
+    HookControlState:
+      type: object
+      additionalProperties: true
+      properties:
+        enabled:
+          type: boolean
+        updated_at:
+          type: string
+        updated_by:
+          type: string
+        disabled_at:
+          type: string
+        disabled_by:
+          type: string
+        reason:
+          type: string
+        disabled_runner_count:
+          type: integer
+        disabled_runners:
+          type: array
+          items:
+            type: string
+        runners:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    IntegrationHookMutationRequest:
+      type: object
+      required: [client, action]
+      additionalProperties: true
+      properties:
+        client:
+          type: string
+        action:
+          type: string
+          enum: [enable, disable]
+        project_path:
+          type: string
+    IntegrationHookMutationResult:
+      type: object
+      additionalProperties: true
+      properties:
+        ok:
+          type: boolean
+        client:
+          type: string
+        action:
+          type: string
+        target_root:
+          type: string
+        item:
+          $ref: '#/components/schemas/IntegrationStatusItem'
+        integrations:
+          $ref: '#/components/schemas/IntegrationSummary'
+    DiscoveredModel:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+        label:
+          type: string
+        size:
+          type: string
+    DiagnosticsStatus:
+      type: object
+      additionalProperties: true
+      properties:
+        ok:
+          type: boolean
+        exit_code:
+          type: integer
+        lines:
+          type: array
+          items:
+            type: string
+    PersonalFilesResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersonalFileListItem'
+        total:
+          type: integer
+        startup_safe:
+          type: integer
+        private_count:
+          type: integer
+    PersonalFileListItem:
+      type: object
+      additionalProperties: true
+      properties:
+        path:
+          type: string
+        title:
+          type: string
+        memory_kind:
+          type: string
+        source_kind:
+          type: string
+        confidence:
+          type: number
+        risk_level:
+          type: string
+        sensitivity:
+          type: string
+        injection_policy:
+          type: string
+        preview:
+          type: string
+    PersonalFile:
+      type: object
+      additionalProperties: true
+      properties:
+        path:
+          type: string
+        frontmatter:
+          type: object
+          additionalProperties: true
+        content:
+          type: string
+        saved:
+          type: boolean
+    SavePersonalFileRequest:
+      type: object
+      required: [path, content]
+      additionalProperties: true
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+    RepoIndexFile:
+      type: object
+      additionalProperties: true
+      properties:
+        path:
+          type: string
+        exists:
+          type: boolean
+        content:
+          type: string
+        saved:
+          type: boolean
+        privacy_note:
+          type: string
+    SaveRepoIndexRequest:
+      type: object
+      required: [content]
+      additionalProperties: true
+      properties:
+        content:
+          type: string
+    SessionListResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionListItem'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    SessionListItem:
+      type: object
+      additionalProperties: true
+      properties:
+        session_id:
+          type: string
+        client_type:
+          type: string
+        thread_name:
+          type:
+            - string
+            - 'null'
+        project_id:
+          type:
+            - string
+            - 'null'
+        activity_status:
+          type:
+            - string
+            - 'null'
+        last_seen_label:
+          type:
+            - string
+            - 'null'
+        latest_activity_summary:
+          type:
+            - string
+            - 'null'
+        summary_preview:
+          type:
+            - string
+            - 'null'
+        dream_summary_preview:
+          type:
+            - string
+            - 'null'
+        dream_summary_title:
+          type:
+            - string
+            - 'null'
+        dream_meta_preview:
+          type:
+            - string
+            - 'null'
+        last_event_at:
+          type:
+            - string
+            - 'null'
+        summary_status:
+          type:
+            - string
+            - 'null'
+        dream_status:
+          type:
+            - string
+            - 'null'
+        dream_count:
+          type:
+            - integer
+            - 'null'
+        dream_total_tokens:
+          type:
+            - integer
+            - 'null'
+        total_tokens:
+          type:
+            - integer
+            - 'null'
+        cached_input_tokens:
+          type:
+            - integer
+            - 'null'
+        input_tokens:
+          type:
+            - integer
+            - 'null'
+        output_tokens:
+          type:
+            - integer
+            - 'null'
+        reasoning_tokens:
+          type:
+            - integer
+            - 'null'
+        risk_summary:
+          type: object
+          additionalProperties: true
+    SessionDetail:
+      type: object
+      additionalProperties: true
+      properties:
+        session:
+          $ref: '#/components/schemas/SessionListItem'
+        summary:
+          type: object
+          additionalProperties: true
+        token_totals:
+          $ref: '#/components/schemas/TokenTotals'
+        dream_token_totals:
+          $ref: '#/components/schemas/DreamTokenTotals'
+        last_seen_label:
+          type:
+            - string
+            - 'null'
+        events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        messages:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        dreams:
+          type: array
+          items:
+            $ref: '#/components/schemas/DreamRun'
+        graph_artifacts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        risk_summary:
+          type: object
+          additionalProperties: true
+        risk_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskEventListItem'
+        analysis_reports:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        events_total:
+          type: integer
+        events_limit:
+          type: integer
+        events_offset:
+          type: integer
+    TokenTotals:
+      type: object
+      additionalProperties: true
+      properties:
+        input_tokens:
+          type: integer
+        cached_input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        reasoning_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+    DreamTokenTotals:
+      type: object
+      additionalProperties: true
+      properties:
+        prompt_tokens:
+          type: integer
+        cached_prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        reasoning_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+    MonitorStatsBucket:
+      type: object
+      additionalProperties: true
+      properties:
+        hour:
+          type: string
+        session_input_tokens:
+          type: integer
+        session_cached_input_tokens:
+          type: integer
+        session_output_tokens:
+          type: integer
+        session_reasoning_tokens:
+          type: integer
+        session_total_tokens:
+          type: integer
+        session_count:
+          type: integer
+        dream_prompt_tokens:
+          type: integer
+        dream_cached_prompt_tokens:
+          type: integer
+        dream_completion_tokens:
+          type: integer
+        dream_reasoning_tokens:
+          type: integer
+        dream_total_tokens:
+          type: integer
+        dream_count:
+          type: integer
+    MonitorStatsGroup:
+      type: object
+      additionalProperties: true
+      properties:
+        group_key:
+          type: string
+        label:
+          type: string
+        session_total_tokens:
+          type: integer
+        dream_total_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        session_count:
+          type: integer
+        dream_count:
+          type: integer
+        session_share:
+          type: number
+        dream_share:
+          type: number
+        total_share:
+          type: number
+    MonitorStatsResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        range:
+          type: object
+          additionalProperties: true
+        filters:
+          type: object
+          additionalProperties: true
+        clients:
+          type: array
+          items:
+            type: string
+        projects:
+          type: array
+          items:
+            type: string
+        workdirs:
+          type: array
+          items:
+            type: string
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorStatsBucket'
+        totals:
+          type: object
+          additionalProperties: true
+        by_project:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorStatsGroup'
+        by_client:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorStatsGroup'
+        by_workdir:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorStatsGroup'
+        by_dream_runner:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorStatsGroup'
+        by_dream_model:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorStatsGroup'
+    RiskListResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        risks:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskEventListItem'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskEventListItem'
+        total:
+          type: integer
+        totals:
+          type: object
+          additionalProperties: true
+        classifier_totals:
+          type: object
+          additionalProperties: true
+        firewall:
+          $ref: '#/components/schemas/FirewallState'
+    RiskEventListItem:
+      type: object
+      additionalProperties: true
+      properties:
+        risk_event_id:
+          type: string
+        status:
+          type: string
+        risk_level:
+          type: string
+        created_at:
+          type: string
+        reason:
+          type:
+            - string
+            - 'null'
+        preview:
+          type:
+            - string
+            - 'null'
+        tool_name:
+          type:
+            - string
+            - 'null'
+        decision:
+          type:
+            - string
+            - 'null'
+        approval_state:
+          type:
+            - string
+            - 'null'
+        session_id:
+          type:
+            - string
+            - 'null'
+        client_type:
+          type:
+            - string
+            - 'null'
+        source_kind:
+          type:
+            - string
+            - 'null'
+        impact:
+          type:
+            - string
+            - 'null'
+        event_seq:
+          type:
+            - integer
+            - 'null'
+        taint_source_refs:
+          type: array
+          items:
+            type: string
+        approval_line:
+          type:
+            - string
+            - 'null'
+        command_ref:
+          type:
+            - string
+            - 'null'
+        categories:
+          type: array
+          items:
+            type: string
+        poisoning_flags:
+          type: array
+          items:
+            type: string
+        deterministic_flags:
+          type: array
+          items:
+            type: string
+        taint_context:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+    RiskDetail:
+      type: object
+      additionalProperties: true
+      properties:
+        risk_event:
+          $ref: '#/components/schemas/RiskEventListItem'
+        evidence:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        overrides:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        classifier:
+          type: object
+          additionalProperties: true
+    FirewallState:
+      type: object
+      additionalProperties: true
+      properties:
+        enabled:
+          type: boolean
+        updated_at:
+          type:
+            - string
+            - 'null'
+        updated_by:
+          type:
+            - string
+            - 'null'
+        reason:
+          type:
+            - string
+            - 'null'
+        disabled_until:
+          type:
+            - string
+            - 'null'
+        source:
+          type:
+            - string
+            - 'null'
+        overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallOverride'
+        override_audit:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallOverrideAudit'
+        audit:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+        deterministic_rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+        effective_fixed_rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+        llm_rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallSuggestion'
+    FirewallOverride:
+      type: object
+      additionalProperties: true
+      properties:
+        override_id:
+          type: string
+        scope_type:
+          type: string
+        expires_at:
+          type: string
+        reason:
+          type: string
+        enabled:
+          type: integer
+    FirewallOverrideAudit:
+      type: object
+      additionalProperties: true
+      properties:
+        audit_id:
+          type: string
+        override_id:
+          type: string
+        created_at:
+          type: string
+        action:
+          type: string
+        actor:
+          type: string
+        reason:
+          type: string
+    SetFirewallStateRequest:
+      type: object
+      required: [enabled]
+      additionalProperties: true
+      properties:
+        enabled:
+          type: boolean
+        actor:
+          type: string
+        reason:
+          type: string
+        disabled_minutes:
+          type: integer
+        permanent_disable:
+          type: boolean
+    CreateFirewallOverrideRequest:
+      type: object
+      required: [scope_type, reason]
+      additionalProperties: true
+      properties:
+        scope_type:
+          type: string
+          enum: [session, agent, project, workdir, global]
+        reason:
+          type: string
+        actor:
+          type: string
+        disabled_minutes:
+          type: integer
+        session_id:
+          type: string
+        client_type:
+          type: string
+        agent_name:
+          type: string
+        thread_name:
+          type: string
+        project_id:
+          type: string
+        workdir:
+          type: string
+    RevokeFirewallOverrideRequest:
+      type: object
+      required: [override_id]
+      additionalProperties: true
+      properties:
+        override_id:
+          type: string
+        reason:
+          type: string
+        actor:
+          type: string
+    FirewallOverrideMutationResult:
+      type: object
+      additionalProperties: true
+      properties:
+        override:
+          $ref: '#/components/schemas/FirewallOverride'
+        firewall:
+          $ref: '#/components/schemas/FirewallState'
+    FirewallRulesResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+    FirewallRule:
+      type: object
+      additionalProperties: true
+      properties:
+        rule_id:
+          type: string
+        name:
+          type: string
+        status:
+          type:
+            - string
+            - 'null'
+        rule_kind:
+          type:
+            - string
+            - 'null'
+        scope_type:
+          type:
+            - string
+            - 'null'
+        source:
+          type:
+            - string
+            - 'null'
+        description:
+          type:
+            - string
+            - 'null'
+        origin:
+          type:
+            - string
+            - 'null'
+        origin_label:
+          type:
+            - string
+            - 'null'
+        rule_effect:
+          type:
+            - string
+            - 'null'
+        rule_effect_label:
+          type:
+            - string
+            - 'null'
+        expires_at:
+          type:
+            - string
+            - 'null'
+        audit_note:
+          type:
+            - string
+            - 'null'
+        command_patterns_json:
+          type:
+            - string
+            - 'null'
+        allowed_actions_json:
+          type:
+            - string
+            - 'null'
+        denied_actions_json:
+          type:
+            - string
+            - 'null'
+    FirewallSuggestionsResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallSuggestion'
+    FirewallSuggestion:
+      type: object
+      additionalProperties: true
+      properties:
+        suggestion_id:
+          type:
+            - string
+            - 'null'
+        status:
+          type:
+            - string
+            - 'null'
+        created_at:
+          type:
+            - string
+            - 'null'
+        payload_json:
+          type:
+            - string
+            - 'null'
+        rationale:
+          type:
+            - string
+            - 'null'
+    DreamRunListResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        dreams:
+          type: array
+          items:
+            $ref: '#/components/schemas/DreamRun'
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/DreamRun'
+        total:
+          type: integer
+    DreamRun:
+      type: object
+      additionalProperties: true
+      properties:
+        dream_run_id:
+          type: string
+        run_id:
+          type: string
+        session_id:
+          type: string
+        status:
+          type: string
+        runner:
+          type: string
+        created_at:
+          type: string
+        started_at:
+          type: string
+        pipeline_version:
+          type:
+            - integer
+            - 'null'
+        pipeline_status:
+          type:
+            - string
+            - 'null'
+        failed_stage:
+          type:
+            - string
+            - 'null'
+        completed_at:
+          type:
+            - string
+            - 'null'
+        error:
+          type:
+            - string
+            - 'null'
+        v2_deterministic_entities:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        v2_deterministic_relations:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        v2_deterministic_source:
+          type: object
+          additionalProperties: true
+        v2_graph_artifacts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        v2_semantic_entities:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        v2_semantic_relations:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        v2_reconciliation_decisions:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        v2_review_items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    DreamQueueResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        queue:
+          type: array
+          items:
+            $ref: '#/components/schemas/DreamQueueItem'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DreamQueueItem'
+        total:
+          type: integer
+    DreamQueueItem:
+      type: object
+      additionalProperties: true
+      properties:
+        queue_id:
+          type: string
+        session_id:
+          type: string
+        status:
+          type: string
+        runner:
+          type: string
+        created_at:
+          type: string
+    DreamV2EvaluationResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/DreamV2EvaluationItem'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DreamV2EvaluationItem'
+        total:
+          type: integer
+    DreamV2EvaluationItem:
+      type: object
+      additionalProperties: true
+      properties:
+        dream_run_id:
+          type: string
+        status:
+          type: string
+        pipeline_status:
+          type: string
+        error:
+          type:
+            - string
+            - 'null'
+    DreamGraphResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        run:
+          type: object
+          additionalProperties: true
+        entities:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        relations:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        graph:
+          type: object
+          additionalProperties: true
+    GraphArtifactDetail:
+      type: object
+      additionalProperties: true
+      properties:
+        artifact:
+          type: object
+          additionalProperties: true
+        entities:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        relations:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        evidence:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        graph:
+          type: object
+          additionalProperties: true
+    GraphTableOptions:
+      type: object
+      additionalProperties: true
+      properties:
+        entity_types:
+          type: array
+          items:
+            type: string
+        relation_types:
+          type: array
+          items:
+            type: string
+    GraphEntityListResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        entities:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphEntityListItem'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphEntityListItem'
+        total:
+          type: integer
+    GraphEntityListItem:
+      type: object
+      additionalProperties: true
+      properties:
+        entity_id:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        last_seen_at:
+          type: string
+        origin_kind:
+          type: string
+        memory_kind:
+          type: string
+        source_kind:
+          type: string
+    GraphRelationListResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        relations:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphRelationListItem'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphRelationListItem'
+        total:
+          type: integer
+    GraphRelationListItem:
+      type: object
+      additionalProperties: true
+      properties:
+        relation_id:
+          type: string
+        id:
+          type: string
+        source:
+          type: string
+        target:
+          type: string
+        type:
+          type: string
+        last_seen_at:
+          type: string
+        origin_kind:
+          type: string
+        memory_kind:
+          type: string
+        source_kind:
+          type: string
+    GraphQueryResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphQueryNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphQueryEdge'
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphQueryEdge'
+        total:
+          type: integer
+    GraphQueryNode:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        type:
+          type: string
+        origin_kind:
+          type: string
+        memory_kind:
+          type: string
+        source_kind:
+          type: string
+    GraphQueryEdge:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+        target:
+          type: string
+        type:
+          type: string
+        origin_kind:
+          type: string
+        memory_kind:
+          type: string
+        source_kind:
+          type: string
+    StorageStatus:
+      type: object
+      additionalProperties: true
+      properties:
+        ok:
+          type: boolean
+        root:
+          type: string
+        install_root:
+          type: string
+        memory_root:
+          type: string
+        storage_schema_version:
+          type: integer
+        storage_attached_at:
+          type: string
+        storage_profile_path:
+          type: string
+        storage_instance_id:
+          type: string
+        user_state_root:
+          type: string
+        user_config_path:
+          type: string
+        instance_metadata_path:
+          type: string
+        instance_metadata:
+          $ref: '#/components/schemas/InstanceMetadata'
+        memory_dir:
+          type: string
+        database_path:
+          type: string
+        path:
+          type: string
+        size_bytes:
+          type: integer
+        bytes:
+          type: integer
+        total:
+          $ref: '#/components/schemas/StoragePathStats'
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageCategory'
+        sqlite:
+          $ref: '#/components/schemas/StorageSqliteSummary'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageWarning'
+        cleanup_commands:
+          type: array
+          items:
+            type: string
+        tables:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    StorageCategory:
+      allOf:
+        - $ref: '#/components/schemas/StoragePathStats'
+        - type: object
+          additionalProperties: true
+          properties:
+            key:
+              type:
+                - string
+                - 'null'
+            label:
+              type:
+                - string
+                - 'null'
+            description:
+              type:
+                - string
+                - 'null'
+    StoragePathStats:
+      type: object
+      additionalProperties: true
+      properties:
+        path:
+          type:
+            - string
+            - 'null'
+        absolute_path:
+          type:
+            - string
+            - 'null'
+        exists:
+          type:
+            - boolean
+            - 'null'
+        file_count:
+          type:
+            - integer
+            - 'null'
+        dir_count:
+          type:
+            - integer
+            - 'null'
+        size_bytes:
+          type:
+            - integer
+            - 'null'
+        newest_mtime:
+          oneOf:
+            - type: number
+            - type: string
+            - type: 'null'
+        largest_files:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageLargestFile'
+        errors:
+          type: array
+          items:
+            type: string
+    StorageLargestFile:
+      type: object
+      additionalProperties: true
+      properties:
+        path:
+          type:
+            - string
+            - 'null'
+        size_bytes:
+          type:
+            - integer
+            - 'null'
+    StorageWarning:
+      type: object
+      additionalProperties: true
+      properties:
+        level:
+          type:
+            - string
+            - 'null'
+        message:
+          type:
+            - string
+            - 'null'
+    StorageSqliteSummary:
+      type: object
+      additionalProperties: true
+      properties:
+        path:
+          type:
+            - string
+            - 'null'
+        total_size_bytes:
+          type:
+            - integer
+            - 'null'
+        raw_tool_output_rows:
+          type:
+            - integer
+            - 'null'
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageSqliteFile'
+        row_counts:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageTableCount'
+    StorageSqliteFile:
+      type: object
+      additionalProperties: true
+      properties:
+        name:
+          type:
+            - string
+            - 'null'
+        path:
+          type:
+            - string
+            - 'null'
+        absolute_path:
+          type:
+            - string
+            - 'null'
+        exists:
+          type:
+            - boolean
+            - 'null'
+        size_bytes:
+          type:
+            - integer
+            - 'null'
+    StorageTableCount:
+      type: object
+      additionalProperties: true
+      properties:
+        table:
+          type:
+            - string
+            - 'null'
+        label:
+          type:
+            - string
+            - 'null'
+        rows:
+          type:
+            - integer
+            - 'null'
+    Neo4jStorageStatus:
+      type: object
+      additionalProperties: true
+      properties:
+        configured:
+          type:
+            - boolean
+            - 'null'
+        config:
+          type: object
+          additionalProperties: true
+        counts:
+          type: object
+          additionalProperties: true
+        labels:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        relationship_types:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        size:
+          type: object
+          additionalProperties: true
+        error:
+          type:
+            - string
+            - 'null'

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+
+if [[ -f "$SCRIPT_DIR/../SKILL.md" && "$(basename "$(dirname "$SCRIPT_DIR")")" = "agent-context-engine" && "$(basename "$(dirname "$(dirname "$SCRIPT_DIR")")")" = "skills" ]]; then
+  ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+elif [[ -f "$SCRIPT_DIR/../SKILL.md" ]]; then
+  ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+else
+  ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+
+PYTHON_BIN="${AGENT_MEMORY_PYTHON:-}"
+if [[ -z "$PYTHON_BIN" ]]; then
+  if [[ -x "$ROOT/.venv/bin/python" ]]; then
+    PYTHON_BIN="$ROOT/.venv/bin/python"
+  else
+    PYTHON_BIN="python3"
+  fi
+fi
+
+exec env AGENT_MEMORY_ROOT="$ROOT" "$PYTHON_BIN" "$SCRIPT_DIR/agent_context_engine.py" "$@"

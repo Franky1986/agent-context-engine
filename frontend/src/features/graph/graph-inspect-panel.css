@@ -1,0 +1,76 @@
+.graph-inspect-panel {
+  border: 1px solid rgba(16, 88, 74, 0.16);
+  border-radius: 22px;
+  background: rgba(232, 248, 239, 0.84);
+  box-shadow: 0 18px 60px rgba(16, 88, 74, 0.08);
+  padding: 24px;
+}
+
+.graph-inspect-list {
+  display: grid;
+  gap: 10px;
+}
+
+.graph-inspect-overlay {
+  justify-items: start;
+}
+
+.inspect-row {
+  border: 1px solid rgba(22, 78, 99, 0.14);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.inspect-row button {
+  justify-self: start;
+  border: 0;
+  border-radius: 10px;
+  background: #12382f;
+  color: #f5fff8;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.inspect-row button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.evidence-json {
+  margin: 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: #f2f6fb;
+  border: 1px solid #d8e0ec;
+  color: #273548;
+  overflow-x: auto;
+}
+
+.inspect-block {
+  border: 1px solid rgba(16, 88, 74, 0.14);
+  border-radius: 14px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: rgba(250, 253, 248, 0.86);
+}
+
+.inspect-block summary {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.inspect-kv {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(130px, auto) 1fr;
+}
+
+.inspect-kv dt {
+  color: #536278;
+}
+
+.inspect-kv dd {
+  margin: 0;
+}

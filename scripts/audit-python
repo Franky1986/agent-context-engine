@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TOOLS_DIR="${ACE_AUDIT_TOOLS_DIR:-$ROOT/.audit-tools/python}"
+PYTHON_BIN="${PYTHON:-python3}"
+AUDIT_PYTHON="$TOOLS_DIR/bin/python"
+AUDIT_REQUIREMENTS="$ROOT/backend/requirements-audit.txt"
+RUNTIME_REQUIREMENTS="$ROOT/backend/requirements-runtime.txt"
+BUILD_REQUIREMENTS="$ROOT/backend/requirements-build.txt"
+
+if [[ ! -x "$AUDIT_PYTHON" ]]; then
+  "$PYTHON_BIN" -m venv "$TOOLS_DIR"
+fi
+
+"$AUDIT_PYTHON" -m pip install --upgrade pip >/dev/null
+"$AUDIT_PYTHON" -m pip install --requirement "$AUDIT_REQUIREMENTS" >/dev/null
+
+exec "$TOOLS_DIR/bin/pip-audit"   --requirement "$RUNTIME_REQUIREMENTS"   --requirement "$BUILD_REQUIREMENTS"   --no-deps   "$@"

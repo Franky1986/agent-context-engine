@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: agent-context-engine
+Version: 0.1.3
+Summary: Local agent context engine backend
+Requires-Python: >=3.11
+Requires-Dist: PyYAML<7,>=6

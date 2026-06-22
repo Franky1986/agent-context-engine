@@ -1,0 +1,3 @@
+[console_scripts]
+agent-context-engine = agent_context_engine.interfaces.cli.main:main
+agent-memory = agent_context_engine.interfaces.cli.main:main

@@ -1,0 +1,49 @@
+{
+  "agent-memory": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "__ANTIGRAVITY_HOOK_SCRIPT__ PreInvocation",
+        "timeout": 30
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__ANTIGRAVITY_HOOK_SCRIPT__ PreToolUse",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__ANTIGRAVITY_HOOK_SCRIPT__ PostToolUse",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "__ANTIGRAVITY_HOOK_SCRIPT__ PostInvocation",
+        "timeout": 30
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "__ANTIGRAVITY_HOOK_SCRIPT__ Stop",
+        "timeout": 30
+      }
+    ]
+  }
+}

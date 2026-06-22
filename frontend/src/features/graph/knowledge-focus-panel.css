@@ -1,0 +1,161 @@
+.knowledge-focus-panel {
+  border: 1px solid rgba(9, 73, 104, 0.16);
+  border-radius: 22px;
+  background: rgba(233, 246, 255, 0.82);
+  box-shadow: 0 18px 60px rgba(9, 73, 104, 0.08);
+  padding: 24px;
+}
+
+.knowledge-focus-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.knowledge-focus-form input {
+  border: 1px solid rgba(45, 51, 64, 0.18);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.knowledge-focus-form button,
+.knowledge-focus-item {
+  border: 0;
+  border-radius: 14px;
+  background: #0f4c66;
+  color: #f5fcff;
+}
+
+.knowledge-focus-form button {
+  cursor: pointer;
+  padding: 10px 14px;
+}
+
+.knowledge-focus-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.knowledge-focus-crumbs {
+  display: grid;
+  gap: 4px;
+}
+
+.knowledge-focus-crumbs strong {
+  color: #18212f;
+  font-size: 12px;
+}
+
+.knowledge-focus-crumbs span {
+  color: #506074;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-focus-back {
+  border: 1px solid rgba(9, 73, 104, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #163246;
+  cursor: pointer;
+  padding: 8px 12px;
+  font-weight: 650;
+}
+
+.knowledge-focus-back:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.knowledge-focus-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(220px, 0.8fr);
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.knowledge-focus-canvas,
+.knowledge-focus-sidebar {
+  border: 1px solid rgba(9, 73, 104, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 14px;
+}
+
+.knowledge-focus-canvas svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.knowledge-node-label {
+  fill: #183247;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.knowledge-edge-label {
+  fill: #42556a;
+  font-size: 10px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.knowledge-focus-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.knowledge-focus-summary {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(9, 73, 104, 0.1);
+  border-radius: 12px;
+  background: rgba(243, 249, 255, 0.88);
+  padding: 10px 12px;
+}
+
+.knowledge-focus-summary strong {
+  color: #18212f;
+  font-size: 12px;
+}
+
+.knowledge-focus-summary span {
+  color: #657285;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-focus-list {
+  display: grid;
+  gap: 8px;
+}
+
+.knowledge-focus-item {
+  display: grid;
+  gap: 3px;
+  cursor: pointer;
+  padding: 12px;
+  text-align: left;
+}
+
+.knowledge-focus-item span {
+  color: rgba(245, 252, 255, 0.82);
+}
+
+@media (max-width: 960px) {
+  .knowledge-focus-form,
+  .knowledge-focus-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-focus-toolbar {
+    display: grid;
+    justify-content: stretch;
+  }
+}

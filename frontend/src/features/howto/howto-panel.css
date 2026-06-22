@@ -1,0 +1,173 @@
+
+.howto-shell {
+  display: grid;
+  gap: 20px;
+}
+
+.howto-hero,
+.howto-section,
+.howto-actions,
+.howto-diagram {
+  border: 1px solid #d8dee7;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fafc 100%);
+  box-shadow: 0 18px 50px rgba(24, 33, 47, 0.08);
+  padding: 22px;
+}
+
+.howto-hero {
+  display: grid;
+  gap: 14px;
+}
+
+.howto-hero p,
+.howto-section p,
+.howto-action-copy,
+.howto-diagram-copy,
+.howto-note,
+.howto-list {
+  color: #465467;
+  line-height: 1.55;
+}
+
+.howto-kicker {
+  color: #1746a2;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.howto-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.howto-title-row h3,
+.howto-section h3,
+.howto-actions h3,
+.howto-diagram h3 {
+  margin: 0;
+  color: #162032;
+}
+
+.howto-pills,
+.howto-action-grid,
+.howto-section-grid,
+.howto-action-links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.howto-pill,
+.howto-link-button {
+  border: 1px solid #c7d2e0;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #1f395f;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+
+.howto-link-button {
+  cursor: pointer;
+}
+
+.howto-link-button:hover,
+.howto-link-button:focus-visible {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.howto-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.howto-card {
+  border: 1px solid #e1e7ef;
+  border-radius: 16px;
+  background: #fff;
+  padding: 16px;
+}
+
+.howto-card h4 {
+  margin: 0 0 8px;
+  color: #162032;
+}
+
+.howto-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.howto-warning {
+  border-left: 4px solid #c62828;
+  padding-left: 12px;
+  color: #5a1b1b;
+}
+
+.howto-diagram-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.howto-diagram-node {
+  border-radius: 18px;
+  padding: 14px;
+  min-height: 116px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  position: relative;
+}
+
+.howto-diagram-node strong {
+  color: #162032;
+}
+
+.howto-diagram-node span {
+  color: #4b5a6c;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.howto-diagram-node[data-tone="user"] { background: #fff8eb; border: 1px solid #f1d59b; }
+.howto-diagram-node[data-tone="runner"] { background: #eef6ff; border: 1px solid #bfd6ff; }
+.howto-diagram-node[data-tone="hook"] { background: #f2f7f2; border: 1px solid #bfd9bf; }
+.howto-diagram-node[data-tone="memory"] { background: #f7f2ff; border: 1px solid #d8c7ff; }
+.howto-diagram-node[data-tone="dream"] { background: #fff3f8; border: 1px solid #f1c2d7; }
+.howto-diagram-node[data-tone="monitor"] { background: #f4f5f8; border: 1px solid #d7dbe3; }
+
+.howto-diagram-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6a7890;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+@media (max-width: 1100px) {
+  .howto-diagram-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .howto-section-grid,
+  .howto-diagram-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .howto-diagram-arrow {
+    transform: rotate(90deg);
+  }
+}
