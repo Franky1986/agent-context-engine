@@ -20,7 +20,8 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from ...infrastructure.config import MEMORY_DIR, ROOT
+from ...infrastructure.config import MEMORY_DIR, ROOT, SKILL_ROOT
+from ...application.instance_profile import load_installation_profile, merge_installation_profile, record_monitor_runtime, resolve_storage_profile
 from ...application.monitoring.monitor.analysis import build_session_analysis_report_for_selector, write_session_analysis_report_html
 from ...application.diagnostics import run_doctor_checks
 from ...application.installation import ensure_monitor_frontend_build, frontend_build_status
@@ -35,7 +36,7 @@ from .routes.ask_api import (
 from .routes.graph_tables import graph_entities, graph_entity_detail, graph_relation_detail, graph_relations, graph_table_options, graph_type_detail, graph_type_rows
 from .html import MONITOR_HTML
 from .routes.dream_v2_api import monitor_dream_v2_apply, monitor_dream_v2_evaluate, monitor_dream_v2_fixture_evaluate, monitor_dream_v2_projection_dry_run, monitor_dream_v2_review
-from .version import MONITOR_VERSION
+from .version import MONITOR_VERSION, PRODUCT_VERSION
 from .routes.memory_api import (
     monitor_integrations,
     monitor_installation_check,
@@ -82,11 +83,67 @@ from .serialization import add_local_time_fields
 
 REPORTS_DIR = Path(MEMORY_DIR) / "analysis_reports"
 REPORT_FILE_RE = re.compile(r"^analysis_(?P<session_slug>.+)_(?P<timestamp>\d{8}T\d{6}Z)\.html$")
-FRONTEND_DIST_DIR = Path(ROOT) / "frontend" / "dist"
+FRONTEND_DIST_DIR = Path(SKILL_ROOT) / "frontend" / "dist"
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
+
+
+def _persist_monitor_runtime_state(
+    *,
+    host: str,
+    port: int,
+    runner: str,
+    language: str,
+    status: str,
+    url: str,
+) -> None:
+    profile = load_installation_profile(ROOT)
+    instance_id = str(profile.get("instance_id") or ROOT.name)
+    storage = resolve_storage_profile(ROOT)
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    monitor_update = {
+        "host": host,
+        "port": port,
+        "language": language,
+        "last_seen_at": now_iso,
+        "last_known_url": url,
+    }
+    if status == "running":
+        monitor_update.update(
+            {
+                "last_started_at": now_iso,
+                "last_started_by": "monitor",
+                "last_known_pid": os.getpid(),
+            }
+        )
+    elif status in {"stopped", "stale"}:
+        monitor_update.update(
+            {
+                "last_stopped_at": now_iso,
+                "last_known_pid": 0,
+            }
+        )
+    merge_installation_profile(ROOT, monitor=monitor_update)
+    record_monitor_runtime(
+        instance_id=instance_id,
+        installation_root=ROOT,
+        memory_root=Path(str(storage.get("memory_root") or ROOT / "memory")),
+        configured_host=host,
+        configured_port=port,
+        active_host=host if status == "running" else "",
+        active_port=port if status == "running" else 0,
+        pid=os.getpid() if status == "running" else 0,
+        status=status,
+        runner=runner,
+        language=language,
+        monitor_version=MONITOR_VERSION,
+        product_version=PRODUCT_VERSION,
+        started_at=now_iso if status == "running" else "",
+        stopped_at=now_iso if status in {"stopped", "stale"} else "",
+        last_known_url=url,
+    )
 
 
 def _parse_report_filename(filename: str) -> tuple[str, str] | None:
@@ -860,6 +917,14 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     language = getattr(args, "language", "en")
     language = "de" if language == "de" else "en"
     url = f"http://{host}:{args.port}/?runner={urllib.parse.quote(args.runner)}&lang={urllib.parse.quote(language)}"
+    _persist_monitor_runtime_state(
+        host=host,
+        port=port,
+        runner=args.runner,
+        language=language,
+        status="running",
+        url=url,
+    )
     print(f"agent-context-engine monitor {MONITOR_VERSION}: {url}")
     print(f"runner={args.runner} model={runner_model(args.runner, args.runner_model) or '-'} root={ROOT}")
     if args.open:
@@ -868,6 +933,22 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         server.serve_forever()
     except KeyboardInterrupt:
         return 0
+    finally:
+        try:
+            _persist_monitor_runtime_state(
+                host=host,
+                port=port,
+                runner=args.runner,
+                language=language,
+                status="stopped",
+                url=url,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            server.server_close()
+        except Exception:  # noqa: BLE001
+            pass
     return 0
 
 

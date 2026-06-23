@@ -127,6 +127,10 @@ def _memory_dir() -> Path:
     return memory_dir()
 
 
+def _rel(path: Path) -> str:
+    return refactor_runtime.rel(path)
+
+
 def _connect(init: bool = False, db_provider: SQLiteConnectionProvider | None = None) -> sqlite3.Connection:
     provider = db_provider or _default_db_provider()
     return provider.connect(init=init)
@@ -313,6 +317,7 @@ def _session_runner_dependencies() -> SessionRunnerDependencies:
         run_persistence_stage=run_persistence_stage,
         run_audit_stage=run_audit_stage,
         root=_root,
+        rel=_rel,
         append_project_memory_ref=append_project_memory_ref,
         extract_session_brief=extract_session_brief,
         record_artifact=_record_artifact,

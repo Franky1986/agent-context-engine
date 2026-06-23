@@ -16,7 +16,7 @@ SCRIPT = SKILL_ROOT / "scripts" / "agent_context_engine.py"
 
 
 def load_agent_memory(root: Path):
-    os.environ["AGENT_MEMORY_ROOT"] = str(root)
+    os.environ["AGENT_CONTEXT_ENGINE_ROOT"] = str(root)
     for name in list(sys.modules):
         if name == "agent_memory" or name.startswith("agent_context_engine."):
             del sys.modules[name]
@@ -38,7 +38,7 @@ def run_cli(
 ) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
-        "AGENT_MEMORY_ROOT": str(root),
+        "AGENT_CONTEXT_ENGINE_ROOT": str(root),
         "AGENT_MEMORY_AUTO_DREAM_ON_STOP": "0",
         "AGENT_MEMORY_CLASSIFIER_MODE": "deterministic",
         **(extra_env or {}),

@@ -50,6 +50,8 @@ The feature consumes integration items with separate fields for:
    reconstruct who enabled or disabled hooks and where.
 9. Hook enablement must not be inferred from file existence alone.
 10. All user-visible text must be language-toggle-aware.
+11. Installed wrapper links under `docs/skills/.../scripts/*` must be treated
+    as valid current-installation targets, not as conflicts.
 
 ## Status Semantics
 
@@ -79,6 +81,13 @@ Expected states:
 - `configured_without_agent_memory`
 - `not_prepared`
 - `not_supported`
+
+### Global-only bridge semantics
+
+- `opencode`, `gemini`, and `antigravity` may share a central memory root while
+  still requiring hook or plugin files to live under the installation root that
+  their wrapper launches from.
+- The UI must report bridge readiness from the actual installation-root files.
 
 ## Interaction Rules
 

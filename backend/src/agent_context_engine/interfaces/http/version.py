@@ -1,4 +1,4 @@
 from __future__ import annotations
 
-PRODUCT_VERSION = "0.1.3"
-MONITOR_VERSION = "0.5.7"
+PRODUCT_VERSION = "0.2.0"
+MONITOR_VERSION = "0.6.0"

@@ -24,6 +24,8 @@ Explain what Agent Context Engine is, how hooks/runners/firewall/monitor fit
 - explain why some actions stay on the explicit user chat path
 - distinguish project-based GUI runners from global-only wrappers
 - route all copy through frontend i18n
+- explain the difference between installation root, shared memory root, global
+  wrappers, and monitor/runtime metadata
 
 ## Acceptance Criteria
 
@@ -31,6 +33,8 @@ Explain what Agent Context Engine is, how hooks/runners/firewall/monitor fit
 - `#howto` opens the howto section directly
 - action buttons only jump to existing monitor sections
 - the howto includes a visual flow explanation and links to integrations/control/sessions/knowledge/personal/overview
+- the howto helps a new operator understand why wrapper commands can be global
+  while storage remains central and local
 
 ## Tests / Checks
 

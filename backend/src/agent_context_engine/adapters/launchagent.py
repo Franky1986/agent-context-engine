@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..infrastructure.config import CANONICAL_ENV_FILENAME, MEMORY_DIR, ROOT, SKILL_ROOT, safe_slug
+from ..infrastructure.config import CANONICAL_ENV_FILENAME, MEMORY_DIR, ROOT, ROOT_ENV_VAR, SKILL_ROOT, safe_slug
 
 
 DEFAULT_LABEL = f"com.agent-context-engine.{safe_slug(ROOT.name).lower()}"
@@ -36,7 +36,7 @@ MANAGED_RUNNER_ENV_KEYS = (
     "AGENT_MEMORY_WORKER_RUNNER",
     "AGENT_MEMORY_DREAM_GRAPH_RUNNER",
     "AGENT_MEMORY_PIPELINE_VERSION",
-    "AGENT_MEMORY_ROOT",
+    ROOT_ENV_VAR,
     "AGENT_MEMORY_LAUNCHAGENT_LABEL",
     "AGENT_MEMORY_LAUNCHAGENT_SPEC_VERSION",
     "AGENT_MEMORY_ENV_FILE",
@@ -50,23 +50,25 @@ def launch_agent_path(label: str) -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
 
 
-def resolve_launch_agent_plist_path(label: str, path_spec: str | Path | None = None) -> Path:
+def resolve_launch_agent_plist_path(label: str, path_spec: str | Path | None = None, *, root: Path = ROOT) -> Path:
     if path_spec in {None, ""}:
         return launch_agent_path(label)
     path = Path(path_spec).expanduser()
     if not path.is_absolute():
-        path = ROOT / path
+        path = root / path
     return path.resolve()
 
 
-def agent_memory_executable() -> Path:
+def agent_memory_executable(*, root: Path = ROOT) -> Path:
+    if (root / "scripts" / "agent-context-engine").exists():
+        return root / "scripts" / "agent-context-engine"
     return SKILL_ROOT / "scripts" / "agent-context-engine"
 
 
-def resolve_env_file(path_spec: str = DEFAULT_ENV_FILE) -> Path:
+def resolve_env_file(path_spec: str = DEFAULT_ENV_FILE, *, root: Path = ROOT) -> Path:
     env_file = Path(path_spec).expanduser()
     if not env_file.is_absolute():
-        env_file = ROOT / env_file
+        env_file = root / env_file
     return env_file
 
 
@@ -132,11 +134,12 @@ def compute_launchagent_fingerprint(
 
 
 def build_launch_agent_plist(args: argparse.Namespace) -> dict:
-    log_dir = MEMORY_DIR / "logs"
-    program = agent_memory_executable()
-    env_file = resolve_env_file(args.env_file)
+    root = Path(str(getattr(args, "root", ROOT))).expanduser().resolve()
+    log_dir = root / "memory" / "logs"
+    program = agent_memory_executable(root=root)
+    env_file = resolve_env_file(args.env_file, root=root)
     env = {
-        "AGENT_MEMORY_ROOT": str(ROOT),
+        ROOT_ENV_VAR: str(root),
         "PATH": args.path,
         "AGENT_MEMORY_ENV_FILE": str(env_file),
         "AGENT_MEMORY_LAUNCHAGENT_LABEL": args.label,
@@ -195,14 +198,14 @@ def build_launch_agent_plist(args: argparse.Namespace) -> dict:
     env["AGENT_MEMORY_LAUNCHAGENT_FINGERPRINT"] = compute_launchagent_fingerprint(
         label=args.label,
         program_arguments=program_arguments,
-        working_directory=str(ROOT),
+        working_directory=str(root),
         env=env,
         interval=int(args.interval),
     )
     return {
         "Label": args.label,
         "ProgramArguments": program_arguments,
-        "WorkingDirectory": str(ROOT),
+        "WorkingDirectory": str(root),
         "EnvironmentVariables": env,
         "StartInterval": args.interval,
         "RunAtLoad": bool(args.run_at_load),
@@ -219,10 +222,12 @@ def default_launchagent_args(
     *,
     label: str = DEFAULT_LABEL,
     env_file: str = DEFAULT_ENV_FILE,
+    root: Path = ROOT,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         label=label,
-        plist_path=str(resolve_launch_agent_plist_path(label)),
+        plist_path=str(resolve_launch_agent_plist_path(label, root=root)),
+        root=str(root),
         interval=900,
         grace_minutes=5,
         runner="same-as-session",
@@ -244,8 +249,8 @@ def default_launchagent_args(
     )
 
 
-def read_launchagent_plist(label: str = DEFAULT_LABEL, *, plist_path: str | Path | None = None) -> dict[str, Any] | None:
-    path = resolve_launch_agent_plist_path(label, plist_path)
+def read_launchagent_plist(label: str = DEFAULT_LABEL, *, plist_path: str | Path | None = None, root: Path = ROOT) -> dict[str, Any] | None:
+    path = resolve_launch_agent_plist_path(label, plist_path, root=root)
     if not path.exists():
         return None
     with path.open("rb") as handle:
@@ -277,10 +282,11 @@ def expected_launchagent_snapshot(
     label: str = DEFAULT_LABEL,
     env_file: str = DEFAULT_ENV_FILE,
     plist_path: str | Path | None = None,
+    root: Path = ROOT,
 ) -> dict[str, Any]:
-    args = default_launchagent_args(label=label, env_file=env_file)
+    args = default_launchagent_args(label=label, env_file=env_file, root=root)
     plist = build_launch_agent_plist(args)
-    return _plist_snapshot(plist, path=resolve_launch_agent_plist_path(label, plist_path))
+    return _plist_snapshot(plist, path=resolve_launch_agent_plist_path(label, plist_path, root=root))
 
 
 def _launchctl_print(label: str) -> str:
@@ -316,10 +322,11 @@ def launchagent_runtime_status(
     label: str = DEFAULT_LABEL,
     env_file: str = DEFAULT_ENV_FILE,
     plist_path: str | Path | None = None,
+    root: Path = ROOT,
 ) -> dict[str, Any]:
-    expected = expected_launchagent_snapshot(label=label, env_file=env_file, plist_path=plist_path)
-    path = resolve_launch_agent_plist_path(label, plist_path)
-    installed_plist = read_launchagent_plist(label, plist_path=plist_path)
+    expected = expected_launchagent_snapshot(label=label, env_file=env_file, plist_path=plist_path, root=root)
+    path = resolve_launch_agent_plist_path(label, plist_path, root=root)
+    installed_plist = read_launchagent_plist(label, plist_path=plist_path, root=root)
     installed = _plist_snapshot(installed_plist, path=path) if installed_plist else None
     loaded = launchagent_loaded(label)
     runtime = _parse_launchctl_runtime(_launchctl_print(label)) if loaded else {}
@@ -335,7 +342,7 @@ def launchagent_runtime_status(
         if installed.get("program_arguments") != expected.get("program_arguments"):
             drift_reasons.append("scheduler arguments differ from expected defaults")
         if installed.get("managed_env") != expected.get("managed_env"):
-            drift_reasons.append("managed AGENT_MEMORY runtime env differs from expected values")
+            drift_reasons.append("managed Agent Context Engine runtime env differs from expected values")
         if installed.get("fingerprint") != expected.get("fingerprint"):
             drift_reasons.append("launchagent fingerprint differs from expected configuration")
         if installed.get("spec_version") != expected.get("spec_version"):
@@ -363,14 +370,15 @@ def reconcile_launchagent(
     label: str = DEFAULT_LABEL,
     env_file: str = DEFAULT_ENV_FILE,
     plist_path: str | Path | None = None,
+    root: Path = ROOT,
 ) -> dict[str, Any]:
-    before = launchagent_runtime_status(label=label, env_file=env_file, plist_path=plist_path)
-    args = default_launchagent_args(label=label, env_file=env_file)
-    args.plist_path = str(resolve_launch_agent_plist_path(label, plist_path))
+    before = launchagent_runtime_status(label=label, env_file=env_file, plist_path=plist_path, root=root)
+    args = default_launchagent_args(label=label, env_file=env_file, root=root)
+    args.plist_path = str(resolve_launch_agent_plist_path(label, plist_path, root=root))
     args.load = True
     started_at = time.time()
     exit_code = cmd_install_launchagent(args)
-    after = launchagent_runtime_status(label=label, env_file=env_file, plist_path=plist_path)
+    after = launchagent_runtime_status(label=label, env_file=env_file, plist_path=plist_path, root=root)
     return {
         "ok": exit_code == 0,
         "action": "reloaded" if exit_code == 0 else "failed",

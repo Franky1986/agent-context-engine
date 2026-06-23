@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ....infrastructure.config import MEMORY_DIR, ROOT, json_dumps, safe_slug, utc_now
 from ....adapters.sqlite.request_db import connect
 from ...dreaming.v2_cli import _semantic_patch, evaluate_v2_runs, run_fixture_evaluation
 from ...dreaming.v2_refactor.compat import _apply_persistence
+
+
+def _safe_rel(path: Path | str) -> str:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        try:
+            return str(candidate.relative_to(ROOT))
+        except ValueError:
+            return str(candidate)
+    return str(candidate)
 
 
 def monitor_dream_v2_review(payload: dict[str, Any]) -> dict[str, Any]:
@@ -75,14 +86,14 @@ def monitor_dream_v2_apply(payload: dict[str, Any]) -> dict[str, Any]:
                 f"artifact_{safe_slug(dream_run_id)}_monitor_apply_{now.replace(':', '-').replace('+', 'Z')}",
                 dream_run_id,
                 run["session_id"],
-                str(path.relative_to(ROOT)),
+                _safe_rel(path),
                 path.stat().st_size,
                 len(path.read_text(encoding="utf-8")),
                 now,
                 json_dumps({"trigger": "monitor"}),
             ),
         )
-    return {"dream_run_id": dream_run_id, "persistence": persistence, "path": str(path.relative_to(ROOT))}
+    return {"dream_run_id": dream_run_id, "persistence": persistence, "path": _safe_rel(path)}
 
 
 def monitor_dream_v2_evaluate(limit: int = 20) -> dict[str, Any]:
@@ -120,7 +131,7 @@ def monitor_dream_v2_projection_dry_run() -> dict[str, Any]:
     path.write_text(json_dumps(patch) + "\n", encoding="utf-8")
     now = utc_now()
     result = {
-        "patch": str(path.relative_to(ROOT)),
+        "patch": _safe_rel(path),
         "entities": len(patch["entities"]),
         "relations": len(patch["relations"]),
         "neo4j_status": "dry_run",

@@ -18,6 +18,8 @@ pre-action safety checks, and enqueue or persist events for later processing.
 - Keep hook handling fast and robust under concurrent agent activity.
 - Fail closed for risky pre-action checks when required.
 - Preserve queued payloads when SQLite is temporarily unavailable.
+- Keep asynchronous queue scheduling observable so operators can see whether a
+  worker is running, stale, or replaying queued events.
 - Distinguish local read-only file/context access from network reads so tainted
   local inspection can warn while remote fetches still block.
 - Return concrete user guidance for taint-driven blocks, including the
@@ -45,6 +47,8 @@ pre-action safety checks, and enqueue or persist events for later processing.
 ## Observability / Audit
 - Risk decisions and queued fallback events must be inspectable later.
 - Session correlation should preserve launch and working directory context.
+- Queue health, bridge error logs, and worker status must be externally
+  inspectable through diagnostics and monitor status payloads.
 
 ## Acceptance Criteria
 - Existing Codex/Claude/Cursor/Antigravity/Gemini/Opencode integrations continue to work.

@@ -14,6 +14,8 @@ Primary scope:
 - hook status inspection
 - hook enable/disable mutation orchestration
 - Opencode project bridge preparation
+- installation-root bridge preparation for global-only runners that share an
+  external memory root
 
 ## Driving Inputs
 
@@ -67,6 +69,9 @@ Each integration item must expose separable status axes:
    local config presence is considered.
 10. Runner-level overrides may further disable a client while global hooks stay
     enabled; a global disable always wins over a runner enable override.
+11. Global-only runners must prepare their bridge or hook files in the
+    installation root that their wrapper actually launches from, not in the
+    shared memory root.
 
 ## Client Families
 
@@ -100,6 +105,8 @@ Rules:
 
 - plugin-bridge preparation is distinct from root/global wrapper availability
 - project hook activation is tracked separately from local wrapper execution
+- readiness must reflect the actual plugin file under the installation root
+  used by the wrapper, not merely a bridge file somewhere else
 
 ## Failure Classes
 

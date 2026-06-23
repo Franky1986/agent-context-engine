@@ -45,6 +45,16 @@ def _root() -> Path:
     return ROOT
 
 
+def _rel(path: Path | str) -> str:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        try:
+            return str(candidate.relative_to(_root()))
+        except ValueError:
+            return str(candidate)
+    return str(candidate)
+
+
 def _safe_slug(value: str) -> str:
     from ..infrastructure.config import safe_slug
 
@@ -82,7 +92,7 @@ def summarize_one(conn: sqlite3.Connection, session: sqlite3.Row) -> Path:
     summaries_repo.upsert_session_summary(
         conn,
         session_id=session["session_id"],
-        summary_path=str(path.relative_to(_root())),
+        summary_path=_rel(path),
         created_at=now,
         input_event_seq_to=session["last_event_seq"],
         input_event_count=len(events),
@@ -108,7 +118,7 @@ def cmd_summarize(
         return 0
     for session in sessions:
         path = summarize_one(conn, session)
-        print(f"summarized {session['client_type']} {session['session_id']} -> {path.relative_to(_root())}")
+        print(f"summarized {session['client_type']} {session['session_id']} -> {_rel(path)}")
     return 0
 
 
@@ -178,10 +188,10 @@ def summarize_window(conn: sqlite3.Connection, start: datetime, grace: timedelta
             grace_until=format_dt(grace_until),
             created_at=_now(),
             input_event_count=len(events),
-            output_path=str(path.relative_to(_root())),
+            output_path=_rel(path),
             notes=f"reason={reason}",
         )
-        print(f"summarized window {window_id} events={len(events)} reason={reason} -> {path.relative_to(_root())}")
+        print(f"summarized window {window_id} events={len(events)} reason={reason} -> {_rel(path)}")
         return True
     except Exception:
         summaries_repo.mark_summary_window_failed(conn, window_id=window_id, notes=f"failed_at={_now()} reason={reason}")

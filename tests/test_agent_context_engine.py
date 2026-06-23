@@ -26,7 +26,7 @@ SCRIPT = SKILL_ROOT / "scripts" / "agent_context_engine.py"
 
 
 def load_agent_memory(root: Path):
-    os.environ["AGENT_MEMORY_ROOT"] = str(root)
+    os.environ["AGENT_CONTEXT_ENGINE_ROOT"] = str(root)
     os.environ["HOME"] = str(test_home_root(root))
     for name in list(sys.modules):
         if name == "agent_memory" or name.startswith("agent_context_engine."):
@@ -41,10 +41,16 @@ def load_agent_memory(root: Path):
     return module
 
 
-def run_cli(root: Path, *args: str, stdin: dict | None = None, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run_cli(
+    root: Path,
+    *args: str,
+    stdin: dict | None = None,
+    extra_env: dict[str, str] | None = None,
+    timeout: int = 20,
+) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
-        "AGENT_MEMORY_ROOT": str(root),
+        "AGENT_CONTEXT_ENGINE_ROOT": str(root),
         "HOME": str(test_home_root(root)),
         "AGENT_MEMORY_LAUNCH_CWD": "",
         "AGENT_MEMORY_AUTO_DREAM_ON_STOP": "0",
@@ -54,6 +60,7 @@ def run_cli(root: Path, *args: str, stdin: dict | None = None, extra_env: dict[s
         "AGENT_MEMORY_CLASSIFIER_MODE": "deterministic",
         "AGENT_MEMORY_TEST_SKIP_MONITOR_START": "1",
         "AGENT_MEMORY_TEST_SKIP_MONITOR_OPEN": "1",
+        "AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD": "1",
         **(extra_env or {}),
     }
     input_text = json.dumps(stdin) if stdin is not None else None
@@ -64,7 +71,7 @@ def run_cli(root: Path, *args: str, stdin: dict | None = None, extra_env: dict[s
         capture_output=True,
         cwd=str(root),
         env=env,
-        timeout=20,
+        timeout=timeout,
         check=False,
     )
     if args and args[0] == "log-hook" and env.get("AGENT_MEMORY_TEST_AUTO_REPLAY", "1") not in {"0", "false", "False", "no"}:
@@ -74,7 +81,7 @@ def run_cli(root: Path, *args: str, stdin: dict | None = None, extra_env: dict[s
             capture_output=True,
             cwd=str(root),
             env=env,
-            timeout=20,
+            timeout=timeout,
             check=False,
         )
     return result
@@ -89,11 +96,11 @@ def test_home_root(root: Path) -> Path:
 
 
 def default_install_memory_root(home_root: Path) -> Path:
-    return (home_root / ".agent-context-engine" / "instances" / "default" / "memory").resolve()
+    return (home_root / ".agent-context-engine" / "memory").resolve()
 
 
 def default_install_root(home_root: Path) -> Path:
-    return (home_root / ".agent-context-engine" / "instances" / "default" / "install").resolve()
+    return (home_root / ".agent-context-engine" / "install").resolve()
 
 
 class AgentContextEngineWindowTests(unittest.TestCase):
@@ -163,6 +170,41 @@ class AgentContextEngineWindowTests(unittest.TestCase):
                     self.assertIsNotNone(row)
                     self.assertEqual(row["cwd"], str(root))
                     self.assertEqual(row["last_workdir"], str(external_project.resolve()))
+
+    def test_global_codex_wrapper_session_persists_without_workspace_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            root = tmp_root / "agent-memory-root"
+            root.mkdir()
+            external_project = tmp_root / "external-project"
+            external_project.mkdir()
+
+            result = run_cli(
+                root,
+                "log-hook",
+                "--client",
+                "codex",
+                stdin={"session_id": "global-codex-wrapper-session", "hook_event_name": "SessionStart", "cwd": str(root)},
+                extra_env={
+                    "AGENT_MEMORY_LAUNCH_CWD": str(external_project),
+                    "AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT": "codex",
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            listed = run_cli(root, "last", "--limit", "5")
+            self.assertEqual(listed.returncode, 0, listed.stderr)
+            self.assertIn("global-codex-wrapper-session", listed.stdout)
+
+            am = load_agent_memory(root)
+            conn = am.connect()
+            row = conn.execute(
+                "select cwd, last_workdir from sessions where session_id = ?",
+                ("global-codex-wrapper-session",),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["cwd"], str(root))
+            self.assertEqual(row["last_workdir"], str(external_project.resolve()))
 
     def test_v2_stage_start_and_finish_commit_immediately(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3241,7 +3283,7 @@ class AgentContextEngineEndToEndTests(unittest.TestCase):
 
             scripts_dir = root / "scripts"
             scripts_dir.mkdir(parents=True, exist_ok=True)
-            (scripts_dir / "agy-memory").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            (scripts_dir / "agy-ace").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
             enable = run_cli(root, "antigravity-enable")
             self.assertEqual(enable.returncode, 0, enable.stdout + enable.stderr)
             run_cli(root, "hooks-disable", "--runner", "antigravity", "--reason", "user request")
@@ -3936,6 +3978,15 @@ class AgentContextEngineEndToEndTests(unittest.TestCase):
 
             self.assertEqual(captured["status"], 403)
             self.assertEqual(captured["payload"]["error_code"], "firewallRuleDisableProtected")
+
+    def test_monitor_server_uses_skill_root_for_frontend_dist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.infrastructure.config import SKILL_ROOT
+            from agent_context_engine.interfaces.http import server
+
+            self.assertEqual(server.FRONTEND_DIST_DIR, Path(SKILL_ROOT) / "frontend" / "dist")
 
     def test_firewall_rule_versioning_supersedes_old_rule_with_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -8899,14 +8950,18 @@ The session reconciled stale queue state and resumed pending dreams.
                 "install",
                 "--target",
                 str(root),
-                "--link-codex-memory",
-                "--link-claude-memory",
-                "--link-agy-memory",
-                "--link-gemini-memory",
-                "--link-opencode-memory",
+                "--link-codex-ace",
+                "--link-claude-ace",
+                "--link-agy-ace",
+                "--link-gemini-ace",
+                "--link-opencode-ace",
                 "--no-install-launchagent",
+                "--no-start-monitor",
+                "--no-bootstrap-runtime",
                 "--link-dir",
                 str(link_dir),
+                extra_env={"AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD": "1"},
+                timeout=60,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / ".codex" / "hooks.json").exists())
@@ -8917,9 +8972,13 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertTrue((root / ".claude" / "agent-memory-binding.json").exists())
             self.assertTrue((root / ".agents" / "hooks.json").exists())
             self.assertTrue((root / ".agents" / "hooks" / "hook_adapter.sh").exists())
+            self.assertTrue((root / ".opencode" / "plugins" / "agent-memory.js").exists())
+            self.assertTrue((root / "opencode.json").exists())
             claude_settings = json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
             self.assertIn("UserPromptSubmit", claude_settings["hooks"])
             self.assertIn("SessionStart", claude_settings["hooks"])
+            opencode_plugin = (root / ".opencode" / "plugins" / "agent-memory.js").read_text(encoding="utf-8")
+            self.assertIn("sessionIdFrom", opencode_plugin)
             codex_script = (root / ".codex" / "hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
             claude_script = (root / ".claude" / "hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
             self.assertIn("HOOKS_STATE", codex_script)
@@ -8933,7 +8992,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("Agent Context Engine Quick Path", (root / "AGENTS.md").read_text(encoding="utf-8"))
             self.assertIn("session-start-hook-entry.md", (root / "AGENTS.md").read_text(encoding="utf-8"))
             self.assertIn("Preferred interaction language", (root / "AGENTS.md").read_text(encoding="utf-8"))
-            self.assertIn("agent-memory search", (root / "AGENTS.md").read_text(encoding="utf-8"))
+            self.assertIn("agent-context-engine search", (root / "AGENTS.md").read_text(encoding="utf-8"))
             self.assertIn("Do not inspect `~/.cursor/projects/...`", (root / "AGENTS.md").read_text(encoding="utf-8"))
             self.assertIn("use `last` first and stop there", (root / "AGENTS.md").read_text(encoding="utf-8"))
             hook_entry = root / "session-start-hook-entry.md"
@@ -8957,11 +9016,11 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertTrue(cursor_rule.exists())
             self.assertIn("alwaysApply: true", cursor_rule.read_text(encoding="utf-8"))
             self.assertIn("AGENTS.md", cursor_rule.read_text(encoding="utf-8"))
-            self.assertTrue((link_dir / "codex-memory").is_symlink())
-            self.assertTrue((link_dir / "claude-memory").is_symlink())
-            self.assertTrue((link_dir / "agy-memory").is_symlink())
-            self.assertTrue((link_dir / "gemini-memory").is_symlink())
-            self.assertTrue((link_dir / "opencode-memory").is_symlink())
+            self.assertTrue((link_dir / "codex-ace").is_symlink())
+            self.assertTrue((link_dir / "claude-ace").is_symlink())
+            self.assertTrue((link_dir / "agy-ace").is_symlink())
+            self.assertTrue((link_dir / "gemini-ace").is_symlink())
+            self.assertTrue((link_dir / "opencode-ace").is_symlink())
 
             doctor = run_cli(root, "doctor")
             self.assertEqual(doctor.returncode, 0, doctor.stderr)
@@ -9035,29 +9094,34 @@ The session reconciled stale queue state and resumed pending dreams.
                 str(target),
                 "--instance-name",
                 "client-a",
-                "--link-codex-memory",
-                "--link-claude-memory",
-                "--link-agy-memory",
-                "--link-gemini-memory",
-                "--link-opencode-memory",
+                "--link-codex-ace",
+                "--link-claude-ace",
+                "--link-agy-ace",
+                "--link-gemini-ace",
+                "--link-opencode-ace",
                 "--no-install-launchagent",
                 "--link-dir",
                 str(link_dir),
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("instance: client-a", result.stdout)
-            self.assertTrue((link_dir / "client-a-codex-memory").is_symlink())
-            self.assertTrue((link_dir / "client-a-claude-memory").is_symlink())
-            self.assertTrue((link_dir / "client-a-agy-memory").is_symlink())
-            self.assertTrue((link_dir / "client-a-gemini-memory").is_symlink())
-            self.assertTrue((link_dir / "client-a-opencode-memory").is_symlink())
-            self.assertTrue((target / "docs" / "skills" / "agent-memory" / "scripts" / "agent-memory").exists())
+            self.assertTrue((link_dir / "client-a-codex-ace").is_symlink())
+            self.assertTrue((link_dir / "client-a-claude-ace").is_symlink())
+            self.assertTrue((link_dir / "client-a-agy-ace").is_symlink())
+            self.assertTrue((link_dir / "client-a-gemini-ace").is_symlink())
+            self.assertTrue((link_dir / "client-a-opencode-ace").is_symlink())
+            self.assertTrue((target / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine").exists())
 
             doctor = subprocess.run(
-                [str(target / "docs" / "skills" / "agent-memory" / "scripts" / "agent-memory"), "doctor"],
+                [str(target / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine"), "doctor"],
                 text=True,
                 capture_output=True,
                 cwd=str(target),
+                env={
+                    **os.environ,
+                    "HOME": str(test_home_root(root)),
+                    "AGENT_CONTEXT_ENGINE_ROOT": str(target),
+                },
                 timeout=20,
                 check=False,
             )
@@ -9091,13 +9155,13 @@ The session reconciled stale queue state and resumed pending dreams.
                 str(launchagent_path),
                 "--launchagent-env-file",
                 "memory/local/test-agent-context-engine.env",
-                "--link-codex-memory",
+                "--link-codex-ace",
                 "--no-install-launchagent",
                 "--link-dir",
                 str(link_dir),
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue((link_dir / "exp-codex-memory-v2").is_symlink())
+            self.assertTrue((link_dir / "exp-codex-v2").is_symlink())
             profile = json.loads((target / "memory" / "local" / "installation-profile.json").read_text(encoding="utf-8"))
             self.assertEqual(profile["instance_id"], "isolated-memory")
             self.assertEqual(profile["root"], str(target.resolve()))
@@ -9167,12 +9231,41 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(instance_metadata["instance_id"], "install-root")
             self.assertEqual(instance_metadata["installation_root"], str(install_root.resolve()))
             self.assertEqual(instance_metadata["memory_root"], str(memory_root.resolve()))
-            self.assertEqual(instance_metadata["product_version"], "0.1.3")
-            self.assertEqual(instance_metadata["monitor_version"], "0.5.7")
+            self.assertEqual(instance_metadata["product_version"], "0.2.0")
+            self.assertEqual(instance_metadata["monitor_version"], "0.6.0")
             self.assertEqual(instance_metadata["monitor_port"], 8899)
             self.assertEqual(instance_metadata["wrapper_suffix"], "-ace")
+            self.assertTrue(str(instance_metadata["installed_at"]))
+            self.assertTrue(str(instance_metadata["last_updated_at"]))
+            link_registry = json.loads((user_root / "link-registry.json").read_text(encoding="utf-8"))
+            ace_entry = dict(link_registry["entries"]["ace"])
+            self.assertEqual(ace_entry["link_kind"], "user_cli_shortcut")
+            self.assertEqual(ace_entry["status"], "linked")
+            self.assertEqual(ace_entry["installation_root"], str(install_root.resolve()))
+            self.assertTrue(ace_entry["target"].endswith("/scripts/agent-context-engine"))
             self.assertIn("user config:", result.stdout)
             self.assertIn("instance metadata:", result.stdout)
+            self.assertIn("link registry:", result.stdout)
+            self.assertIn("installed at:", result.stdout)
+            self.assertIn("last updated at:", result.stdout)
+
+    def test_install_refuses_conflicting_user_cli_shortcut_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            install_root = temp_root / "install-root"
+            user_root = test_home_root(temp_root) / ".agent-context-engine"
+            user_root.mkdir(parents=True, exist_ok=True)
+            (user_root / "ace").write_text("occupied", encoding="utf-8")
+
+            result = run_cli(
+                temp_root,
+                "install",
+                "--target",
+                str(install_root),
+                "--no-install-launchagent",
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("user CLI shortcut already exists and points elsewhere", result.stderr)
 
     def test_attach_memory_root_rebinds_runtime_storage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -9243,6 +9336,49 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertFalse(missing_memory_root.exists())
             self.assertIn(f"memory root: {missing_memory_root.resolve()}", status.stdout)
 
+    def test_dream_v2_succeeds_with_external_memory_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            install_root = temp_root / "install-root"
+            memory_root = temp_root / "external-memory"
+            install = run_cli(
+                temp_root,
+                "install",
+                "--target",
+                str(install_root),
+                "--memory-root",
+                str(memory_root),
+                "--no-install-launchagent",
+            )
+            self.assertEqual(install.returncode, 0, install.stderr)
+
+            fixture = run_cli(install_root, "dream-v2-fixture", "--kind", "small", "--json")
+            self.assertEqual(fixture.returncode, 0, fixture.stdout + fixture.stderr)
+            payload = json.loads(fixture.stdout)
+            session_id = payload["session_id"]
+
+            dreamed = run_cli(
+                install_root,
+                "dream",
+                "--session",
+                session_id,
+                "--pipeline-version",
+                "2",
+                "--runner",
+                "codex",
+                "--dry-run",
+                extra_env={"AGENT_MEMORY_PIPELINE_VERSION": "2", "AGENT_MEMORY_DREAM_V2_MOCK": "1"},
+            )
+            self.assertEqual(dreamed.returncode, 0, dreamed.stdout + dreamed.stderr)
+
+            am = load_agent_memory(install_root)
+            conn = am.connect()
+            run = conn.execute("select * from dream_runs where session_id = ?", (session_id,)).fetchone()
+            self.assertIsNotNone(run)
+            self.assertEqual(run["status"], "succeeded")
+            self.assertEqual(run["pipeline_status"], "dry_run")
+            self.assertTrue(str(run["output_summary_path"]).startswith(str(memory_root.resolve())) or str(run["output_summary_path"]).startswith("external-memory") or str(run["output_summary_path"]).startswith(str(Path(memory_root.name))))
+
     def test_repair_installation_updates_launchagent_env_file_when_memory_root_changes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_root = Path(tmp)
@@ -9305,8 +9441,8 @@ The session reconciled stale queue state and resumed pending dreams.
     def test_install_discovery_prefers_public_checkout_and_detected_memory_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_root = Path(tmp)
-            source_root = temp_root / "agent-memory"
-            public_root = temp_root / "agent-context-engine"
+            source_root = temp_root / "agent-context-engine"
+            public_root = temp_root / "agent-context-engine-public"
             existing_memory_root = temp_root / "shared-memory"
             install = run_cli(
                 temp_root,
@@ -9320,7 +9456,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(install.returncode, 0, install.stderr)
             (public_root / "scripts").mkdir(parents=True, exist_ok=True)
             (public_root / "scripts" / "agent_context_engine.py").write_text("# placeholder\n", encoding="utf-8")
-            (public_root / "backend" / "src" / "agent_memory").mkdir(parents=True, exist_ok=True)
+            (public_root / "backend" / "src" / "agent_context_engine").mkdir(parents=True, exist_ok=True)
 
             load_agent_memory(public_root)
             from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary
@@ -9330,7 +9466,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(summary["checkout_role"], "public_checkout")
             self.assertEqual(summary["detected_source_checkout"], str(source_root.resolve()))
             self.assertEqual(summary["recommended_memory_root"], str(default_install_memory_root(test_home_root(public_root))))
-            self.assertEqual(summary["recommended_memory_root_source"], "user_config_default_memory_root")
+            self.assertEqual(summary["recommended_memory_root_source"], "default_home_root")
             self.assertEqual(summary["recommended_wrapper_prefix"], "")
             self.assertEqual(summary["recommended_wrapper_suffix"], "-ace")
             self.assertFalse(summary["recommended_install_launchagent"])
@@ -9370,6 +9506,7 @@ The session reconciled stale queue state and resumed pending dreams.
                 summary = _discovery_summary(start=fresh_root, language_hint="en")
 
             self.assertEqual(summary["checkout_role"], "fresh_installation_candidate")
+            self.assertEqual(summary["target_root"], str(fresh_root.resolve()))
             self.assertEqual(summary["recommended_monitor_port"], 8788)
 
     def test_install_discovery_defaults_to_english_for_unsupported_language_hint(self) -> None:
@@ -9406,6 +9543,44 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(summary["checkout_role"], "public_checkout")
             self.assertEqual(summary["recommended_monitor_port"], 8789)
 
+    def test_install_discovery_avoids_port_reserved_by_active_monitor_runtime_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            fresh_root = temp_root / "agent-context-engine-test8"
+            (fresh_root / "scripts").mkdir(parents=True, exist_ok=True)
+            (fresh_root / "scripts" / "agent_context_engine.py").write_text("# placeholder\n", encoding="utf-8")
+            (fresh_root / "backend" / "src" / "agent_context_engine").mkdir(parents=True, exist_ok=True)
+
+            load_agent_memory(fresh_root)
+            from agent_context_engine.application.instance_profile import record_monitor_runtime
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary
+
+            record_monitor_runtime(
+                instance_id="default",
+                installation_root=default_install_root(test_home_root(fresh_root)),
+                memory_root=default_install_memory_root(test_home_root(fresh_root)),
+                configured_host="127.0.0.1",
+                configured_port=8787,
+                active_host="127.0.0.1",
+                active_port=8787,
+                pid=os.getpid(),
+                status="running",
+                runner="codex",
+                language="en",
+                monitor_version="test",
+                product_version="test",
+                last_known_url="http://127.0.0.1:8787/",
+            )
+
+            with mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation._port_conflict_status",
+                side_effect=lambda host, port: {"available": True, "error": ""},
+            ):
+                summary = _discovery_summary(start=fresh_root, language_hint="en")
+
+            self.assertEqual(summary["recommended_monitor_port"], 8788)
+            self.assertTrue(summary["active_monitor_runtime_entries"])
+
     def test_port_conflict_status_detects_listening_local_monitor_port(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -9422,11 +9597,99 @@ The session reconciled stale queue state and resumed pending dreams.
 
             self.assertFalse(status["available"])
 
+    def test_final_install_monitor_port_shifts_when_reserved_by_other_active_instance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import record_monitor_runtime
+            from agent_context_engine.interfaces.cli.commands.installation import _resolve_final_monitor_port
+
+            other_install_root = root / "other-install"
+            other_memory_root = root / "other-memory"
+            target_root = root / "target-install"
+
+            record_monitor_runtime(
+                instance_id="other",
+                installation_root=other_install_root,
+                memory_root=other_memory_root,
+                configured_host="127.0.0.1",
+                configured_port=8787,
+                active_host="127.0.0.1",
+                active_port=8787,
+                pid=os.getpid(),
+                status="running",
+                runner="codex",
+                language="en",
+                monitor_version="test",
+                product_version="test",
+                last_known_url="http://127.0.0.1:8787/",
+            )
+
+            with mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation._port_conflict_status",
+                side_effect=lambda host, port: {"available": port != 8788, "error": "" if port != 8788 else "reserved"},
+            ):
+                resolved_port, reason = _resolve_final_monitor_port(
+                    checkout_root=root,
+                    target_root=target_root,
+                    target_memory_root=target_root / "memory",
+                    host="127.0.0.1",
+                    requested_port=8787,
+                    user_config={},
+                )
+
+            self.assertEqual(resolved_port, 8789)
+            self.assertIn("reserved by another active monitor runtime entry", reason)
+
+    def test_final_install_monitor_port_reuses_existing_port_for_same_memory_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import record_monitor_runtime
+            from agent_context_engine.interfaces.cli.commands.installation import _resolve_final_monitor_port
+
+            shared_memory_root = root / "shared-memory"
+            other_install_root = root / "other-install"
+            target_root = root / "target-install"
+
+            record_monitor_runtime(
+                instance_id="other",
+                installation_root=other_install_root,
+                memory_root=shared_memory_root,
+                configured_host="127.0.0.1",
+                configured_port=8787,
+                active_host="127.0.0.1",
+                active_port=8787,
+                pid=os.getpid(),
+                status="running",
+                runner="codex",
+                language="en",
+                monitor_version="test",
+                product_version="test",
+                last_known_url="http://127.0.0.1:8787/",
+            )
+
+            with mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation._port_conflict_status",
+                side_effect=lambda host, port: {"available": True, "error": ""},
+            ):
+                resolved_port, reason = _resolve_final_monitor_port(
+                    checkout_root=root,
+                    target_root=target_root,
+                    target_memory_root=shared_memory_root,
+                    host="127.0.0.1",
+                    requested_port=8787,
+                    user_config={},
+                )
+
+            self.assertEqual(resolved_port, 8787)
+            self.assertEqual(reason, "")
+
     def test_install_without_target_uses_discovery_guidance_for_public_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_root = Path(tmp)
-            source_root = temp_root / "agent-memory"
-            public_root = temp_root / "agent-context-engine"
+            source_root = temp_root / "agent-context-engine"
+            public_root = temp_root / "agent-context-engine-public"
             existing_memory_root = temp_root / "shared-memory"
             install = run_cli(
                 temp_root,
@@ -9440,25 +9703,159 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(install.returncode, 0, install.stderr)
             (public_root / "scripts").mkdir(parents=True, exist_ok=True)
             (public_root / "scripts" / "agent_context_engine.py").write_text("# placeholder\n", encoding="utf-8")
-            (public_root / "backend" / "src" / "agent_memory").mkdir(parents=True, exist_ok=True)
+            (public_root / "backend" / "src" / "agent_context_engine").mkdir(parents=True, exist_ok=True)
 
             result = run_cli(public_root, "install", "--no-interactive", "--language", "de")
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn("Installations-Discovery", result.stdout)
-            self.assertIn(f"--target '{default_install_root(test_home_root(public_root))}'", result.stdout)
+            self.assertIn(f"--target '{public_root.resolve()}'", result.stdout)
             self.assertIn(f"--memory-root '{default_install_memory_root(test_home_root(public_root))}'", result.stdout)
-            self.assertIn("--monitor-port 8788", result.stdout)
+            self.assertRegex(result.stdout, r"--monitor-port 87[0-9]{2}")
             self.assertIn("Vorgeschlagenes Wrapper-Suffix: -ace", result.stdout)
             self.assertIn("--wrapper-suffix ace", result.stdout)
+            self.assertIn("--bootstrap-runtime", result.stdout)
+            self.assertIn("--link-codex-ace", result.stdout)
+            self.assertIn("--link-opencode-ace", result.stdout)
             self.assertIn("--no-install-launchagent", result.stdout)
             self.assertNotIn(f"--target '{source_root.resolve()}'", result.stdout)
             self.assertIn("Nutzerfreigabe erforderlich", result.stdout)
 
+    def test_install_discovery_uses_environment_language_before_saved_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "scripts").mkdir(parents=True, exist_ok=True)
+            (root / "scripts" / "agent_context_engine.py").write_text("# placeholder\n", encoding="utf-8")
+            (root / "backend" / "src" / "agent_context_engine").mkdir(parents=True, exist_ok=True)
+
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import save_user_config
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary
+
+            save_user_config({"default_language": "en"}, home=test_home_root(root))
+            with mock.patch.dict(os.environ, {"LANG": "de_DE.UTF-8"}, clear=False):
+                summary = _discovery_summary(start=root)
+
+            self.assertEqual(summary["reply_language"], "de")
+            self.assertEqual(summary["recommended_plan"]["language"], "de")
+            self.assertEqual(summary["reply_language_source"], "environment")
+
+    def test_install_discovery_prefers_existing_checkout_installation_language(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install = run_cli(
+                root,
+                "install",
+                "--target",
+                str(root),
+                "--language",
+                "de",
+                "--no-install-launchagent",
+            )
+            self.assertEqual(install.returncode, 0, install.stderr)
+
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import save_user_config
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary
+
+            save_user_config({"default_language": "en"}, home=test_home_root(root))
+            with mock.patch.dict(os.environ, {"LANG": ""}, clear=False):
+                summary = _discovery_summary(start=root)
+
+            self.assertEqual(summary["reply_language"], "de")
+            self.assertEqual(summary["reply_language_source"], "checkout_installation")
+
+    def test_install_discovery_keeps_existing_installation_monitor_port_when_same_target_is_running(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install = run_cli(
+                root,
+                "install",
+                "--target",
+                str(root),
+                "--language",
+                "de",
+                "--monitor-port",
+                "8789",
+                "--no-install-launchagent",
+            )
+            self.assertEqual(install.returncode, 0, install.stderr)
+
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import record_monitor_runtime
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary
+
+            record_monitor_runtime(
+                instance_id=root.name,
+                installation_root=root,
+                memory_root=default_install_memory_root(test_home_root(root)),
+                configured_host="127.0.0.1",
+                configured_port=8789,
+                active_host="127.0.0.1",
+                active_port=8789,
+                pid=os.getpid(),
+                status="running",
+                runner="codex",
+                language="de",
+                monitor_version="test",
+                product_version="test",
+                last_known_url="http://127.0.0.1:8789/",
+            )
+
+            with mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation._port_conflict_status",
+                side_effect=lambda host, port: {"available": port != 8789, "error": "" if port != 8789 else "in use"},
+            ):
+                summary = _discovery_summary(start=root, target_hint=root, language_hint="de")
+
+            self.assertEqual(summary["recommended_monitor_port"], 8789)
+
+    def test_wrapper_conflicts_accepts_installed_wrapper_path_inside_same_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts_dir = root / "scripts"
+            installed_scripts_dir = root / "docs" / "skills" / "agent-context-engine" / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            installed_scripts_dir.mkdir(parents=True, exist_ok=True)
+            (scripts_dir / "codex-ace").write_text("#!/bin/sh\n", encoding="utf-8")
+            installed_wrapper = installed_scripts_dir / "codex-ace"
+            installed_wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands.installation import _wrapper_conflicts
+
+            with mock.patch("shutil.which", return_value=str(installed_wrapper)):
+                conflicts = _wrapper_conflicts(checkout_root=root, prefix="", suffix="-ace")
+
+            entry = next(item for item in conflicts if item["wrapper"] == "codex-ace")
+            self.assertEqual(entry["resolved_path"], str(installed_wrapper.resolve()))
+            self.assertTrue(entry["points_to_current_checkout"])
+            self.assertFalse(entry["conflict"])
+
+    def test_install_discovery_warns_when_english_comes_only_from_saved_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "scripts").mkdir(parents=True, exist_ok=True)
+            (root / "scripts" / "agent_context_engine.py").write_text("# placeholder\n", encoding="utf-8")
+            (root / "backend" / "src" / "agent_context_engine").mkdir(parents=True, exist_ok=True)
+
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import save_user_config
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary, _render_install_discovery
+
+            save_user_config({"default_language": "en"}, home=test_home_root(root))
+            with mock.patch.dict(os.environ, {"LANG": ""}, clear=False):
+                summary = _discovery_summary(start=root)
+            rendered = _render_install_discovery(summary, language="en")
+
+            self.assertEqual(summary["reply_language"], "en")
+            self.assertEqual(summary["reply_language_source"], "user_config_default_language")
+            self.assertIn("Language warning:", rendered)
+
     def test_install_refuses_public_to_source_cross_checkout_without_force(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_root = Path(tmp)
-            source_root = temp_root / "agent-memory"
-            public_root = temp_root / "agent-context-engine"
+            source_root = temp_root / "agent-context-engine"
+            public_root = temp_root / "agent-context-engine-public"
             install = run_cli(
                 temp_root,
                 "install",
@@ -9469,7 +9866,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(install.returncode, 0, install.stderr)
             (public_root / "scripts").mkdir(parents=True, exist_ok=True)
             (public_root / "scripts" / "agent_context_engine.py").write_text("# placeholder\n", encoding="utf-8")
-            (public_root / "backend" / "src" / "agent_memory").mkdir(parents=True, exist_ok=True)
+            (public_root / "backend" / "src" / "agent_context_engine").mkdir(parents=True, exist_ok=True)
 
             result = run_cli(public_root, "install", "--target", str(source_root), "--language", "en", "--no-interactive")
             self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
@@ -9514,6 +9911,7 @@ The session reconciled stale queue state and resumed pending dreams.
                 host="127.0.0.1",
                 port=8787,
                 language="en",
+                memory_root=(test_home_root(root) / ".agent-context-engine" / "memory").resolve(),
             )
             howto_mock.assert_called_once_with(host="127.0.0.1", port=8787, runner="codex", language="en")
 
@@ -9596,6 +9994,31 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("launchagent_identity", payload)
             self.assertIn("wrapper_conflicts", payload)
 
+    def test_install_discovery_uses_existing_installation_launchagent_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import merge_installation_profile
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary
+
+            custom_label = "com.agent-context-engine.custom-install"
+            custom_plist = root / "LaunchAgents" / "custom-install.plist"
+            custom_env = root / "external-memory" / "local" / "agent-context-engine.env"
+            merge_installation_profile(
+                root,
+                launchagent={
+                    "label": custom_label,
+                    "path": str(custom_plist),
+                    "env_file": str(custom_env),
+                },
+            )
+
+            summary = _discovery_summary(start=root, target_hint=root, language_hint="en")
+            identity = dict(summary["launchagent_identity"])
+            self.assertEqual(identity["label"], custom_label)
+            self.assertEqual(identity["plist_path"], str(custom_plist))
+            self.assertEqual(identity["env_file"], str(custom_env))
+
     def test_install_discovery_and_summary_follow_german_language(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_root = Path(tmp)
@@ -9636,14 +10059,42 @@ The session reconciled stale queue state and resumed pending dreams.
                 "en",
                 "--wrapper-prefix",
                 "ace-",
+                "--no-link-codex-ace",
+                "--no-link-claude-ace",
+                "--no-link-agy-ace",
+                "--no-link-gemini-ace",
+                "--no-link-opencode-ace",
                 "--no-interactive",
                 "--no-install-launchagent",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("next: start ", result.stdout)
-            self.assertIn("codex-memory", result.stdout)
-            self.assertIn("claude-memory", result.stdout)
-            self.assertNotIn("ace-codex-memory", result.stdout)
+            self.assertIn("./docs/skills/agent-context-engine/scripts/codex-ace", result.stdout)
+            self.assertIn("./docs/skills/agent-context-engine/scripts/claude-ace", result.stdout)
+            self.assertNotIn("ace-codex", result.stdout)
+
+    def test_install_links_global_wrappers_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            link_dir = test_home_root(root) / ".local" / "bin"
+            result = run_cli(
+                root,
+                "install",
+                "--target",
+                str(root),
+                "--language",
+                "en",
+                "--no-interactive",
+                "--no-install-launchagent",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((link_dir / "codex-ace").is_symlink())
+            self.assertTrue((link_dir / "claude-ace").is_symlink())
+            self.assertTrue((link_dir / "agy-ace").is_symlink())
+            self.assertTrue((link_dir / "gemini-ace").is_symlink())
+            self.assertTrue((link_dir / "opencode-ace").is_symlink())
+            self.assertIn("global wrapper verification:", result.stdout)
+            self.assertIn("codex-ace:", result.stdout)
 
     def test_install_default_launchagent_path_does_not_crash(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -9851,6 +10302,20 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn(str(managed), result.stderr)
             self.assertIn("use --force only when you intentionally want to refresh this installation in place", result.stderr)
 
+    def test_install_allows_fresh_source_checkout_with_repo_managed_files_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "scripts").mkdir(parents=True, exist_ok=True)
+            (root / "scripts" / "agent_context_engine.py").write_text("# placeholder\n", encoding="utf-8")
+            (root / "backend" / "src" / "agent_context_engine").mkdir(parents=True, exist_ok=True)
+            (root / "session-start-hook-entry.md").write_text("# Session Start\n", encoding="utf-8")
+            (root / "docs" / "skills" / "agent-context-engine").mkdir(parents=True, exist_ok=True)
+
+            result = run_cli(root, "install", "--target", str(root), "--language", "de", "--no-install-launchagent")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Installationszusammenfassung:", result.stdout)
+            self.assertIn("preferred interaction language: German", result.stdout)
+
     def test_global_wrapper_enable_disable_and_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -9858,23 +10323,67 @@ The session reconciled stale queue state and resumed pending dreams.
             install = run_cli(root, "install", "--target", str(root), "--no-install-launchagent")
             self.assertEqual(install.returncode, 0, install.stderr)
 
-            enable = run_cli(root, "global-wrapper-enable", "gemini-memory", "--link-dir", str(link_dir))
+            enable = run_cli(root, "global-wrapper-enable", "gemini-ace", "--link-dir", str(link_dir))
             self.assertEqual(enable.returncode, 0, enable.stderr)
-            self.assertTrue((link_dir / "gemini-memory").is_symlink())
+            self.assertTrue((link_dir / "gemini-ace").is_symlink())
+            registry = json.loads((test_home_root(root) / ".agent-context-engine" / "link-registry.json").read_text(encoding="utf-8"))
+            gemini_entry = dict(registry["entries"]["gemini-ace"])
+            self.assertEqual(gemini_entry["status"], "linked")
+            self.assertTrue(gemini_entry["target"].endswith("/scripts/gemini-ace"))
 
-            antigravity_enable = run_cli(root, "global-wrapper-enable", "agy-memory", "--link-dir", str(link_dir))
+            antigravity_enable = run_cli(root, "global-wrapper-enable", "agy-ace", "--link-dir", str(link_dir))
             self.assertEqual(antigravity_enable.returncode, 0, antigravity_enable.stderr)
-            self.assertTrue((link_dir / "agy-memory").is_symlink())
+            self.assertTrue((link_dir / "agy-ace").is_symlink())
 
             status = run_cli(root, "global-wrapper-status", "--link-dir", str(link_dir), extra_env={"PATH": f"{link_dir}:{os.environ.get('PATH', '')}"})
             self.assertEqual(status.returncode, 0, status.stderr)
-            self.assertIn("gemini-memory:", status.stdout)
-            self.assertIn("agy-memory:", status.stdout)
+            self.assertIn("gemini-ace:", status.stdout)
+            self.assertIn("agy-ace:", status.stdout)
             self.assertIn("path_linked: yes", status.stdout)
+            self.assertIn("last_changed_at:", status.stdout)
+            self.assertIn("registry_status: linked", status.stdout)
 
-            disable = run_cli(root, "global-wrapper-disable", "gemini-memory", "--link-dir", str(link_dir))
+            disable = run_cli(root, "global-wrapper-disable", "gemini-ace", "--link-dir", str(link_dir))
             self.assertEqual(disable.returncode, 0, disable.stderr)
-            self.assertFalse((link_dir / "gemini-memory").exists() or (link_dir / "gemini-memory").is_symlink())
+            self.assertFalse((link_dir / "gemini-ace").exists() or (link_dir / "gemini-ace").is_symlink())
+            registry = json.loads((test_home_root(root) / ".agent-context-engine" / "link-registry.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["entries"]["gemini-ace"]["status"], "removed")
+
+    def test_check_installation_uses_target_root_for_launchagent_expectations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            install_root = temp_root / "install-root"
+            label = "com.agent-context-engine.test-check"
+            plist_path = temp_root / "LaunchAgents" / "test-check.plist"
+            install = run_cli(
+                temp_root,
+                "install",
+                "--target",
+                str(install_root),
+                "--launchagent-label",
+                label,
+                "--launchagent-path",
+                str(plist_path),
+                "--no-install-launchagent",
+            )
+            self.assertEqual(install.returncode, 0, install.stderr)
+
+            launchagent = run_cli(
+                install_root,
+                "install-launchagent",
+                "--label",
+                label,
+                "--plist-path",
+                str(plist_path),
+                "--env-file",
+                str(install_root / "memory" / "local" / "agent-context-engine.env"),
+            )
+            self.assertEqual(launchagent.returncode, 0, launchagent.stderr)
+
+            status = run_cli(temp_root, "check-installation", "--target", str(install_root))
+            self.assertEqual(status.returncode, 0, status.stderr)
+            self.assertNotIn("program path differs from current install root", status.stdout)
+            self.assertNotIn("working directory differs from current install root", status.stdout)
 
     def test_integration_summary_uses_resolved_wrapper_names_in_usage_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -9899,10 +10408,10 @@ The session reconciled stale queue state and resumed pending dreams.
                 summary = integrations.integration_summary(root=root, probe_gemini=False)
                 gemini_item = next(item for item in summary["items"] if item["client"] == "gemini")
                 codex_item = next(item for item in summary["items"] if item["client"] == "codex")
-                self.assertEqual(gemini_item["global_command_name"], "exp-gemini-memory-v2")
-                self.assertIn("exp-gemini-memory-v2", gemini_item["usage_hint"])
-                self.assertTrue(str(codex_item["terminal_command"]).endswith("./scripts/codex-memory") or "scripts/codex-memory" in str(codex_item["terminal_command"]))
-                self.assertIn("exp-codex-memory-v2", codex_item["usage_hint"])
+                self.assertEqual(gemini_item["global_command_name"], "exp-gemini-v2")
+                self.assertIn("exp-gemini-v2", gemini_item["usage_hint"])
+                self.assertTrue(str(codex_item["terminal_command"]).endswith("./scripts/codex-ace") or "scripts/codex-ace" in str(codex_item["terminal_command"]))
+                self.assertIn("exp-codex-v2", codex_item["usage_hint"])
 
     def test_doctor_reports_pipeline_v2_runtime_cutover_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10038,7 +10547,7 @@ The session reconciled stale queue state and resumed pending dreams.
                 )
             )
             env = plist["EnvironmentVariables"]
-            self.assertEqual(env["AGENT_MEMORY_ROOT"], str(root.resolve()))
+            self.assertEqual(env["AGENT_CONTEXT_ENGINE_ROOT"], str(root.resolve()))
             self.assertEqual(env["AGENT_MEMORY_NEO4J_URI"], "http://127.0.0.1:7474")
             self.assertEqual(env["AGENT_MEMORY_NEO4J_PASSWORD"], "secret")
             self.assertNotIn("IGNORED_SECRET", env)
@@ -10237,7 +10746,59 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("proc.on(\"error\"", plugin_text)
             self.assertIn("proc.stdin.on(\"error\"", plugin_text)
             self.assertIn("opencode-hook.err.log", plugin_text)
+            self.assertIn("const sessionIdFrom = (...values)", plugin_text)
+            self.assertIn("const cwdFromInfo = (info = {}, fallback = \"\")", plugin_text)
+            self.assertIn("event.properties?.sessionId", plugin_text)
             self.assertIn("session-start-hook-entry.md", (root / "AGENTS.md").read_text(encoding="utf-8"))
+
+    def test_opencode_enable_keeps_plugin_in_install_root_when_memory_root_is_external(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_root = root / "shared-memory"
+            load_agent_memory(root)
+
+            result = run_cli(root, "opencode-enable", "--memory-root", str(memory_root))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / ".opencode" / "plugins" / "agent-memory.js").exists())
+            self.assertTrue((root / "opencode.json").exists())
+            self.assertFalse((memory_root / ".opencode" / "plugins" / "agent-memory.js").exists())
+            self.assertFalse((memory_root / "opencode.json").exists())
+
+    def test_semantic_prompt_requires_english_canonical_names_for_non_english_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            load_agent_memory(Path(tmp))
+            from agent_context_engine.application.dreaming.v2_refactor.services.prompting import build_semantic_prompt
+
+            session = {
+                "session_id": "s1",
+                "project_id": "p1",
+                "client_type": "codex",
+            }
+            events = [
+                {
+                    "seq": 1,
+                    "recorded_at": "2026-06-23T09:00:00Z",
+                    "event_name": "UserPromptSubmit",
+                    "prompt": "erzähl eine mini geschichte",
+                    "last_assistant_message": "",
+                    "tool_name": "",
+                }
+            ]
+            prompt = build_semantic_prompt(
+                session,
+                events,
+                "Dream markdown",
+                {},
+                json_dumps_fn=json.dumps,
+                plain_event_window_fn=lambda payload: "conversation",
+                budget_fn=lambda *_args: {"ok": True},
+                known_entity_types={"task"},
+                known_relation_types={"requests"},
+                schema_version="semantic_proposals.v2",
+            )
+            self.assertIn("prefer an English canonical entity name", prompt)
+            self.assertIn("Preserve the original source-language wording in aliases", prompt)
+            self.assertIn("Do not translate proper nouns", prompt)
 
     def test_install_writes_gemini_hook_bridge(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10359,7 +10920,11 @@ print("{}")
                 text=True,
                 capture_output=True,
                 cwd=str(root),
-                env={**os.environ, "AGENT_MEMORY_ROOT": str(root), "AGENT_MEMORY_AUTO_WORKER_ON_HOOK": "0"},
+                env={
+                    **os.environ,
+                    "AGENT_CONTEXT_ENGINE_ROOT": str(root),
+                    "AGENT_MEMORY_AUTO_WORKER_ON_HOOK": "0",
+                },
                 timeout=20,
                 check=False,
             )
@@ -10383,7 +10948,11 @@ print("{}")
                 text=True,
                 capture_output=True,
                 cwd=str(root),
-                env={**os.environ, "AGENT_MEMORY_ROOT": str(root), "AGENT_MEMORY_AUTO_WORKER_ON_HOOK": "0"},
+                env={
+                    **os.environ,
+                    "AGENT_CONTEXT_ENGINE_ROOT": str(root),
+                    "AGENT_MEMORY_AUTO_WORKER_ON_HOOK": "0",
+                },
                 timeout=20,
                 check=False,
             )
@@ -10391,6 +10960,18 @@ print("{}")
             pretool_payload = json.loads(pretool.stdout)
             self.assertEqual(pretool_payload["decision"], "deny")
             self.assertIn("blocked by policy", pretool_payload["reason"])
+
+    def test_antigravity_enable_keeps_hooks_in_install_root_when_memory_root_is_external(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_root = root / "shared-memory"
+            load_agent_memory(root)
+
+            result = run_cli(root, "antigravity-enable", "--memory-root", str(memory_root))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / ".agents" / "hooks.json").exists())
+            self.assertTrue((root / ".agents" / "hooks" / "hook_adapter.sh").exists())
+            self.assertFalse((memory_root / ".agents" / "hooks.json").exists())
 
     def test_antigravity_enable_rejects_project_target_in_global_only_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10602,6 +11183,18 @@ print("{}")
             self.assertEqual(status.returncode, 0, status.stderr)
             self.assertIn("hooks: enabled", status.stdout)
 
+    def test_gemini_enable_keeps_hooks_in_install_root_when_memory_root_is_external(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_root = root / "shared-memory"
+            load_agent_memory(root)
+
+            result = run_cli(root, "gemini-enable", "--memory-root", str(memory_root))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / ".gemini" / "settings.json").exists())
+            self.assertTrue((root / ".gemini" / "hooks" / "hook_adapter.sh").exists())
+            self.assertFalse((memory_root / ".gemini" / "settings.json").exists())
+
     def test_gemini_enable_rejects_project_target_in_global_only_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -10687,8 +11280,8 @@ print("{}")
 
             workdir = str(root)
             merge_installation_profile(root, wrapper_naming={"prefix": "exp-", "suffix": "-v2"})
-            self.assertEqual(native_resume_command("codex", "codex-session", workdir, root=root), "exp-codex-memory-v2 resume codex-session")
-            self.assertEqual(native_resume_command("claude", "claude-session", workdir, root=root), "exp-claude-memory-v2 --resume claude-session")
+            self.assertEqual(native_resume_command("codex", "codex-session", workdir, root=root), "exp-codex-v2 resume codex-session")
+            self.assertEqual(native_resume_command("claude", "claude-session", workdir, root=root), "exp-claude-v2 --resume claude-session")
             self.assertIn("cursor-agent --resume 'cursor-session'", native_resume_command("cursor", "cursor-session", workdir) or "")
             self.assertIn("agy --conversation 'anti-session'", native_resume_command("antigravity", "anti-session", workdir) or "")
             self.assertIn("opencode --session 'open-session'", native_resume_command("opencode", "open-session", workdir) or "")

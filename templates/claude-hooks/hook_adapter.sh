@@ -6,7 +6,7 @@ if [ "${AGENT_MEMORY_DREAM:-0}" = "1" ]; then
   exit 0
 fi
 
-ROOT="__AGENT_MEMORY_ROOT__"
+ROOT="__AGENT_CONTEXT_ENGINE_ROOT__"
 SCRIPT="__AGENT_MEMORY_SCRIPT__"
 HOOKS_STATE="$ROOT/memory/local/hooks-state.json"
 LOG="$ROOT/memory/logs/claude-hook.err.log"
@@ -42,7 +42,7 @@ then
 fi
 
 set +e
-env AGENT_MEMORY_ROOT="$ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client claude \
+env AGENT_CONTEXT_ENGINE_ROOT="$ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client claude \
   2>"$TMPERR"
 CODE=$?
 set -e

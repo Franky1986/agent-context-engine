@@ -22,8 +22,8 @@ python3 scripts/agent_context_engine.py install \
   --target /tmp/agent-context-engine-target \
   --instance-name smoke \
   --link-dir /tmp/agent-context-engine-bin \
-  --link-codex-memory \
-  --link-claude-memory \
+  --link-codex-ace \
+  --link-claude-ace \
   --no-interactive \
   --force
 

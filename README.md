@@ -1,35 +1,50 @@
-# Agent Context Engine Skill Package
+<p align="center">
+  <img src="docs/assets/agent-context-engine-logo.png" alt="Agent Context Engine logo" width="220">
+</p>
 
-This directory packages Agent Context Engine as an installable local runtime skill.
+# Agent Context Engine
 
-## Fresh Public Clone
+Local-first cross-harness context engine for coding agents with memory,
+retrieval, tracing, summarization, and safety controls.
 
-If you cloned the standalone public repository, start here:
+Agent Context Engine captures agent sessions across supported runners, keeps the
+runtime local and inspectable, and gives you retrieval, condensed handovers,
+monitoring, graph extraction, and firewall-style safety controls without
+requiring cloud infrastructure.
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE),
+[NOTICE](NOTICE), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Created and maintained by [Frank Richter](https://www.linkedin.com/in/frank-richter-24657078/).
+Developed with Codex.
+
+Current public versions:
+
+- Backend / product: `0.2.0`
+- Monitor: `0.6.0`
+
+See [CHANGELOG.md](CHANGELOG.md) for release history since the initial public release.
+
+## What It Does
+
+- captures sessions, prompts, tools, and runtime events through hooks
+- stores local memory for retrieval across prior work
+- builds condensed handovers and dream-based context compression
+- exposes a local monitor for sessions, risks, storage, integrations, and graph state
+- enforces safety controls for risky tool calls and memory retrieval
+- supports cross-harness workflows for Codex, Claude Code, Cursor, Gemini, Antigravity, and OpenCode
+
+## Quick Start
+
+From a fresh clone:
 
 ```sh
 python3 scripts/agent_context_engine.py install
 ```
 
-The installer prints a guided setup explanation and an exact command. For an
-agent-driven setup, read `AGENT_BOOTSTRAP.md` and
-`docs/setup/RUNNER_HARNESSES.md` first, summarize the suggested target,
-memory-root, monitor port, wrapper naming, and refresh mode to the user, wait
-for approval, and only then run the installer with explicit choices:
-
-```sh
-python3 scripts/agent_context_engine.py install \
-  --target /path/to/agent-context-engine-root \
-  --language en \
-  --bootstrap-runtime \
-  --codex-workspace-root /path/to/actual/codex-workspace \
-  --project "example=/path/to/example" \
-  --link-codex-memory \
-  --link-claude-memory \
-  --link-agy-memory \
-  --link-gemini-memory \
-  --link-opencode-memory \
-  --no-interactive
-```
+The installer runs a read-only discovery pass first, proposes a target root,
+memory root, monitor port, wrapper naming, and LaunchAgent behavior, and waits
+for explicit approval before writing files.
 
 After install:
 
@@ -40,44 +55,55 @@ cd /path/to/agent-context-engine-root
 ./scripts/agent-context-engine launchagent-status
 ```
 
-For the nested skill layout inside another repository, use the longer path shown
-below: `python3 docs/skills/agent-context-engine/scripts/agent_context_engine.py install`.
+## How It Works
 
-Hooks capture new sessions immediately. By default, the first completed agent
-turn in a new session also queues a small deterministic initial dream, so the
-session has a quick startup assessment before the periodic scheduler catches up. The
-LaunchAgent is still recommended because it retries summaries, dreams, graph
-extraction, and Neo4j sync on a timer even when no further hook event arrives.
+1. Hooks capture session activity from supported runners.
+2. Local storage keeps events, summaries, tool metadata, retrieval indexes, and safety audit data.
+3. Retrieval and handover flows turn prior work into usable context for the next agent session.
+4. Background scheduling keeps summaries, dreams, graph extraction, and maintenance moving forward.
+5. The local monitor exposes runtime state, integrations, risks, and storage in one place.
 
-## Contents
+## Documentation
 
-- `SKILL.md`: agent-facing usage guide
-- `AGENT_BOOTSTRAP.md`: agent-facing fresh-clone initialization workflow
-- `docs/setup/RUNNER_HARNESSES.md`: maintained runner and harness matrix
-- `scripts/agent_context_engine.py`: thin CLI entrypoint
-- `scripts/agent_context_engine/`: implementation modules
-  - `application/`: retrieval, summaries, personal memory, classifiers, file access
-  - `domain/`: risk scanning and dynamic schema proposals
-  - `adapters/`: SQLite schema/repositories and optional Neo4j sync
-  - `cli_commands/`: command handlers for install, sessions, retrieval, risk, status
-  - `monitoring/`: monitor HTTP server, API handlers and HTML
-  - `graphing/`: entity/relation extraction, candidates, patches and materialization
-  - `dreaming/`: dream prompts, memory metadata and runner orchestration
-  - `hooking/`: hook payload normalization, queueing and risk gate
-  - `runners/`: Codex, Claude Code, Cursor, Gemini, Antigravity, and OpenCode adapters
-  - root facades: `cli.py`, `config.py`, `db.py`, `dream.py`, `graph.py`, `hooks.py`, `monitor.py`, `scheduler.py`
-- `scripts/agent-context-engine`: local CLI wrapper
-- `scripts/codex-memory`: Codex launcher with Memory hooks
-- `scripts/claude-memory`: Claude Code launcher with Memory hooks
-- `scripts/agy-memory`: Antigravity launcher with Memory hooks
-- `scripts/gemini-memory`: Gemini launcher with Memory hooks
-- `scripts/opencode-memory`: OpenCode launcher with Memory hooks
-- `templates/codex-hooks/hooks.json`: Codex hook config template
-- `templates/codex-hooks/hook_adapter.sh`: Codex hook adapter template
-- `templates/claude-hooks/settings.json`: Claude Code hook config template
-- `templates/claude-hooks/hook_adapter.sh`: Claude Code hook adapter template with Dream guard
-- `templates/cursor-hooks/hook_adapter.sh`: Cursor IDE hook adapter template
-- `tests/test_agent_context_engine.py`: unit and end-to-end tests
+- [Overview](docs/overview.md)
+- [System Overview](docs/architecture/SYSTEM_OVERVIEW.md)
+- [Activation Model](docs/setup/activation-model.md)
+- [Central Installation Mode](docs/setup/central-installation-mode.md)
+- [Runner And Harness Guide](docs/setup/RUNNER_HARNESSES.md)
+- [Build And Checks](docs/setup/BUILD_AND_CHECKS.md)
+- [Monitor Operator Workflows](docs/runbooks/monitor-operator-workflows.md)
+- [Project Origin](docs/project-origin.md)
+
+## For Agents
+
+- [AGENT_BOOTSTRAP.md](AGENT_BOOTSTRAP.md): guided install contract for agent-driven setup
+- [session-start-hook-entry.md](session-start-hook-entry.md): session-start retrieval and context workflow
+- [SKILL.md](SKILL.md): packaged skill-facing instructions
+
+## Development
+
+Core checks:
+
+```sh
+./scripts/check --skip-runtime-db
+python3 -m unittest discover -s tests -v
+./scripts/audit
+```
+
+Dependency files are pinned and split by purpose:
+
+- `backend/requirements-runtime.txt`
+- `backend/requirements-build.txt`
+- `backend/requirements-audit.txt`
+
+## Repository Layout
+
+- `backend/`: Python backend, CLI, hooks, runtime logic, monitor API, and storage model
+- `frontend/`: monitor UI
+- `scripts/`: wrappers, checks, audits, and local operator helpers
+- `templates/`: hook templates for supported runners
+- `contracts/`: OpenAPI contract and interface specs
+- `docs/`: public setup, architecture, runbooks, and product documentation
 
 ## Install Into A Target Project
 
@@ -89,20 +115,34 @@ python3 docs/skills/agent-context-engine/scripts/agent_context_engine.py install
 
 The installer will explain what Agent Context Engine does, why it improves the workflow,
 keep the source checkout unchanged by default, suggest the central install root
-`~/.agent-context-engine/instances/default/install` plus the matching runtime
-storage root `~/.agent-context-engine/instances/default/memory`, and print the
-exact install command.
+`~/.agent-context-engine/install` plus the matching runtime storage root
+`~/.agent-context-engine/memory`, and print the exact install command. The
+guided defaults also keep global PATH wrapper links off unless the user asks
+for them, bootstrap the local runtime, and start the monitor after install.
+
+If discovery points at the central default target
+`~/.agent-context-engine/install`, that is the default installation plan even
+when the current checkout is a fresh clone. In that mode the checkout stays
+unchanged unless the user explicitly chooses a different `--target`.
+
+Agent Context Engine also keeps a central monitor runtime registry at
+`~/.agent-context-engine/monitor-runtime.json`. Every monitor start updates
+that file with the current instance, host, port, PID, and timestamps so future
+discovery runs can avoid known active monitor ports before proposing defaults.
+The installer then performs one more final monitor-port reconciliation
+immediately before writing the install profile, so a stale discovery result can
+still be corrected at install time.
 
 ```sh
 python3 docs/skills/agent-context-engine/scripts/agent_context_engine.py install \
   --target /path/to/agent-context-engine-root \
   --project "project-a=/path/to/project-a" \
   --project "project-b=/path/to/project-b" \
-  --link-codex-memory \
-  --link-claude-memory \
-  --link-agy-memory \
-  --link-gemini-memory \
-  --link-opencode-memory \
+  --link-codex-ace \
+  --link-claude-ace \
+  --link-agy-ace \
+  --link-gemini-ace \
+  --link-opencode-ace \
   --force
 ```
 
@@ -133,11 +173,11 @@ and do not pay an extra classifier subprocess.
 With wrapper link flags, it can also create:
 
 ```text
-~/.local/bin/codex-memory -> <target>/docs/skills/agent-context-engine/scripts/codex-memory
-~/.local/bin/claude-memory -> <target>/docs/skills/agent-context-engine/scripts/claude-memory
-~/.local/bin/agy-memory -> <target>/docs/skills/agent-context-engine/scripts/agy-memory
-~/.local/bin/gemini-memory -> <target>/docs/skills/agent-context-engine/scripts/gemini-memory
-~/.local/bin/opencode-memory -> <target>/docs/skills/agent-context-engine/scripts/opencode-memory
+~/.local/bin/codex-ace -> <target>/docs/skills/agent-context-engine/scripts/codex-ace
+~/.local/bin/claude-ace -> <target>/docs/skills/agent-context-engine/scripts/claude-ace
+~/.local/bin/agy-ace -> <target>/docs/skills/agent-context-engine/scripts/agy-ace
+~/.local/bin/gemini-ace -> <target>/docs/skills/agent-context-engine/scripts/gemini-ace
+~/.local/bin/opencode-ace -> <target>/docs/skills/agent-context-engine/scripts/opencode-ace
 ```
 
 For a second independent installation on the same Mac, use an instance name or
@@ -147,18 +187,24 @@ explicit command prefix so existing global commands are not replaced:
 python3 docs/skills/agent-context-engine/scripts/agent_context_engine.py install \
   --target /path/to/second-agent-context-engine-root \
   --instance-name client-a \
-  --link-codex-memory \
-  --link-claude-memory \
-  --link-agy-memory \
-  --link-gemini-memory \
-  --link-opencode-memory
+  --link-codex-ace \
+  --link-claude-ace \
+  --link-agy-ace \
+  --link-gemini-ace \
+  --link-opencode-ace
 ```
 
-This creates prefixed wrapper names such as `client-a-codex-memory`,
-`client-a-claude-memory`, `client-a-agy-memory`, `client-a-gemini-memory`, and
-`client-a-opencode-memory` in `~/.local/bin/`. The local CLI remains scoped to
+This creates prefixed wrapper names such as `client-a-codex-ace`,
+`client-a-claude-ace`, `client-a-agy-ace`, `client-a-gemini-ace`, and
+`client-a-opencode-ace` in `~/.local/bin/`. The local CLI remains scoped to
 that root:
 `/path/to/second-agent-context-engine-root/scripts/agent-context-engine`.
+
+When an agent is driving installation from a restricted environment, do not
+over-interpret pre-approval health checks against an existing central install.
+Results such as `Operation not permitted`, a temporarily non-writable
+home-directory path, or `unable to open database file` are permission-limited
+signals, not enough on their own to declare the existing install broken.
 
 If `docs/knowledge/repos.md` does not exist, the installer creates it. Pass
 known projects with repeated `--project "name=/absolute/path"` arguments, or run
@@ -207,7 +253,7 @@ cd <target>
 ./scripts/agent-context-engine doctor
 ./scripts/agent-context-engine check-installation
 ./scripts/agent-context-engine doctor --relocation-report
-codex-memory
+codex-ace
 ```
 
 `doctor --relocation-report` is useful after copying an existing `memory/`
@@ -217,7 +263,7 @@ location; the report shows representative rows so the user can decide whether
 that is expected history or needs migration.
 
 If you only use a Codex GUI/editor workspace, the hook files in that workspace
-may still work without a separate headless CLI. But `codex-memory`,
+may still work without a separate headless CLI. But `codex-ace`,
 `codex exec`, monitor ask with runner `codex`, and Dreaming still require the
 Codex CLI on the machine. In practice that also means a terminal-side
 `codex login` before the first headless use. The same separation applies to
@@ -226,7 +272,7 @@ Claude Desktop vs. `claude`, and Cursor GUI hooks vs. `cursor-agent`.
 At Codex `SessionStart`, the project hook now injects only a short deterministic
 activation note. It does not list previous sessions in the visible chat by
 default. Use `agent-memory last`, `folder`, `use <session_id>`, or `handover
-<session_id>` when the user asks for previous work. The `codex-memory` wrapper
+<session_id>` when the user asks for previous work. The `codex-ace` wrapper
 preserves the original launch folder in `AGENT_MEMORY_LAUNCH_CWD` before it
 changes into the central Memory root, and subsequent hooks update `last_workdir`
 from tool inputs such as `workdir`, `working_dir`, or `cwd`.
@@ -343,13 +389,13 @@ Full package verification includes a fresh install smoke test:
 ### Claude Code
 
 ```sh
-claude-memory
+claude-ace
 ```
 
 Symlink:
 
 ```text
-~/.local/bin/claude-memory -> <target>/docs/skills/agent-context-engine/scripts/claude-memory
+~/.local/bin/claude-ace -> <target>/docs/skills/agent-context-engine/scripts/claude-ace
 ```
 
 Hook config at `<target>/.claude/settings.json` is loaded automatically by Claude Code when the working directory is `<target>`. No explicit hook approval step is needed; Claude Code reads `settings.json` from the project root.
@@ -465,7 +511,7 @@ graph context, then calls the selected runner in no-tools/read-only mode.
 For every installation, the SQLite database is:
 
 ```text
-<agent-memory-root>/memory/status/agent-memory.sqlite3
+<agent-context-engine-root>/memory/status/agent-memory.sqlite3
 ```
 
 Portable documentation should refer to the relative path
@@ -949,7 +995,7 @@ JSON artifacts that can later be imported into Neo4j.
 Use `handover` or `use` as the default agentic continuation command. It prints
 the resolved session, project workdir, freshness status, summary/dream artifacts,
 metrics, recent timeline, recent tools, and explicit instructions for continuing
-inside the current `codex-memory` chat.
+inside the current `codex-ace` chat.
 
 Outputs:
 

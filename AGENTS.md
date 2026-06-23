@@ -38,6 +38,15 @@ new project, load `AGENT_BOOTSTRAP.md` first, then
 `docs/setup/RUNNER_HARNESSES.md`, and then the relevant README sections. Keep
 normal memory-search questions focused on the quick path above.
 
+For install requests, keep the approval flow compact: use discovery first,
+present the discovered defaults, and avoid drawing strong conclusions from
+pre-approval `doctor` / `check-installation` failures in restricted
+environments. Permission-related errors against `~/.agent-context-engine`
+should be treated as inconclusive until rerun with the required access.
+Include the monitor-port caveat explicitly in the approval summary: the shown
+port is a discovery default and is revalidated again immediately before config
+is written.
+
 ## Integration Management Context
 
 When the user asks about client or runner integrations, wrapper commands,
@@ -52,7 +61,7 @@ Use them as the operational contract before changing integration state or
 explaining monitor status.
 
 OpenCode, Antigravity, and Gemini are global-only: they are started through
-`opencode-memory`, `agy-memory`, and `gemini-memory` from any directory. The
+`opencode-ace`, `agy-ace`, and `gemini-ace` from any directory. The
 plain `opencode`, `agy`, and `gemini` commands start without Agent Context Engine hooks.
 
 ## Runtime And Privacy Rules

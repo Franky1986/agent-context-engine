@@ -17,6 +17,10 @@ application services.
 - Keep documented commands stable.
 - Normalize user inputs before calling application functions.
 - Preserve useful non-zero exits for controlled failures.
+- Keep installation and enable/repair flows explicit about target root,
+  memory root, wrapper naming, monitor port selection, and user confirmation.
+- Expose global-only runner preparation flows that operate on the installation
+  root while still allowing an external shared memory root.
 
 ## Inputs / Outputs
 - Inputs: command line arguments, environment flags, current working directory.
@@ -40,6 +44,9 @@ application services.
 - `./scripts/agent-context-engine --help` and core commands remain stable.
 - No new core logic appears in command modules.
 - JSON output stays parseable where documented.
+- Install discovery and install execution agree on wrapper-link conflict
+  semantics for both direct `scripts/*` targets and installed
+  `docs/skills/.../scripts/*` targets within the same checkout.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`

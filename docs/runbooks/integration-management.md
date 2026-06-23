@@ -110,12 +110,12 @@ Interpretation:
 
 - `global_active`:
   - the wrapper command is available in `PATH`
-  - example: `claude-memory`
+  - example: `claude-ace`
 - `root_active`:
   - the wrapper exists under this Agent Context Engine root
   - but no global `PATH` command exists
   - use:
-    - `cd <agent-memory-root> && ./scripts/<wrapper>`
+    - `cd <agent-context-engine-root> && ./scripts/<wrapper>`
     - or the absolute script path
 - `blocked_by_hooks`:
   - the wrapper command may exist, but the local hook/config state prevents the
@@ -207,11 +207,11 @@ This distinction must stay explicit in the monitor and in agent guidance.
 A wrapper is global only if the command resolves from any shell location:
 
 ```sh
-which codex-memory
-which claude-memory
-which agy-memory
-which gemini-memory
-which opencode-memory
+which codex-ace
+which claude-ace
+which agy-ace
+which gemini-ace
+which opencode-ace
 ```
 
 If `which` returns nothing, the wrapper is **not** global.
@@ -224,9 +224,9 @@ root-active only.
 Examples:
 
 ```sh
-cd /path/to/agent-memory-root && ./scripts/gemini-memory
-cd /path/to/agent-memory-root && ./scripts/opencode-memory
-cd /path/to/agent-memory-root && ./scripts/agy-memory
+cd /path/to/agent-context-engine-root && ./scripts/gemini-ace
+cd /path/to/agent-context-engine-root && ./scripts/opencode-ace
+cd /path/to/agent-context-engine-root && ./scripts/agy-ace
 ```
 
 Agents must not claim global availability unless the actual global command is
@@ -240,8 +240,8 @@ Global/root wrappers and active project context are separate concerns.
   monitor state, and the local CLI.
 - `Project workdir` is the repo/folder the user actually wants to work in.
 
-For the root-managed wrappers (`codex-memory`, `claude-memory`, `agy-memory`,
-`gemini-memory`, `opencode-memory`):
+For the root-managed wrappers (`codex-ace`, `claude-ace`, `agy-ace`,
+`gemini-ace`, `opencode-ace`):
 
 - the wrapper may start the runner from the Agent Context Engine root
 - but it must preserve the original shell folder as the initial workdir
@@ -265,17 +265,17 @@ workdir.
 Primary wrapper:
 
 ```sh
-cd /path/to/agent-memory-root && ./scripts/codex-memory
+cd /path/to/agent-context-engine-root && ./scripts/codex-ace
 ```
 
 Global command, only if linked in `PATH`:
 
 ```sh
-codex-memory
+codex-ace
 ```
 
 If only the Codex GUI workspace is prepared but `codex` is missing, say that
-explicitly. GUI-only hook capture may work, but `codex-memory`, `codex exec`,
+explicitly. GUI-only hook capture may work, but `codex-ace`, `codex exec`,
 monitor ask with runner `codex`, and Dreaming do not.
 
 ### Claude
@@ -283,13 +283,13 @@ monitor ask with runner `codex`, and Dreaming do not.
 Primary wrapper:
 
 ```sh
-cd /path/to/agent-memory-root && ./scripts/claude-memory
+cd /path/to/agent-context-engine-root && ./scripts/claude-ace
 ```
 
 Global command, only if linked in `PATH`:
 
 ```sh
-claude-memory
+claude-ace
 ```
 
 Claude Desktop must not be treated as equivalent to Claude Code CLI here. If
@@ -301,13 +301,13 @@ GUI/editor experience exists elsewhere.
 Primary wrapper:
 
 ```sh
-cd /path/to/agent-memory-root && ./scripts/gemini-memory
+cd /path/to/agent-context-engine-root && ./scripts/gemini-ace
 ```
 
 Global command, only if linked in `PATH`:
 
 ```sh
-gemini-memory
+gemini-ace
 ```
 
 Gemini loads hooks from the current working directory. The wrapper starts
@@ -319,7 +319,7 @@ workspace via `--include-directories`. The hook adapter uses
 Global hook bridge setup (run once per Agent Context Engine root):
 
 ```sh
-cd /path/to/agent-memory-root && ./scripts/agent-context-engine gemini-enable
+cd /path/to/agent-context-engine-root && ./scripts/agent-context-engine gemini-enable
 ```
 
 `gemini-enable --target <project-path>` is deprecated and refused. Gemini
@@ -331,19 +331,19 @@ Agent Context Engine hooks.
 Primary wrapper:
 
 ```sh
-cd /path/to/agent-memory-root && ./scripts/agy-memory
+cd /path/to/agent-context-engine-root && ./scripts/agy-ace
 ```
 
 Global command, only if linked in `PATH`:
 
 ```sh
-agy-memory
+agy-ace
 ```
 
 Compatibility alias:
 
 ```sh
-antigravity-memory
+antigravity-ace
 ```
 
 Antigravity loads hooks from the current working directory. The wrapper starts
@@ -355,7 +355,7 @@ the effective project context.
 Global hook bridge setup (run once per Agent Context Engine root):
 
 ```sh
-cd /path/to/agent-memory-root && ./scripts/agent-context-engine antigravity-enable
+cd /path/to/agent-context-engine-root && ./scripts/agent-context-engine antigravity-enable
 ```
 
 `antigravity-enable --target <project-path>` is deprecated and refused.
@@ -367,13 +367,13 @@ activate Agent Context Engine hooks.
 Primary wrapper:
 
 ```sh
-cd /path/to/agent-memory-root && ./scripts/opencode-memory
+cd /path/to/agent-context-engine-root && ./scripts/opencode-ace
 ```
 
 Global command, only if linked in `PATH`:
 
 ```sh
-opencode-memory [project]
+opencode-ace [project]
 ```
 
 OpenCode loads plugins only from its startup directory. The wrapper starts
@@ -384,7 +384,7 @@ argument via `AGENT_MEMORY_LAUNCH_CWD`.
 Global plugin bridge setup (run once per Agent Context Engine root):
 
 ```sh
-cd /path/to/agent-memory-root && ./scripts/agent-context-engine opencode-enable
+cd /path/to/agent-context-engine-root && ./scripts/agent-context-engine opencode-enable
 ```
 
 `opencode-enable --target <project-path>` is deprecated and refused. OpenCode
@@ -404,7 +404,7 @@ Cursor is not a single global wrapper flow. It is activated per project.
 Project activation:
 
 ```sh
-cd /path/to/agent-memory-root && ./scripts/agent-context-engine cursor-enable --target <project-path>
+cd /path/to/agent-context-engine-root && ./scripts/agent-context-engine cursor-enable --target <project-path>
 ```
 
 After activation:

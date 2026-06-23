@@ -18,6 +18,9 @@ INSTALLATION_PROFILE_PATH = Path("memory") / "local" / "installation-profile.jso
 DEFAULT_STORAGE_SCHEMA_VERSION = 1
 CANONICAL_ENV_FILENAME = "agent-context-engine.env"
 LEGACY_ENV_FILENAME = "agent-memory.env"
+ROOT_ENV_VAR = "AGENT_CONTEXT_ENGINE_ROOT"
+STORAGE_ROOT_ENV_VAR = "AGENT_CONTEXT_ENGINE_STORAGE_ROOT"
+LEGACY_STORAGE_ROOT_ENV_VAR = "AGENT_MEMORY_STORAGE_ROOT"
 
 
 def default_root_for_skill(skill_root: Path) -> Path:
@@ -26,7 +29,8 @@ def default_root_for_skill(skill_root: Path) -> Path:
     return skill_root
 
 
-ROOT = Path(os.environ["AGENT_MEMORY_ROOT"]).expanduser().resolve() if os.environ.get("AGENT_MEMORY_ROOT") else default_root_for_skill(SKILL_ROOT)
+_root_override = os.environ.get(ROOT_ENV_VAR)
+ROOT = Path(_root_override).expanduser().resolve() if _root_override else default_root_for_skill(SKILL_ROOT)
 
 
 def _read_installation_profile_payload(root: Path) -> dict[str, Any]:
@@ -49,7 +53,7 @@ def install_root() -> Path:
 
 
 def memory_root(root: Path = ROOT) -> Path:
-    override = os.environ.get("AGENT_MEMORY_STORAGE_ROOT")
+    override = os.environ.get(STORAGE_ROOT_ENV_VAR) or os.environ.get(LEGACY_STORAGE_ROOT_ENV_VAR)
     if override:
         try:
             return Path(override).expanduser().resolve()

@@ -8,7 +8,7 @@ fi
 
 EVENT="${1:-}"
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MEMORY_ROOT="${AGENT_MEMORY_ROOT:-__AGENT_MEMORY_ROOT__}"
+MEMORY_ROOT="${AGENT_CONTEXT_ENGINE_ROOT:-__AGENT_CONTEXT_ENGINE_ROOT__}"
 HOOKS_STATE="$MEMORY_ROOT/memory/local/hooks-state.json"
 LOG="$MEMORY_ROOT/memory/logs/antigravity-hook.err.log"
 STATE_DIR="$WORKSPACE_ROOT/.agents/hooks/.agent-memory-state"
@@ -203,7 +203,7 @@ run_hook() {
   local client_event="$1"
   local output_target="$2"
   set +e
-  env AGENT_MEMORY_ROOT="$MEMORY_ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$MEMORY_ROOT/__AGENT_MEMORY_SCRIPT__" log-hook --client antigravity \
+  env AGENT_CONTEXT_ENGINE_ROOT="$MEMORY_ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$MEMORY_ROOT/__AGENT_MEMORY_SCRIPT__" log-hook --client antigravity \
     < "$TMPPAYLOAD" \
     > "$output_target" \
     2> "$TMPERR"

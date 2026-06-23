@@ -106,7 +106,7 @@ def spawn_scheduler_kick(reason: str = "hook") -> None:
     ]
     env = {
         **env,
-        "AGENT_MEMORY_ROOT": str(ROOT),
+        "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT),
         "AGENT_MEMORY_SCHEDULER": "1",
     }
     subprocess.Popen(
@@ -163,7 +163,7 @@ def spawn_hook_queue_kick(reason: str = "hook") -> None:
         close_fds=True,
         env={
             **env,
-            "AGENT_MEMORY_ROOT": str(ROOT),
+            "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT),
             "AGENT_MEMORY_HOOK_QUEUE_WORKER": "1",
         },
     )

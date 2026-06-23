@@ -48,6 +48,7 @@ class SessionRunnerDependencies:
     run_persistence_stage: Callable[..., dict[str, Any]]
     run_audit_stage: Callable[..., dict[str, Any]]
     root: Callable[[], Path]
+    rel: Callable[[Path], str]
     append_project_memory_ref: Callable[..., Path]
     extract_session_brief: Callable[[str], str]
     record_artifact: Callable[..., None]
@@ -346,20 +347,20 @@ def run_v2_for_session(
             event_count=len(events),
         )
         audit_paths = audit["audit_paths"]
-        output_paths = [str(path.relative_to(deps.root())) for path in audit_paths.values()]
-        output_summary_path = str(audit_paths.get("summary").relative_to(deps.root()))
+        output_paths = [deps.rel(path) for path in audit_paths.values()]
+        output_summary_path = deps.rel(audit_paths.get("summary"))
         if project_dream_path is not None:
             project_ref = deps.append_project_memory_ref(
                 current,
-                str(project_dream_path.relative_to(deps.root())),
-                str(project_dream_path.relative_to(deps.root())),
+                deps.rel(project_dream_path),
+                deps.rel(project_dream_path),
                 dream_run_id,
                 runner,
                 runner_model,
             )
             output_paths = [
-                str(project_dream_path.relative_to(deps.root())),
-                str(project_ref.relative_to(deps.root())),
+                deps.rel(project_dream_path),
+                deps.rel(project_ref),
                 *output_paths,
             ]
         session_brief = deps.extract_session_brief(response)

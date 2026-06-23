@@ -200,7 +200,7 @@ def query_plan_schema() -> dict[str, Any]:
 
 
 def run_monitor_llm(runner: str, model: str | None, prompt: str, timeout: int, *, output_schema: dict[str, Any] | None = None) -> str:
-    env = {**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_ROOT": str(ROOT)}
+    env = {**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)}
     if runner == "codex":
         if not shutil.which("codex"):
             raise RuntimeError("codex executable not found")

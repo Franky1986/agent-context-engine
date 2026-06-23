@@ -311,7 +311,7 @@ def _render_shell_hook_script(client: str, *, memory_root: Path) -> str:
     spec = _hook_spec(client)
     return (
         spec["template_script"].read_text(encoding="utf-8")
-        .replace("__AGENT_MEMORY_ROOT__", str(memory_root.resolve()))
+        .replace("__AGENT_CONTEXT_ENGINE_ROOT__", str(memory_root.resolve()))
         .replace("__AGENT_MEMORY_SCRIPT__", str(_agent_memory_script_absolute_path(memory_root)))
     )
 
@@ -851,7 +851,7 @@ def _prepare_antigravity_hook_client(*, root: Path = ROOT, memory_root: Path | N
         _write_json(config_path, {})
     script_text = (SKILL_ROOT / "templates" / "antigravity-hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
     script_text = script_text.replace("__AGENT_MEMORY_SCRIPT__", _agent_memory_script_for_root(memory_root))
-    script_text = script_text.replace("__AGENT_MEMORY_ROOT__", str(memory_root.resolve()))
+    script_text = script_text.replace("__AGENT_CONTEXT_ENGINE_ROOT__", str(memory_root.resolve()))
     script_path = paths["script_path"]
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(script_text, encoding="utf-8")
@@ -1252,6 +1252,27 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
   const launchCwd = process.env.AGENT_MEMORY_LAUNCH_CWD || ""
   const opencodeBridgeLog = join(memoryRoot, "memory", "logs", "opencode-hook.err.log")
   const currentCwd = (fallback = "") => launchCwd || worktree || directory || fallback || "."
+  const sessionIdFrom = (...values) => {{
+    for (const value of values) {{
+      if (typeof value === "string" && value.trim()) return value.trim()
+    }}
+    return ""
+  }}
+  const cwdFromInfo = (info = {{}}, fallback = "") =>
+    currentCwd(
+      info?.directory ||
+      info?.cwd ||
+      info?.worktree ||
+      info?.path?.cwd ||
+      info?.path?.directory ||
+      fallback
+    )
+  const titleFrom = (...values) => {{
+    for (const value of values) {{
+      if (typeof value === "string" && value.trim()) return value.trim()
+    }}
+    return ""
+  }}
   const textFromParts = (parts) =>
     Array.isArray(parts)
       ? parts
@@ -1292,7 +1313,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
       encoding: "utf8",
       env: {{
         ...process.env,
-        AGENT_MEMORY_ROOT: memoryRoot,
+        AGENT_CONTEXT_ENGINE_ROOT: memoryRoot,
       }},
     }})
     const stdout = (proc.stdout || "").trim()
@@ -1308,7 +1329,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
       cwd: currentCwd(payload?.cwd || ""),
       env: {{
         ...process.env,
-        AGENT_MEMORY_ROOT: memoryRoot,
+        AGENT_CONTEXT_ENGINE_ROOT: memoryRoot,
       }},
       stdio: ["pipe", "ignore", "ignore"],
       detached: true,
@@ -1336,11 +1357,19 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
       if (!event || typeof event.type !== "string") return
       if (event.type === "session.created") {{
         const info = event.properties?.info || {{}}
+        const sessionId = sessionIdFrom(
+          event.properties?.sessionID,
+          event.properties?.sessionId,
+          event.sessionID,
+          event.sessionId,
+          input?.sessionID,
+          input?.sessionId
+        )
         runHookAsync({{
           hook_event_name: "SessionStart",
-          session_id: event.properties?.sessionID || "",
-          cwd: info?.directory || info?.path?.cwd || currentCwd(),
-          thread_name: info?.title || "",
+          session_id: sessionId,
+          cwd: cwdFromInfo(info),
+          thread_name: titleFrom(info?.title, event.properties?.title, event.title),
           payload: event,
         }})
         return
@@ -1348,7 +1377,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
       if (event.type === "permission.asked") {{
         runHookAsync({{
           hook_event_name: "PermissionAsked",
-          session_id: event.properties?.sessionID || "",
+          session_id: sessionIdFrom(event.properties?.sessionID, event.properties?.sessionId, event.sessionID, event.sessionId),
           cwd: currentCwd(),
           payload: event,
         }})
@@ -1357,7 +1386,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
       if (event.type === "permission.replied") {{
         runHookAsync({{
           hook_event_name: "PermissionReplied",
-          session_id: event.properties?.sessionID || "",
+          session_id: sessionIdFrom(event.properties?.sessionID, event.properties?.sessionId, event.sessionID, event.sessionId),
           cwd: currentCwd(),
           payload: event,
         }})
@@ -1366,7 +1395,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
       if (event.type === "command.executed") {{
         runHookAsync({{
           hook_event_name: "CommandExecuted",
-          session_id: event.properties?.sessionID || "",
+          session_id: sessionIdFrom(event.properties?.sessionID, event.properties?.sessionId, event.sessionID, event.sessionId),
           cwd: currentCwd(),
           payload: event,
         }})
@@ -1375,7 +1404,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
       if (event.type === "session.idle") {{
         runHookAsync({{
           hook_event_name: "Stop",
-          session_id: event.properties?.sessionID || "",
+          session_id: sessionIdFrom(event.properties?.sessionID, event.properties?.sessionId, event.sessionID, event.sessionId),
           cwd: currentCwd(),
           payload: event,
         }})
@@ -1386,7 +1415,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
       if (!prompt) return
       runHookSync({{
         hook_event_name: "UserPromptSubmit",
-        session_id: input?.sessionID || "",
+        session_id: sessionIdFrom(input?.sessionID, input?.sessionId, output?.sessionID, output?.sessionId),
         cwd: currentCwd(),
         prompt,
         payload: {{ input: input || null, output: output || null }},
@@ -1395,7 +1424,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
     "tool.execute.before": async (input, output) => {{
       runHookSync({{
         hook_event_name: "PreToolUse",
-        session_id: input?.sessionID || "",
+        session_id: sessionIdFrom(input?.sessionID, input?.sessionId, output?.sessionID, output?.sessionId),
         cwd: currentCwd(),
         tool_name: input?.tool || "",
         tool_input: output?.args || null,
@@ -1504,7 +1533,7 @@ def opencode_status(root: Path = ROOT) -> dict[str, Any]:
     runtime_ready = shutil.which("opencode") is not None
     dream_ready = runtime_ready and shutil.which(dream_provider_id) is not None and dream_provider_model in ollama_ids
     hook_status = _opencode_hook_status(root=root)
-    wrapper_status = _simple_wrapper_state(executable_name="opencode", wrapper_command="./scripts/opencode-memory", root=root)
+    wrapper_status = _simple_wrapper_state(executable_name="opencode", wrapper_command="./scripts/opencode-ace", root=root)
     global_wrapper_name = _resolved_global_wrapper_name("opencode", root=root)
     usage_hint = (
         f"Run the global wrapper `{global_wrapper_name}` from any directory. It starts OpenCode from the Agent Context Engine root so the plugin bridge loads, while the original launch directory becomes the project context."
@@ -1533,11 +1562,11 @@ def opencode_status(root: Path = ROOT) -> dict[str, Any]:
         "recommended_model": selected_model or "",
         "recommended_small_model": selected_small_model or selected_model or "",
         "recommended_dream_model": OPENCODE_DREAM_MODEL,
-        "wrapper_command": "./scripts/opencode-memory",
+        "wrapper_command": "./scripts/opencode-ace",
         "usage_mode": "wrapper",
         "usage_hint": usage_hint,
         "working_root": str(root.resolve()),
-        "terminal_command": _root_prefixed("./scripts/opencode-memory", root=root),
+        "terminal_command": _root_prefixed("./scripts/opencode-ace", root=root),
         "activation_command": _root_prefixed("./scripts/agent-context-engine opencode-enable", root=root),
         **wrapper_status,
         **hook_status,
@@ -1550,11 +1579,11 @@ def antigravity_status(*, root: Path = ROOT) -> dict[str, Any]:
     hook_status = _antigravity_hook_status(root=root)
     wrapper_status = _shell_wrapper_state(
         executable_name="agy",
-        wrapper_command="./scripts/agy-memory",
+        wrapper_command="./scripts/agy-ace",
         hooks_state=str(hook_status["hooks_state"]),
         root=root,
     )
-    legacy_global_command = shutil.which("antigravity-memory")
+    legacy_global_command = shutil.which("antigravity-ace")
     if not wrapper_status.get("global_command_available") and legacy_global_command:
         wrapper_status["global_command_available"] = True
         wrapper_status["global_command_path"] = legacy_global_command
@@ -1565,7 +1594,7 @@ def antigravity_status(*, root: Path = ROOT) -> dict[str, Any]:
     usage_hint = (
         f"Run the global wrapper `{global_wrapper_name}` from any directory. It starts Antigravity from the Agent Context Engine root so the central hooks load, while the original launch directory is added as a workspace."
         if wrapper_status["global_command_available"]
-        else f"Use the global wrapper `{global_wrapper_name}` after adding the PATH link. The legacy alias `antigravity-memory` remains available. Without the link, use the root command below."
+        else f"Use the global wrapper `{global_wrapper_name}` after adding the PATH link. The legacy alias `antigravity-ace` remains available. Without the link, use the root command below."
     )
     return _apply_hook_control_status({
         "client": "antigravity",
@@ -1581,15 +1610,15 @@ def antigravity_status(*, root: Path = ROOT) -> dict[str, Any]:
         "models": [],
         "recommended_model": ANTIGRAVITY_DREAM_MODEL,
         "recommended_small_model": ANTIGRAVITY_DREAM_MODEL,
-        "wrapper_command": "./scripts/agy-memory",
+        "wrapper_command": "./scripts/agy-ace",
         "usage_mode": "wrapper",
         "usage_hint": usage_hint,
         "working_root": str(root.resolve()),
-        "terminal_command": _root_prefixed("./scripts/agy-memory", root=root),
+        "terminal_command": _root_prefixed("./scripts/agy-ace", root=root),
         "activation_command": _root_prefixed("./scripts/agent-context-engine antigravity-enable", root=root),
         "resume_command": "agy --conversation <conversation-id>",
         "conversation_resume_command": "agy --conversation <conversation-id>",
-        "legacy_wrapper_command": "./scripts/antigravity-memory",
+        "legacy_wrapper_command": "./scripts/antigravity-ace",
         "prepared": bool(wrapper_status["wrapper_path_exists"]) or bool(hook_status["prepared"]),
         **wrapper_status,
         **hook_status,
@@ -1603,7 +1632,7 @@ def gemini_status(*, root: Path = ROOT, probe: bool = False) -> dict[str, Any]:
     hook_status = _shell_hook_status("gemini", root=root)
     wrapper_status = _shell_wrapper_state(
         executable_name="gemini",
-        wrapper_command="./scripts/gemini-memory",
+        wrapper_command="./scripts/gemini-ace",
         hooks_state=str(hook_status["hooks_state"]),
         root=root,
     )
@@ -1628,11 +1657,11 @@ def gemini_status(*, root: Path = ROOT, probe: bool = False) -> dict[str, Any]:
         "recommended_model": recommended or GEMINI_MINI_PREFERENCE[0],
         "recommended_small_model": recommended or GEMINI_MINI_PREFERENCE[0],
         "errors": discovered.get("errors", []),
-        "wrapper_command": "./scripts/gemini-memory",
+        "wrapper_command": "./scripts/gemini-ace",
         "usage_mode": "wrapper",
         "usage_hint": usage_hint,
         "working_root": str(root.resolve()),
-        "terminal_command": _root_prefixed("./scripts/gemini-memory", root=root),
+        "terminal_command": _root_prefixed("./scripts/gemini-ace", root=root),
         "activation_command": _root_prefixed("./scripts/agent-context-engine gemini-enable", root=root),
         "prepared": bool(wrapper_status["wrapper_path_exists"]) or bool(hook_status["prepared"]),
         **wrapper_status,
@@ -1646,13 +1675,13 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
     cursor_hooks = _cursor_status_with_hooks(root=root)
     codex_wrapper = _shell_wrapper_state(
         executable_name="codex",
-        wrapper_command="./scripts/codex-memory",
+        wrapper_command="./scripts/codex-ace",
         hooks_state=str(codex_hooks["hooks_state"]),
         root=root,
     )
     claude_wrapper = _shell_wrapper_state(
         executable_name="claude",
-        wrapper_command="./scripts/claude-memory",
+        wrapper_command="./scripts/claude-ace",
         hooks_state=str(claude_hooks["hooks_state"]),
         root=root,
     )
@@ -1673,7 +1702,7 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
             "models": [],
             "recommended_model": os.environ.get("AGENT_MEMORY_CODEX_DREAM_MODEL", "gpt-5.4-mini"),
             "recommended_small_model": os.environ.get("AGENT_MEMORY_CODEX_DREAM_MODEL", "gpt-5.4-mini"),
-            "wrapper_command": "./scripts/codex-memory",
+            "wrapper_command": "./scripts/codex-ace",
             "usage_mode": "wrapper",
             "usage_hint": (
                 f"Run the global wrapper `{codex_global_name}` from any directory."
@@ -1681,7 +1710,7 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
                 else f"Use the global wrapper `{codex_global_name}` after adding the PATH link. Without that link, use the root command below."
             ),
             "working_root": str(root.resolve()),
-            "terminal_command": _root_prefixed("./scripts/codex-memory", root=root),
+            "terminal_command": _root_prefixed("./scripts/codex-ace", root=root),
             **codex_wrapper,
             **codex_hooks,
             "prepared": bool(codex_wrapper["wrapper_path_exists"]) or bool(codex_hooks["prepared"]),
@@ -1700,7 +1729,7 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
             "models": [],
             "recommended_model": os.environ.get("AGENT_MEMORY_CLAUDE_DREAM_MODEL", "claude-haiku-4-5-20251001"),
             "recommended_small_model": os.environ.get("AGENT_MEMORY_CLAUDE_DREAM_MODEL", "claude-haiku-4-5-20251001"),
-            "wrapper_command": "./scripts/claude-memory",
+            "wrapper_command": "./scripts/claude-ace",
             "usage_mode": "wrapper",
             "usage_hint": (
                 f"Run the global wrapper `{claude_global_name}` from any directory."
@@ -1708,7 +1737,7 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
                 else f"Use the global wrapper `{claude_global_name}` after adding the PATH link. Without that link, use the root command below."
             ),
             "working_root": str(root.resolve()),
-            "terminal_command": _root_prefixed("./scripts/claude-memory", root=root),
+            "terminal_command": _root_prefixed("./scripts/claude-ace", root=root),
             **claude_wrapper,
             **claude_hooks,
             "prepared": bool(claude_wrapper["wrapper_path_exists"]) or bool(claude_hooks["prepared"]),

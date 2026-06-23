@@ -171,7 +171,10 @@ def invoke_runner(
 
     started = now_fn()
     started_mono = monotonic_fn()
-    runner_env = {"AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_ROOT": root_path}
+    runner_env = {
+        "AGENT_MEMORY_DREAM": "1",
+        "AGENT_CONTEXT_ENGINE_ROOT": root_path,
+    }
 
     if runner == "codex":
         command = codex_dream_command_fn(raw_output_path, model)

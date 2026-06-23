@@ -1,7 +1,8 @@
 {
-  "name": "agent-memory-monitor",
+  "name": "agent-context-engine-monitor",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.6.0",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

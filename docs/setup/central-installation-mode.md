@@ -9,7 +9,7 @@ Use this mode when:
 
 - you work across multiple repositories
 - you want one central runtime and monitor
-- you want shared wrappers such as `codex-memory` or `claude-memory`
+- you want shared wrappers such as `codex-ace` or `claude-ace`
 - you want one memory layer to follow work across projects
 
 ## User Experience

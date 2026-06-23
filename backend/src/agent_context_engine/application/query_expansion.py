@@ -237,7 +237,7 @@ def _runner_model(runner: str, model: str | None) -> str | None:
 
 
 def _run_hardened_llm(runner: str, model: str | None, prompt: str, timeout: int) -> str:
-    env = {**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_ROOT": str(ROOT)}
+    env = {**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)}
     resolved_model = _runner_model(runner, model)
     if runner == "codex":
         if not shutil.which("codex"):

@@ -5,7 +5,7 @@
 > finds plausible existing `memory_root` candidates, reports wrapper conflicts
 > and LaunchAgent identity, returns a structured recommended install plan, and
 > suggests safe defaults for `agent-context-engine` such as isolated monitor
-> ports, an `ace-` wrapper prefix, and delayed LaunchAgent activation.
+> ports, a `-ace` wrapper suffix, and delayed LaunchAgent activation.
 > `install` without `--target` now uses that discovery context for a guided
 > entry flow, keeps prompts and summaries in the chosen language, blocks
 > accidental public-to-source mutations, can adopt an existing `memory_root`
@@ -43,7 +43,7 @@ For a fresh `agent-context-engine` checkout, discovery may suggest:
 - the current checkout as the install target,
 - an existing `memory_root` when one is confidently detected,
 - an isolated monitor port when `8787` is already occupied,
-- the wrapper prefix `ace-` for multi-install safety,
+- the wrapper suffix `-ace` for multi-install safety,
 - deferred LaunchAgent installation until the user wants the background worker.
 
 Those values are proposals, not implicit consent.

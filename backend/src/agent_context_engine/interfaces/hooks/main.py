@@ -226,6 +226,11 @@ def hooks_runtime_enabled_for(client: str, payload: dict[str, Any], *, root: Pat
         return False
     if workspace_root.resolve() == root.resolve():
         return True
+    payload_cwd = normalized_path(str(payload.get("cwd") or os.environ.get("PWD") or ""))
+    root_cwd = normalized_path(str(root))
+    launch_cwd = normalized_path(os.environ.get("AGENT_MEMORY_LAUNCH_CWD"))
+    if client in {"codex", "claude"} and launch_cwd and payload_cwd == root_cwd:
+        return True
     binding = workspace_binding_status(client, root=workspace_root, expected_memory_root=root)
     return str(binding.get("hook_binding_state") or "") == "bound"
 

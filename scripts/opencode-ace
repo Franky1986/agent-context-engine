@@ -8,11 +8,11 @@ while [[ -L "$SOURCE" ]]; do
   [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
-DEFAULT_ROOT="__AGENT_MEMORY_ROOT__"
+DEFAULT_ROOT="__AGENT_CONTEXT_ENGINE_ROOT__"
 
-if [[ -n "${AGENT_MEMORY_ROOT:-}" ]]; then
-  WORKMANAGEMENT_ROOT="$AGENT_MEMORY_ROOT"
-elif [[ "$DEFAULT_ROOT" != "__AGENT_MEMORY_ROOT__" ]]; then
+if [[ -n "${AGENT_CONTEXT_ENGINE_ROOT:-}" ]]; then
+  WORKMANAGEMENT_ROOT="$AGENT_CONTEXT_ENGINE_ROOT"
+elif [[ "$DEFAULT_ROOT" != "__AGENT_CONTEXT_ENGINE_ROOT__" ]]; then
   WORKMANAGEMENT_ROOT="$DEFAULT_ROOT"
 elif [[ -f "$SCRIPT_DIR/../SKILL.md" && "$(basename "$(dirname "$SCRIPT_DIR")")" = "agent-context-engine" && "$(basename "$(dirname "$(dirname "$SCRIPT_DIR")")")" = "skills" ]]; then
   WORKMANAGEMENT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
@@ -25,15 +25,17 @@ fi
 LAUNCH_CWD="${PWD}"
 
 if [[ ! -d "$WORKMANAGEMENT_ROOT" ]]; then
-  echo "codex-memory: missing Agent Context Engine root: $WORKMANAGEMENT_ROOT" >&2
+  echo "opencode-ace: missing Agent Context Engine root: $WORKMANAGEMENT_ROOT" >&2
   exit 1
 fi
 
-if [[ ! -f "$WORKMANAGEMENT_ROOT/.codex/hooks.json" ]]; then
-  echo "codex-memory: missing hooks config: $WORKMANAGEMENT_ROOT/.codex/hooks.json" >&2
-  exit 1
-fi
-
-cd "$WORKMANAGEMENT_ROOT"
 export AGENT_MEMORY_LAUNCH_CWD="$LAUNCH_CWD"
-exec codex -C "$WORKMANAGEMENT_ROOT" "$@"
+export AGENT_CONTEXT_ENGINE_ROOT="$WORKMANAGEMENT_ROOT"
+export AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT="opencode"
+
+# OpenCode only loads plugins from the startup directory's .opencode/plugins/.
+# Start opencode from the Agent Context Engine root so the global agent-memory plugin is
+# loaded. The original launch directory is preserved via AGENT_MEMORY_LAUNCH_CWD
+# and passed back to opencode as the project/workdir argument.
+cd "$WORKMANAGEMENT_ROOT"
+exec opencode "$@"

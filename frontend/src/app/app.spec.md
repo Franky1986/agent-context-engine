@@ -29,6 +29,8 @@ served by the local backend.
   `Overview`, `Sessions`, `Dreams`, `Knowledge`, `Control`, and `Howto`.
 - Keep `Sessions` as the default entry point for the daily operator journey.
 - Keep `Howto` available as a persistent rightmost tab and as a stable deep-link target for fresh installations.
+- Surface versioned monitor state cleanly enough that backend/product version
+  and monitor version can evolve together without UI ambiguity.
 - Group legacy or specialized monitor surfaces under the new primary sections
   instead of exposing them as competing top-level tabs.
 

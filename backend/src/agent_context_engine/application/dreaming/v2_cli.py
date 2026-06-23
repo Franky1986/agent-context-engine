@@ -20,6 +20,16 @@ def _row_dict(row: Any) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
+def _safe_rel(path: Path | str) -> str:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        try:
+            return str(candidate.relative_to(ROOT))
+        except ValueError:
+            return str(candidate)
+    return str(candidate)
+
+
 def _read_rel(path: str | None, limit: int = 200_000) -> str:
     if not path:
         return ""
@@ -457,12 +467,12 @@ def run_fixture_evaluation(
                 now,
                 now,
                 "succeeded" if report.get("ok") else "failed",
-                str(path.relative_to(ROOT)),
+                _safe_rel(path),
                 json_dumps(report.get("metrics", {})),
                 None if report.get("ok") else "; ".join(report.get("errors", [])),
             ),
         )
-    return {**report, "report_path": str(path.relative_to(ROOT))}
+    return {**report, "report_path": _safe_rel(path)}
 
 
 def cmd_dream_v2_fixture_evaluate(args: argparse.Namespace) -> int:
@@ -613,12 +623,12 @@ def run_readiness_evaluation(*, runner: str = "codex", runner_model: str | None 
                 now,
                 now,
                 "succeeded" if ok else "failed",
-                str(path.relative_to(ROOT)),
+                _safe_rel(path),
                 json_dumps({"checks": len(checks), "by_category": by_category}),
                 None if ok else "one or more readiness checks failed",
             ),
         )
-    return {**report, "report_path": str(path.relative_to(ROOT))}
+    return {**report, "report_path": _safe_rel(path)}
 
 
 def cmd_dream_v2_readiness(args: argparse.Namespace) -> int:
@@ -862,7 +872,7 @@ def cmd_dream_v2_apply(args: argparse.Namespace) -> int:
                 f"artifact_{safe_slug(args.dream_run_id)}_manual_apply_{now.replace(':', '-').replace('+', 'Z')}",
                 args.dream_run_id,
                 run["session_id"],
-                str(path.relative_to(ROOT)),
+                _safe_rel(path),
                 path.stat().st_size,
                 len(path.read_text(encoding="utf-8")),
                 now,
@@ -870,9 +880,9 @@ def cmd_dream_v2_apply(args: argparse.Namespace) -> int:
             ),
         )
     if args.json:
-        print(json_dumps({"dream_run_id": args.dream_run_id, "persistence": persistence, "path": str(path.relative_to(ROOT))}))
+        print(json_dumps({"dream_run_id": args.dream_run_id, "persistence": persistence, "path": _safe_rel(path)}))
     else:
-        print(f"applied {args.dream_run_id}: entities={persistence.get('semantic_entities_written', 0)} relations={persistence.get('semantic_relations_written', 0)} path={path.relative_to(ROOT)}")
+        print(f"applied {args.dream_run_id}: entities={persistence.get('semantic_entities_written', 0)} relations={persistence.get('semantic_relations_written', 0)} path={_safe_rel(path)}")
     return 0
 
 
@@ -958,7 +968,7 @@ def cmd_neo4j_repair_semantic_projection(args: argparse.Namespace) -> int:
     status = "dry_run" if args.dry_run else "skipped_unavailable"
     error = None
     result: dict[str, Any] = {
-        "patch": str(patch_path.relative_to(ROOT)),
+        "patch": _safe_rel(patch_path),
         "entities": len(patch["entities"]),
         "relations": len(patch["relations"]),
         "neo4j_status": status,
@@ -1149,15 +1159,15 @@ def cmd_dream_v2_evaluate(args: argparse.Namespace) -> int:
                 now,
                 now,
                 "succeeded" if ok else "failed",
-                str(path.relative_to(ROOT)),
+                _safe_rel(path),
                 json_dumps({"runs_checked": len(findings)}),
                 None if ok else "one or more v2 runs failed evaluation",
             ),
         )
     if args.json:
-        print(json_dumps({**report, "report_path": str(path.relative_to(ROOT))}))
+        print(json_dumps({**report, "report_path": _safe_rel(path)}))
     else:
-        print(f"v2 evaluation ok={ok} runs={len(findings)} report={path.relative_to(ROOT)}")
+        print(f"v2 evaluation ok={ok} runs={len(findings)} report={_safe_rel(path)}")
         for item in findings:
             print(f"  {item['dream_run_id']} ok={item['ok']} status={item['status']} errors={'; '.join(item['errors']) or '-'}")
     return 0 if ok else 1

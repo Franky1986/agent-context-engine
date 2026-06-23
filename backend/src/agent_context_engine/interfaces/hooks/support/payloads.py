@@ -84,7 +84,7 @@ def normalized_path(value: str | None) -> str:
 
 def effective_start_cwd(payload_cwd: str) -> str:
     launch_cwd = normalized_path(os.environ.get("AGENT_MEMORY_LAUNCH_CWD"))
-    root_cwd = normalized_path(os.environ.get("AGENT_MEMORY_ROOT"))
+    root_cwd = normalized_path(os.environ.get("AGENT_CONTEXT_ENGINE_ROOT"))
     # Root-managed wrappers `cd` into the Agent Memory installation before
     # launching the runner. Preserve the original shell folder as the initial
     # project/workdir context whenever it differs from the memory root, no

@@ -7,7 +7,7 @@ if [ "${AGENT_MEMORY_DREAM:-0}" = "1" ]; then
 fi
 
 EVENT="${1:-}"
-ROOT="__AGENT_MEMORY_ROOT__"
+ROOT="__AGENT_CONTEXT_ENGINE_ROOT__"
 SCRIPT="__AGENT_MEMORY_SCRIPT__"
 HOOKS_STATE="$ROOT/memory/local/hooks-state.json"
 LOG="$ROOT/memory/logs/gemini-hook.err.log"
@@ -174,7 +174,7 @@ print(json.dumps(transformed, ensure_ascii=False))
 PY
 
 set +e
-env AGENT_MEMORY_ROOT="$ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client gemini \
+env AGENT_CONTEXT_ENGINE_ROOT="$ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client gemini \
   < "$TMPPAYLOAD" \
   > "$TMPOUT" \
   2> "$TMPERR"

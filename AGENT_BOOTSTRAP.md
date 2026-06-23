@@ -20,18 +20,38 @@ agent should:
 5. Summarize the suggested target root, memory root, monitor port, wrapper
    naming, and refresh mode, then wait for the user's approval before any
    install or refresh mutation.
-6. Ask only for additional choices that still remain genuinely open after that
+   That summary should explicitly say that the proposed monitor port is only a
+   discovery default and will be revalidated again immediately before config is
+   written.
+6. If discovery points to the central default install root
+   `~/.agent-context-engine/install`, treat that as the default plan even when
+   the current checkout itself is fresh. State clearly that the checkout stays
+   unchanged unless the user explicitly chooses another `--target`.
+7. Do not drift into extra diagnostics on an existing installation before the
+   approval gate unless they are strictly needed to explain an ambiguity in the
+   proposed plan.
+8. If `doctor` or `check-installation` are run before approval from a
+   restricted environment, do not treat permission failures such as
+   `Operation not permitted`, non-writable home-directory paths, or
+   `unable to open database file` as authoritative evidence that the install is
+   broken. Those findings are inconclusive until rerun with the required
+   permissions.
+9. Ask only for additional choices that still remain genuinely open after that
    discovery summary.
-7. Run the installer with explicit options.
-8. Keep all writes inside the chosen target root and explicit memory root. Do
+10. Run the installer with explicit options.
+11. Keep all writes inside the chosen target root and explicit memory root. Do
    not mutate a separate source checkout when working inside
    `agent-context-engine`.
-9. After install, run `doctor` and `check-installation`.
-10. Ensure the installer leaves the local monitor running with the stored default host/port unless the user explicitly opted out.
-11. Explain how the user starts the selected harness.
+12. After install, run `doctor` and `check-installation`.
+13. Ensure the installer leaves the local monitor running with the stored default host/port unless the user explicitly opted out.
+14. Explain how the user starts the selected harness.
 
 Do not copy private runtime data into the public repository. Agent Context Engine stores
-runtime state under the default user root `~/.agent-context-engine`, with the default instance under `~/.agent-context-engine/instances/default/`, unless the user explicitly chooses another `--memory-root`. If the user chooses a source-local storage path, it must remain gitignored.
+runtime state under the default user root `~/.agent-context-engine`, with the default
+central install root at `~/.agent-context-engine/install` and the default runtime
+storage root at `~/.agent-context-engine/memory`, unless the user explicitly chooses
+another `--memory-root`. If the user chooses a source-local storage path, it must
+remain gitignored.
 
 ## Required User Choices
 
@@ -45,8 +65,8 @@ defaults before writing files:
   CLI, OpenCode, or a subset.
 - Workspace roots: the actual folders opened by Codex GUI, Claude/Claude Code,
   and Cursor when they differ from the central Agent Context Engine root.
-- Global commands: whether to create `codex-memory`, `claude-memory`,
-  `agy-memory`, `gemini-memory`, and/or `opencode-memory` symlinks in
+- Global commands: whether to create `codex-ace`, `claude-ace`,
+  `agy-ace`, `gemini-ace`, and/or `opencode-ace` symlinks in
   `~/.local/bin`.
 - Instance name: only needed when the user already has another Agent Context Engine
   installation or wants prefixed commands.
@@ -56,7 +76,7 @@ defaults before writing files:
 Reasonable defaults:
 
 - Target root: the cloned repository if the user wants a self-contained trial;
-  otherwise another explicit workspace folder, while the runtime storage default stays `~/.agent-context-engine/instances/default/memory`.
+  otherwise another explicit workspace folder, while the runtime storage default stays `~/.agent-context-engine/memory`.
 - Preferred interaction language: English for public/default setups, or the
   user's preferred language when stated.
 - Harnesses: prepare Codex, Claude, Antigravity, and Gemini in the central
@@ -85,6 +105,24 @@ Agents must not execute that suggested command until the user has approved the
 suggested target, memory root, monitor port, wrapper naming, and whether an
 existing installation should be refreshed in place.
 
+When discovery suggests `repair_existing_installation` because a central target
+already exists, the agent should stay on the approval path: summarize the
+default central target, memory root, monitor port, wrapper naming, and whether
+the checkout remains unchanged. Do not infer install health from pre-approval
+checks that may be constrained by sandbox or home-directory permissions.
+
+Discovery now also consults the central monitor runtime registry at
+`~/.agent-context-engine/monitor-runtime.json`, which records monitor starts by
+instance, host, port, PID, and timestamps. Treat that registry as a conflict
+hint and visibility aid; it improves default port selection, but runtime socket
+checks still remain the final truth.
+
+Immediately before the installer writes the final monitor configuration, it
+also reconciles the chosen port again against active runtime entries and live
+port availability. Discovery therefore proposes a default, but the install step
+still has the final chance to shift the monitor port when the earlier proposal
+has gone stale.
+
 After discovery, the minimal guided entrypoint remains:
 
 ```sh
@@ -93,12 +131,12 @@ python3 scripts/agent_context_engine.py install
 
 Without explicit flags, `install` now keeps the source checkout as the source
 only and suggests the central default install root under
-`~/.agent-context-engine/instances/default/install`, keeps prompts in the
-detected user language where possible,
-offers safe public-checkout defaults such as the `-ace` wrapper suffix and
+`~/.agent-context-engine/install`, keeps prompts in the detected user language
+where possible, offers safe public-checkout defaults such as the `-ace`
+wrapper suffix, runtime bootstrap, disabled global PATH links by default, and
 delayed LaunchAgent installation, shows a final install-plan confirmation, and
-starts the local monitor at the end unless `--no-start-monitor` is used
-before writing files in interactive use.
+starts the local monitor at the end unless `--no-start-monitor` is used before
+writing files in interactive use.
 
 For an agent-driven non-interactive setup, prefer an explicit command:
 
@@ -111,11 +149,11 @@ python3 scripts/agent_context_engine.py install \
   --claude-workspace-root /path/to/actual/claude-workspace \
   --project "example=/path/to/example" \
   --wrapper-suffix ace \
-  --link-codex-memory \
-  --link-claude-memory \
-  --link-agy-memory \
-  --link-gemini-memory \
-  --link-opencode-memory \
+  --link-codex-ace \
+  --link-claude-ace \
+  --link-agy-ace \
+  --link-gemini-ace \
+  --link-opencode-ace \
   --no-interactive
 ```
 
@@ -123,21 +161,25 @@ For a second local installation, avoid replacing existing global commands:
 
 ```sh
 python3 scripts/agent_context_engine.py install \
-  --target /path/to/agent-memory-root \
+  --target /path/to/agent-context-engine-root \
   --language en \
   --instance-name client-a \
-  --link-codex-memory \
-  --link-claude-memory \
-  --link-agy-memory \
-  --link-gemini-memory \
-  --link-opencode-memory \
+  --link-codex-ace \
+  --link-claude-ace \
+  --link-agy-ace \
+  --link-gemini-ace \
+  --link-opencode-ace \
   --no-interactive
 ```
+
+That produces prefixed global commands such as `client-a-codex-ace`,
+`client-a-claude-ace`, `client-a-agy-ace`, `client-a-gemini-ace`, and
+`client-a-opencode-ace`.
 
 After install:
 
 ```sh
-cd /path/to/agent-memory-root
+cd /path/to/agent-context-engine-root
 ./docs/skills/agent-context-engine/scripts/agent-context-engine doctor
 ./docs/skills/agent-context-engine/scripts/agent-context-engine check-installation
 ./docs/skills/agent-context-engine/scripts/agent-context-engine launchagent-status
@@ -155,15 +197,15 @@ If a specific project should be activated for a client:
 ```sh
 ./docs/skills/agent-context-engine/scripts/agent-context-engine cursor-enable \
   --target /path/to/project \
-  --memory-root /path/to/agent-memory-root
+  --memory-root /path/to/agent-context-engine-root
 ./docs/skills/agent-context-engine/scripts/agent-context-engine antigravity-enable \
   --target /path/to/project \
-  --memory-root /path/to/agent-memory-root
+  --memory-root /path/to/agent-context-engine-root
 ./docs/skills/agent-context-engine/scripts/agent-context-engine gemini-enable \
   --target /path/to/project
 ./docs/skills/agent-context-engine/scripts/agent-context-engine opencode-enable \
   --target /path/to/project \
-  --memory-root /path/to/agent-memory-root
+  --memory-root /path/to/agent-context-engine-root
 ```
 
 ## Start Commands
@@ -171,31 +213,31 @@ If a specific project should be activated for a client:
 Codex:
 
 ```sh
-codex-memory
+codex-ace
 ```
 
 Claude Code:
 
 ```sh
-claude-memory
+claude-ace
 ```
 
 Antigravity CLI:
 
 ```sh
-agy-memory
+agy-ace
 ```
 
 Gemini CLI:
 
 ```sh
-gemini-memory
+gemini-ace
 ```
 
 OpenCode:
 
 ```sh
-opencode-memory
+opencode-ace
 ```
 
 Cursor IDE:
@@ -223,7 +265,7 @@ If `doctor` or `check-installation` reports missing Codex, Claude, or Cursor
 binaries, keep the distinction explicit:
 
 - GUI-only hook activation may still work for a prepared workspace root.
-- headless features such as `codex-memory`, `claude-memory`, monitor ask, dream
+- headless features such as `codex-ace`, `claude-ace`, monitor ask, dream
   runners, and CLI-driven repair paths still require the corresponding CLI on
   the machine.
 - `install` should therefore capture the intended workflow runners up front via

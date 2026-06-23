@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import socket
 import shutil
 import subprocess
@@ -14,7 +15,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import quote
 
-from ....infrastructure.config import DEFAULT_STORAGE_SCHEMA_VERSION, ROOT, SKILL_ROOT, safe_slug, sh_quote
+from ....infrastructure.config import DEFAULT_STORAGE_SCHEMA_VERSION, ROOT, ROOT_ENV_VAR, SKILL_ROOT, safe_slug, sh_quote
 from ....application.installation import (
     ensure_monitor_frontend_build,
     ensure_runtime_venv,
@@ -30,20 +31,26 @@ from ....application.instance_profile import (
     WORKFLOW_LABELS,
     WORKFLOW_RUNNER_DEFAULTS,
     _utc_timestamp,
+    active_monitor_runtime_entries,
     default_instance_install_root,
     default_user_storage_root,
     ensure_storage_profile,
     instance_metadata_path_for_root,
     installation_profile_path,
     load_installation_profile,
+    load_link_registry,
+    mark_monitor_runtime_entries_stopped,
     load_user_config,
     load_storage_profile,
     merge_user_config,
     merge_installation_profile,
     monitor_restart_command,
+    record_link_registry_entry,
     resolve_storage_profile,
     storage_profile_path,
     sync_instance_metadata,
+    link_registry_path,
+    user_cli_link_path,
     user_config_path,
 )
 from ....adapters.launchagent import DEFAULT_ENV_FILE, DEFAULT_LABEL, launch_agent_path, launchagent_runtime_status
@@ -71,6 +78,44 @@ def copy_text(src: Path, dest: Path, replacements: dict[str, str] | None = None)
         text = text.replace(key, value)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text, encoding="utf-8")
+
+
+def ensure_user_cli_link(target: Path, *, force: bool) -> Path:
+    link_path = user_cli_link_path()
+    cli_target = (target / agent_memory_cli_for_root(target).replace("./", "")).resolve()
+    link_path.parent.mkdir(parents=True, exist_ok=True)
+    if link_path.exists() or link_path.is_symlink():
+        try:
+            existing = link_path.resolve(strict=False)
+        except OSError:
+            existing = None
+        if existing == cli_target:
+            record_link_registry_entry(
+                logical_name=link_path.name,
+                link_kind="user_cli_shortcut",
+                path=link_path,
+                target=cli_target,
+                status="linked",
+                installation_root=target,
+                command_name=link_path.name,
+            )
+            return link_path
+        if not force:
+            raise FileExistsError(f"user CLI shortcut already exists and points elsewhere: {link_path} -> {existing or '<unresolved>'}")
+        if link_path.is_dir() and not link_path.is_symlink():
+            raise FileExistsError(f"user CLI shortcut path is an existing directory: {link_path}")
+        link_path.unlink()
+    link_path.symlink_to(cli_target)
+    record_link_registry_entry(
+        logical_name=link_path.name,
+        link_kind="user_cli_shortcut",
+        path=link_path,
+        target=cli_target,
+        status="linked",
+        installation_root=target,
+        command_name=link_path.name,
+    )
+    return link_path
 
 
 LANGUAGE_LABELS = {
@@ -109,17 +154,72 @@ def _recommended_memory_root_source_text(source: str) -> str:
     return mapping.get(source, source or "detected")
 
 
+def _default_global_wrapper_links() -> list[str]:
+    return list(GLOBAL_WRAPPERS)
+
+
+def _link_flag_enabled(args: argparse.Namespace, flag_name: str, *, default: bool = True) -> bool:
+    value = getattr(args, flag_name, None)
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _checkout_change_mode_text(*, checkout_root: Path, target_root: Path, language: str) -> str:
+    if checkout_root.resolve() == target_root.resolve():
+        return _ui_text(
+            language,
+            en="installing into this checkout",
+            de="Installation direkt in dieses Checkout",
+        )
+    return _ui_text(
+        language,
+        en="this checkout stays unchanged; install writes into the central user root",
+        de="dieses Checkout bleibt unveraendert; die Installation schreibt in den zentralen Nutzer-Root",
+    )
+
+
+def _monitor_port_reason_text(*, recommended_port: int, default_port: int, language: str) -> str:
+    if recommended_port == default_port:
+        return _ui_text(language, en="default port", de="Standard-Port")
+    return _ui_text(
+        language,
+        en=f"adjusted because {default_port} is already reserved or busy",
+        de=f"angepasst, weil {default_port} bereits reserviert oder belegt ist",
+    )
+
+
 GLOBAL_WRAPPERS = (
-    "codex-memory",
-    "claude-memory",
-    "agy-memory",
-    "gemini-memory",
-    "opencode-memory",
+    "codex-ace",
+    "claude-ace",
+    "agy-ace",
+    "gemini-ace",
+    "opencode-ace",
 )
 
 LEGACY_GLOBAL_WRAPPERS = (
-    "antigravity-memory",
+    "antigravity-ace",
 )
+
+PUBLIC_WRAPPER_NAME_TO_SCRIPT = {
+    "codex-memory": "codex-ace",
+    "claude-memory": "claude-ace",
+    "agy-memory": "agy-ace",
+    "antigravity-memory": "antigravity-ace",
+    "gemini-memory": "gemini-ace",
+    "opencode-memory": "opencode-ace",
+    "codex-ace": "codex-ace",
+    "claude-ace": "claude-ace",
+    "agy-ace": "agy-ace",
+    "antigravity-ace": "antigravity-ace",
+    "gemini-ace": "gemini-ace",
+    "opencode-ace": "opencode-ace",
+}
+
+
+def _normalize_wrapper_script_name(name: str) -> str:
+    normalized = str(name or "").strip()
+    return PUBLIC_WRAPPER_NAME_TO_SCRIPT.get(normalized, normalized)
 
 PUBLIC_CHECKOUT_NAME_HINTS = {
     "agent-context-engine",
@@ -205,6 +305,27 @@ def _environment_language(default: str = "en") -> str:
     return default
 
 
+def _resolved_discovery_language(
+    *,
+    checkout_root: Path,
+    user_config: dict[str, object],
+    language_hint: str | None = None,
+) -> tuple[str, str]:
+    explicit = str(language_hint or "").strip()
+    if explicit:
+        return normalize_language(explicit), "explicit"
+    target_language = installation_language_for_target(target=checkout_root, default="")
+    if target_language:
+        return normalize_language(target_language), "checkout_installation"
+    env_language = _environment_language("")
+    if env_language:
+        return normalize_language(env_language), "environment"
+    configured = str(user_config.get("default_language") or "").strip().lower()
+    if configured:
+        return normalize_language(configured), "user_config_default_language"
+    return "en", "fallback_default"
+
+
 def _command_script_for_root(root: Path) -> str:
     if (root / "scripts" / "agent_context_engine.py").exists():
         return "python3 scripts/agent_context_engine.py"
@@ -228,7 +349,7 @@ def _is_public_checkout_name(name: str) -> bool:
 
 def _public_wrapper_suffix_for_checkout(path: Path) -> str:
     normalized = safe_slug(path.name).strip("-")
-    if normalized in {"agent-context-engine", "agent-memory-public"}:
+    if normalized in {"agent-context-engine", "agent-context-engine-public", "agent-memory-public"}:
         return "-ace"
     parts = [part for part in normalized.split("-") if part]
     acronym = "".join(part[0] for part in parts[:4])
@@ -248,9 +369,6 @@ def _checkout_root_from_path(start: Path) -> Path:
 def _paired_checkout(path: Path) -> Path | None:
     name = path.name
     lowered = name.lower()
-    if lowered == "agent-context-engine":
-        candidate = path.parent / "agent-memory"
-        return candidate if candidate.exists() else None
     if lowered == "agent-memory":
         candidate = path.parent / "agent-context-engine"
         if candidate.exists():
@@ -334,8 +452,15 @@ def _discovered_memory_root_candidates(current_root: Path) -> list[dict[str, obj
     return candidates
 
 
-def _known_monitor_ports(*, checkout_root: Path, target_root: Path, user_config: dict[str, object]) -> set[tuple[str, int]]:
+def _known_monitor_ports(
+    *,
+    checkout_root: Path,
+    target_root: Path,
+    target_memory_root: Path | None,
+    user_config: dict[str, object],
+) -> set[tuple[str, int]]:
     reserved: set[tuple[str, int]] = set()
+    normalized_target_memory_root = str(target_memory_root.resolve()) if target_memory_root is not None else ""
     candidate_roots: list[Path] = []
     seen: set[Path] = set()
     for candidate in _discovery_installation_roots(checkout_root):
@@ -356,6 +481,10 @@ def _known_monitor_ports(*, checkout_root: Path, target_root: Path, user_config:
     for root in candidate_roots:
         if root == target_root and not installation_profile_path(root).exists():
             continue
+        root_storage = resolve_storage_profile(root)
+        root_memory_root = str(root_storage.get("memory_root") or "").strip()
+        if normalized_target_memory_root and root != target_root and root_memory_root == normalized_target_memory_root:
+            continue
         monitor = dict(load_installation_profile(root).get("monitor") or {})
         host = str(monitor.get("host") or DEFAULT_MONITOR_HOST).strip() or DEFAULT_MONITOR_HOST
         try:
@@ -363,6 +492,18 @@ def _known_monitor_ports(*, checkout_root: Path, target_root: Path, user_config:
         except (TypeError, ValueError):
             continue
         reserved.add((host, port))
+    for entry in active_monitor_runtime_entries():
+        host = str(entry.get("active_host") or entry.get("configured_host") or DEFAULT_MONITOR_HOST).strip() or DEFAULT_MONITOR_HOST
+        entry_memory_root = str(entry.get("memory_root") or "").strip()
+        entry_installation_root = str(entry.get("installation_root") or "").strip()
+        if normalized_target_memory_root and entry_installation_root != str(target_root.resolve()) and entry_memory_root == normalized_target_memory_root:
+            continue
+        try:
+            port = max(1, min(int(entry.get("active_port") or entry.get("configured_port") or 0), 65535))
+        except (TypeError, ValueError):
+            continue
+        if port:
+            reserved.add((host, port))
     return reserved
 
 
@@ -375,7 +516,83 @@ def _next_monitor_port(preferred: int, *, host: str = DEFAULT_MONITOR_HOST, rese
             continue
         if _port_conflict_status(host, port)["available"]:
             return port
+    for port in range(max(1, preferred - 50), preferred):
+        if (host, port) in reserved:
+            continue
+        if _port_conflict_status(host, port)["available"]:
+            return port
     return preferred
+
+
+def _resolve_final_monitor_port(
+    *,
+    checkout_root: Path,
+    target_root: Path,
+    target_memory_root: Path,
+    host: str,
+    requested_port: int,
+    user_config: dict[str, object],
+) -> tuple[int, str]:
+    active_entries = [entry for entry in active_monitor_runtime_entries() if isinstance(entry, dict)]
+    reserved_other: set[tuple[str, int]] = set()
+    same_target_active = False
+    normalized_target = str(target_root.resolve())
+    normalized_target_memory_root = str(target_memory_root.resolve())
+    for entry in active_entries:
+        entry_root = str(entry.get("installation_root") or "").strip()
+        entry_memory_root = str(entry.get("memory_root") or "").strip()
+        entry_host = str(entry.get("active_host") or entry.get("configured_host") or DEFAULT_MONITOR_HOST).strip() or DEFAULT_MONITOR_HOST
+        try:
+            entry_port = max(1, min(int(entry.get("active_port") or entry.get("configured_port") or 0), 65535))
+        except (TypeError, ValueError):
+            continue
+        if not entry_port:
+            continue
+        if entry_root == normalized_target and entry_host == host and entry_port == requested_port:
+            same_target_active = True
+            continue
+        if entry_root != normalized_target and entry_memory_root == normalized_target_memory_root:
+            continue
+        if entry_root != normalized_target:
+            reserved_other.add((entry_host, entry_port))
+
+    port_status = _port_conflict_status(host, requested_port)
+    if (host, requested_port) not in reserved_other and (port_status["available"] or same_target_active):
+        return requested_port, ""
+
+    reserved_known = _known_monitor_ports(
+        checkout_root=checkout_root,
+        target_root=target_root,
+        target_memory_root=target_memory_root,
+        user_config=user_config,
+    )
+    reserved_known.update(reserved_other)
+    resolved_port = _next_monitor_port(requested_port, host=host, reserved_ports=reserved_known)
+    if resolved_port == requested_port:
+        return requested_port, ""
+    if (host, requested_port) in reserved_other:
+        reason = f"reserved by another active monitor runtime entry on {host}:{requested_port}"
+    elif not port_status["available"]:
+        reason = str(port_status["error"] or f"{host}:{requested_port} is not currently bindable")
+    else:
+        reason = f"reserved during final install reconciliation on {host}:{requested_port}"
+    return resolved_port, reason
+
+
+def _acceptable_wrapper_targets(checkout_root: Path, wrapper_name: str) -> set[Path]:
+    candidates = {
+        checkout_root / "scripts" / wrapper_name,
+        checkout_root / "docs" / "skills" / "agent-context-engine" / "scripts" / wrapper_name,
+        checkout_root / "docs" / "skills" / "agent-memory" / "scripts" / wrapper_name,
+    }
+    resolved: set[Path] = set()
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                resolved.add(candidate.resolve())
+        except OSError:
+            continue
+    return resolved
 
 
 def _wrapper_conflicts(*, checkout_root: Path, prefix: str, suffix: str) -> list[dict[str, object]]:
@@ -386,9 +603,8 @@ def _wrapper_conflicts(*, checkout_root: Path, prefix: str, suffix: str) -> list
         if not resolved:
             continue
         resolved_path = Path(resolved).expanduser().resolve()
-        candidate_target = wrapper_script_path(checkout_root, wrapper_name)
-        expected_target = candidate_target.resolve() if candidate_target.exists() else None
-        points_to_current = expected_target is not None and resolved_path == expected_target
+        acceptable_targets = _acceptable_wrapper_targets(checkout_root, wrapper_name)
+        points_to_current = resolved_path in acceptable_targets
         conflicts.append(
             {
                 "wrapper": wrapper_name,
@@ -402,7 +618,7 @@ def _wrapper_conflicts(*, checkout_root: Path, prefix: str, suffix: str) -> list
 
 
 def _launchagent_identity_status(*, label: str, env_file: str, plist_path: str) -> dict[str, object]:
-    status = launchagent_runtime_status(label=label, env_file=env_file, plist_path=plist_path)
+    status = launchagent_runtime_status(label=label, env_file=env_file, plist_path=plist_path, root=ROOT)
     return {
         "label": label,
         "plist_path": plist_path,
@@ -414,24 +630,46 @@ def _launchagent_identity_status(*, label: str, env_file: str, plist_path: str) 
     }
 
 
+def _launchagent_identity_for_target(
+    *,
+    checkout_role: str,
+    target_root: Path,
+    recommended_memory_root: str,
+) -> tuple[str, str, str]:
+    if installation_profile_path(target_root).exists():
+        launchagent = dict(load_installation_profile(target_root).get("launchagent") or {})
+        label = str(launchagent.get("label") or "").strip()
+        path = str(launchagent.get("path") or "").strip()
+        env_file = str(launchagent.get("env_file") or "").strip()
+        if label and path and env_file:
+            return label, env_file, path
+    label = (
+        f"{DEFAULT_LABEL.rsplit('.', 1)[0]}.{safe_slug(target_root.name)}"
+        if checkout_role in {"public_checkout", "fresh_installation_candidate", "unknown_checkout"}
+        else DEFAULT_LABEL
+    )
+    fallback_memory_root = Path(recommended_memory_root).expanduser().resolve() if recommended_memory_root else (target_root / "memory").resolve()
+    env_file = _default_launchagent_env_file_for_storage(fallback_memory_root)
+    return label, env_file, str(launch_agent_path(label))
+
+
 def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_root_hint: str | None = None, language_hint: str | None = None) -> dict[str, object]:
     checkout_root = _checkout_root_from_path(start)
     role = _checkout_role(checkout_root)
     if target_hint is not None:
         target_root = target_hint.expanduser().resolve()
-    elif role == "existing_installation":
-        target_root = checkout_root
     else:
-        target_root = _default_home_install_root()
+        target_root = checkout_root
     paired = _paired_checkout(checkout_root)
     memory_candidates = _discovered_memory_root_candidates(checkout_root)
     user_config = load_user_config()
+    has_user_config = user_config_path().exists()
     recommended_memory_root = str(memory_root_hint or "").strip()
     recommended_memory_root_source = "explicit"
     if not recommended_memory_root:
         configured_default_root = str(user_config.get("default_memory_root") or "").strip()
         default_home_root = _default_home_memory_root()
-        if configured_default_root:
+        if configured_default_root and has_user_config:
             recommended_memory_root = str(Path(configured_default_root).expanduser().resolve())
             recommended_memory_root_source = "user_config_default_memory_root"
         else:
@@ -442,17 +680,24 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
                 recommended_memory_root_source = "default_home_root_existing"
             else:
                 recommended_memory_root_source = "default_home_root"
-    language = normalize_language(
-        language_hint
-        or str(user_config.get("default_language") or "").strip().lower()
-        or installation_language_for_target(target=checkout_root, default=_environment_language("en"))
+    language, language_source = _resolved_discovery_language(
+        checkout_root=checkout_root,
+        user_config=user_config,
+        language_hint=language_hint,
     )
     monitor_host = str(user_config.get("default_monitor_host") or DEFAULT_MONITOR_HOST).strip() or DEFAULT_MONITOR_HOST
     try:
         monitor_port = max(1, min(int(user_config.get("default_monitor_port") or DEFAULT_MONITOR_PORT), 65535))
     except (TypeError, ValueError):
         monitor_port = DEFAULT_MONITOR_PORT
-    reserved_monitor_ports = _known_monitor_ports(checkout_root=checkout_root, target_root=target_root, user_config=user_config)
+    discovery_memory_root = Path(recommended_memory_root).expanduser().resolve() if recommended_memory_root else (target_root / "memory").resolve()
+    reserved_monitor_ports = _known_monitor_ports(
+        checkout_root=checkout_root,
+        target_root=target_root,
+        target_memory_root=discovery_memory_root,
+        user_config=user_config,
+    )
+    active_monitor_entries = active_monitor_runtime_entries()
     recommended_port = _next_monitor_port(monitor_port, host=monitor_host, reserved_ports=reserved_monitor_ports)
     recommended_wrapper_prefix = str(user_config.get("default_wrapper_prefix") or "").strip()
     recommended_wrapper_suffix = str(user_config.get("default_wrapper_suffix") or "").strip()
@@ -469,6 +714,23 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
         launchagent_recommended = False
     current_installation_exists = installation_profile_path(target_root).exists()
     if current_installation_exists:
+        target_monitor = dict(load_installation_profile(target_root).get("monitor") or {})
+        target_host = str(target_monitor.get("host") or monitor_host).strip() or monitor_host
+        try:
+            target_port = max(1, min(int(target_monitor.get("port") or monitor_port), 65535))
+        except (TypeError, ValueError):
+            target_port = monitor_port
+        target_entry_active = any(
+            str(entry.get("installation_root") or "").strip() == str(target_root.resolve())
+            and str(entry.get("active_host") or entry.get("configured_host") or DEFAULT_MONITOR_HOST).strip() == target_host
+            and int(entry.get("active_port") or entry.get("configured_port") or 0) == target_port
+            for entry in active_monitor_entries
+            if isinstance(entry, dict)
+        )
+        target_port_status = _port_conflict_status(target_host, target_port)
+        if target_entry_active or target_port_status["available"]:
+            recommended_port = target_port
+    if current_installation_exists:
         recommended_install_mode = "repair_existing_installation"
     elif recommended_memory_root_source in {"default_home_root", "explicit"} and not Path(recommended_memory_root).exists():
         recommended_install_mode = "fresh_installation"
@@ -476,10 +738,11 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
         recommended_install_mode = "install_with_existing_memory_root"
     else:
         recommended_install_mode = "fresh_installation"
-    launchagent_label = f"{DEFAULT_LABEL.rsplit('.', 1)[0]}.{safe_slug(target_root.name)}" if role in {"public_checkout", "fresh_installation_candidate", "unknown_checkout"} else DEFAULT_LABEL
-    fallback_memory_root = Path(recommended_memory_root).expanduser().resolve() if recommended_memory_root else (target_root / "memory").resolve()
-    launchagent_env_file = _default_launchagent_env_file_for_storage(fallback_memory_root)
-    launchagent_path_text = str(launch_agent_path(launchagent_label))
+    launchagent_label, launchagent_env_file, launchagent_path_text = _launchagent_identity_for_target(
+        checkout_role=role,
+        target_root=target_root,
+        recommended_memory_root=recommended_memory_root,
+    )
     wrapper_conflicts = _wrapper_conflicts(checkout_root=checkout_root, prefix=recommended_wrapper_prefix, suffix=recommended_wrapper_suffix)
     launchagent_identity = _launchagent_identity_status(label=launchagent_label, env_file=launchagent_env_file, plist_path=launchagent_path_text)
     recommended_plan = {
@@ -487,8 +750,10 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
         "memory_root_mode": "attach_existing" if recommended_memory_root else "new",
         "memory_root": recommended_memory_root,
         "monitor_port": recommended_port,
+        "monitor_port_revalidated_at_install": True,
         "wrapper_prefix": recommended_wrapper_prefix,
         "wrapper_suffix": recommended_wrapper_suffix,
+        "global_wrapper_links": _default_global_wrapper_links(),
         "install_launchagent": launchagent_recommended,
         "language": language,
         "install_mode": recommended_install_mode,
@@ -504,6 +769,7 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
         "paired_checkout": str(paired.resolve()) if paired is not None else "",
         "detected_source_checkout": str(paired.resolve()) if role == "public_checkout" and paired is not None else "",
         "reply_language": language,
+        "reply_language_source": language_source,
         "memory_root_candidates": memory_candidates,
         "recommended_memory_root": recommended_memory_root,
         "recommended_memory_root_source": recommended_memory_root_source if recommended_memory_root else "",
@@ -511,6 +777,7 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
         "recommended_monitor_host": monitor_host,
         "recommended_monitor_port": recommended_port,
         "default_monitor_port": monitor_port,
+        "active_monitor_runtime_entries": active_monitor_entries,
         "recommended_wrapper_prefix": recommended_wrapper_prefix,
         "recommended_wrapper_suffix": recommended_wrapper_suffix,
         "recommended_install_launchagent": launchagent_recommended,
@@ -523,6 +790,14 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
 
 def _render_install_discovery(summary: dict[str, object], *, language: str | None = None) -> str:
     lang = normalize_language(language or str(summary.get("reply_language") or "en"))
+    checkout_root = Path(str(summary["checkout_root"])).expanduser().resolve()
+    target_root = Path(str(summary["target_root"])).expanduser().resolve()
+    language_source = str(summary.get("reply_language_source") or "unknown")
+    monitor_reason = _monitor_port_reason_text(
+        recommended_port=int(summary["recommended_monitor_port"]),
+        default_port=int(summary.get("default_monitor_port") or DEFAULT_MONITOR_PORT),
+        language=lang,
+    )
     lines = [
         _ui_text(lang, en="Installation discovery", de="Installations-Discovery"),
         f"- {_ui_text(lang, en='checkout root', de='Checkout-Root')}: {summary['checkout_root']}",
@@ -530,11 +805,17 @@ def _render_install_discovery(summary: dict[str, object], *, language: str | Non
         f"- {_ui_text(lang, en='recommended mode', de='Empfohlener Modus')}: {summary['recommended_install_mode']}",
         f"- {_ui_text(lang, en='suggested target', de='Vorgeschlagenes Ziel')}: {summary['target_root']}",
         f"- {_ui_text(lang, en='reply language', de='Antwortsprache')}: {summary['reply_language']}",
-        f"- {_ui_text(lang, en='suggested monitor port', de='Vorgeschlagener Monitor-Port')}: {summary['recommended_monitor_host']}:{summary['recommended_monitor_port']}",
+        f"- {_ui_text(lang, en='reply language source', de='Quelle der Antwortsprache')}: {language_source}",
+        f"- {_ui_text(lang, en='checkout change mode', de='Checkout-Aenderungsmodus')}: {_checkout_change_mode_text(checkout_root=checkout_root, target_root=target_root, language=lang)}",
+        f"- {_ui_text(lang, en='suggested monitor port', de='Vorgeschlagener Monitor-Port')}: {summary['recommended_monitor_host']}:{summary['recommended_monitor_port']} ({monitor_reason})",
         f"- {_ui_text(lang, en='suggested wrapper prefix', de='Vorgeschlagenes Wrapper-Prefix')}: {summary['recommended_wrapper_prefix'] or '-'}",
         f"- {_ui_text(lang, en='suggested wrapper suffix', de='Vorgeschlagenes Wrapper-Suffix')}: {summary['recommended_wrapper_suffix'] or '-'}",
-        f"- {_ui_text(lang, en='suggested launchagent install', de='Empfohlene LaunchAgent-Installation')}: "
-        + _ui_text(lang, en="yes" if summary["recommended_install_launchagent"] else "later", de="ja" if summary["recommended_install_launchagent"] else "spaeter"),
+        f"- {_ui_text(lang, en='global PATH wrapper links', de='Globale PATH-Wrapper-Links')}: "
+        + ", ".join(_default_global_wrapper_links()),
+        f"- {_ui_text(lang, en='launchagent install/load in this plan', de='LaunchAgent-Installation/Laden in diesem Plan')}: "
+        + _ui_text(lang, en="enabled by default" if summary["recommended_install_launchagent"] else "deferred by default", de="standardmaessig aktiv" if summary["recommended_install_launchagent"] else "standardmaessig spaeter"),
+        f"- {_ui_text(lang, en='runtime bootstrap', de='Runtime-Bootstrap')}: {_ui_text(lang, en='yes', de='ja')}",
+        f"- {_ui_text(lang, en='monitor startup after install', de='Monitorstart nach der Installation')}: {_ui_text(lang, en='yes', de='ja')}",
         f"- {_ui_text(lang, en='user confirmation required', de='Nutzerfreigabe erforderlich')}: "
         + _ui_text(lang, en="yes", de="ja"),
     ]
@@ -557,6 +838,14 @@ def _render_install_discovery(summary: dict[str, object], *, language: str | Non
             f"- {_ui_text(lang, en='suggested memory root', de='Vorgeschlagener Memory-Root')}: "
             + f"{recommended_memory_root} ({source_text})"
         )
+        lines.append(
+            f"- {_ui_text(lang, en='runtime storage behavior', de='Runtime-Storage-Verhalten')}: "
+            + _ui_text(
+                lang,
+                en="this install reuses the central runtime storage unless you override --memory-root",
+                de="diese Installation nutzt den zentralen Runtime-Storage weiter, solange du --memory-root nicht ueberschreibst",
+            )
+        )
     candidates = list(summary.get("memory_root_candidates") or [])
     if candidates:
         lines.append(_ui_text(lang, en="- discovered memory roots:", de="- erkannte Memory-Roots:"))
@@ -573,6 +862,17 @@ def _render_install_discovery(summary: dict[str, object], *, language: str | Non
         lines.append(_ui_text(lang, en="- wrapper conflicts:", de="- Wrapper-Konflikte:"))
         for item in wrapper_conflicts[:5]:
             lines.append(f"  - {item['command_name']} -> {item['resolved_path']}")
+    active_monitors = [item for item in list(summary.get("active_monitor_runtime_entries") or []) if isinstance(item, dict)]
+    if active_monitors:
+        lines.append(_ui_text(lang, en="- active monitor runtime entries:", de="- aktive Monitor-Runtime-Eintraege:"))
+        for item in active_monitors[:5]:
+            lines.append(
+                "  - "
+                + f"{item.get('instance_id') or 'unknown'} "
+                + f"{item.get('active_host') or item.get('configured_host') or DEFAULT_MONITOR_HOST}:"
+                + f"{item.get('active_port') or item.get('configured_port') or 0} "
+                + f"[pid={item.get('pid') or 0}, status={item.get('status') or 'unknown'}]"
+            )
     lines.append("")
     lines.append(
         _ui_text(
@@ -581,6 +881,21 @@ def _render_install_discovery(summary: dict[str, object], *, language: str | Non
             de="Vorgeschlagenes Ziel, Memory-Root, Monitor-Port, Wrapper-Namensschema oder Refresh-Modus erst nach ausdruecklicher Nutzerfreigabe anwenden.",
         )
     )
+    lines.append(
+        _ui_text(
+            lang,
+            en="The proposed monitor port is a discovery default; the installer revalidates it again immediately before writing config.",
+            de="Der vorgeschlagene Monitor-Port ist ein Discovery-Default; der Installer validiert ihn unmittelbar vor dem Schreiben der Konfiguration erneut.",
+        )
+    )
+    if str(summary.get("reply_language") or "") == "en" and language_source in {"user_config_default_language", "fallback_default"}:
+        lines.append(
+            _ui_text(
+                lang,
+                en="Language warning: English was inferred from saved defaults or fallback. If the user asked in another language, rerun install-discovery with --language de or --language en explicitly.",
+                de="Sprachwarnung: Englisch wurde aus gespeicherten Defaults oder per Fallback abgeleitet. Wenn der Nutzer in einer anderen Sprache gefragt hat, install-discovery explizit mit --language de oder --language en neu starten.",
+            )
+        )
     return "\n".join(lines)
 
 
@@ -594,20 +909,31 @@ def _guided_install_plan(summary: dict[str, object], args: argparse.Namespace) -
     wrapper_prefix = str(getattr(args, "wrapper_prefix", None) or summary.get("recommended_wrapper_prefix") or "").strip()
     wrapper_suffix = str(getattr(args, "wrapper_suffix", None) or summary.get("recommended_wrapper_suffix") or "").strip()
     install_launchagent = bool(getattr(args, "install_launchagent", summary.get("recommended_install_launchagent", True)))
+    bootstrap_runtime = bool(getattr(args, "bootstrap_runtime", True))
+    start_monitor = bool(getattr(args, "start_monitor", True))
     language = normalize_language(str(getattr(args, "language", None) or summary.get("reply_language") or "en"))
-    install_mode = str(summary.get("recommended_install_mode") or "fresh_installation")
+    effective_memory_root = (
+        Path(memory_root_text).expanduser().resolve()
+        if memory_root_text
+        else _default_storage_root_for_install(target_root, args)
+    )
+    install_mode = "fresh_installation"
     if installation_profile_path(target_root).exists():
         install_mode = "repair_existing_installation"
-    elif memory_root_text:
+    elif effective_memory_root.exists():
         install_mode = "install_with_existing_memory_root"
     return {
         "target_root": str(target_root),
         "memory_root_mode": "attach_existing" if memory_root_text else "new",
         "memory_root": memory_root_text,
         "monitor_port": monitor_port,
+        "monitor_port_revalidated_at_install": bool(summary.get("recommended_plan", {}).get("monitor_port_revalidated_at_install", True)),
         "wrapper_prefix": wrapper_prefix,
         "wrapper_suffix": wrapper_suffix,
+        "bootstrap_runtime": bootstrap_runtime,
         "install_launchagent": install_launchagent,
+        "start_monitor": start_monitor,
+        "global_wrapper_links": _linked_wrapper_specs(args),
         "language": language,
         "install_mode": install_mode,
         "detected_source_checkout": str(summary.get("detected_source_checkout") or ""),
@@ -633,8 +959,10 @@ def _render_install_plan(summary: dict[str, object], args: argparse.Namespace, *
     suffix = install_wrapper_suffix(args)
     monitor_host = str(getattr(args, "monitor_host", None) or summary.get("recommended_monitor_host") or DEFAULT_MONITOR_HOST).strip() or DEFAULT_MONITOR_HOST
     monitor_port = int(getattr(args, "monitor_port", None) or summary["recommended_monitor_port"])
-    install_launchagent = bool(getattr(args, "install_launchagent", summary.get("recommended_install_launchagent", True)))
-    install_mode = str(_guided_install_plan(summary, args).get("install_mode") or summary.get("recommended_install_mode") or "fresh_installation")
+    plan = _guided_install_plan(summary, args)
+    install_launchagent = bool(plan.get("install_launchagent"))
+    install_mode = str(plan.get("install_mode") or summary.get("recommended_install_mode") or "fresh_installation")
+    linked_wrappers = list(plan.get("global_wrapper_links") or [])
     lines = [
         _ui_text(language, en="Installation plan", de="Installationsplan"),
         f"- {_ui_text(language, en='mode', de='Modus')}: {install_mode}",
@@ -642,9 +970,27 @@ def _render_install_plan(summary: dict[str, object], args: argparse.Namespace, *
         f"- {_ui_text(language, en='memory root', de='Memory-Root')}: {memory_root}",
         f"- {_ui_text(language, en='monitor', de='Monitor')}: {monitor_host}:{monitor_port}",
         f"- {_ui_text(language, en='wrapper naming', de='Wrapper-Namensschema')}: prefix={prefix or '-'} suffix={suffix or '-'}",
+        f"- {_ui_text(language, en='global PATH wrapper links', de='Globale PATH-Wrapper-Links')}: "
+        + (", ".join(linked_wrappers) if linked_wrappers else _ui_text(language, en="disabled", de="deaktiviert")),
+        f"- {_ui_text(language, en='runtime bootstrap', de='Runtime-Bootstrap')}: "
+        + _ui_text(language, en="yes" if plan.get("bootstrap_runtime") else "no", de="ja" if plan.get("bootstrap_runtime") else "nein"),
+        f"- {_ui_text(language, en='monitor startup after install', de='Monitorstart nach der Installation')}: "
+        + _ui_text(language, en="yes" if plan.get("start_monitor") else "no", de="ja" if plan.get("start_monitor") else "nein"),
         f"- {_ui_text(language, en='install launchagent now', de='LaunchAgent jetzt installieren')}: "
         + _ui_text(language, en="yes" if install_launchagent else "later", de="ja" if install_launchagent else "spaeter"),
+        f"- {_ui_text(language, en='checkout change mode', de='Checkout-Aenderungsmodus')}: {_checkout_change_mode_text(checkout_root=Path(str(summary['checkout_root'])).expanduser().resolve(), target_root=target_root, language=language)}",
+        f"- {_ui_text(language, en='monitor port finalization', de='Finalisierung des Monitor-Ports')}: "
+        + _ui_text(language, en="revalidated immediately before writing config", de="wird unmittelbar vor dem Schreiben der Konfiguration erneut validiert"),
     ]
+    if install_mode == "repair_existing_installation":
+        lines.append(
+            f"- {_ui_text(language, en='existing install interpretation', de='Interpretation bestehender Installation')}: "
+            + _ui_text(
+                language,
+                en="the central target already looks like an existing managed install",
+                de="das zentrale Ziel sieht bereits wie eine bestehende verwaltete Installation aus",
+            )
+        )
     return "\n".join(lines)
 
 
@@ -653,7 +999,7 @@ def _run_post_install_checks(target: Path, *, language: str) -> dict[str, int]:
     doctor = subprocess.run(
         [str(cli_path), "doctor"],
         cwd=str(target),
-        env={**os.environ, "AGENT_MEMORY_ROOT": str(target)},
+        env={**os.environ, ROOT_ENV_VAR: str(target)},
         text=True,
         capture_output=True,
         check=False,
@@ -706,6 +1052,9 @@ def _recommended_install_command(summary: dict[str, object]) -> str:
         command.extend(["--wrapper-prefix", prefix])
     if suffix:
         command.extend(["--wrapper-suffix", suffix.lstrip("-")])
+    command.append("--bootstrap-runtime")
+    for wrapper_name in _default_global_wrapper_links():
+        command.append(f"--link-{wrapper_name}")
     if not bool(summary.get("recommended_install_launchagent", True)):
         command.append("--no-install-launchagent")
     return " ".join(command)
@@ -714,16 +1063,40 @@ def _recommended_install_command(summary: dict[str, object]) -> str:
 def _linked_wrapper_specs(args: argparse.Namespace) -> list[str]:
     wrappers: list[str] = []
     for flag_name, wrapper_name in [
-        ("link_codex_memory", "codex-memory"),
-        ("link_claude_memory", "claude-memory"),
-        ("link_agy_memory", "agy-memory"),
-        ("link_antigravity_memory", "antigravity-memory"),
-        ("link_gemini_memory", "gemini-memory"),
-        ("link_opencode_memory", "opencode-memory"),
+        ("link_codex_memory", "codex-ace"),
+        ("link_claude_memory", "claude-ace"),
+        ("link_agy_memory", "agy-ace"),
+        ("link_antigravity_memory", "antigravity-ace"),
+        ("link_gemini_memory", "gemini-ace"),
+        ("link_opencode_memory", "opencode-ace"),
     ]:
-        if getattr(args, flag_name):
+        if _link_flag_enabled(args, flag_name, default=wrapper_name != "antigravity-ace"):
             wrappers.append(wrapper_name)
     return wrappers
+
+
+def _verify_global_wrapper_links(*, args: argparse.Namespace, prefix: str, suffix: str) -> list[dict[str, str]]:
+    link_dir = Path(args.link_dir).expanduser().resolve()
+    results: list[dict[str, str]] = []
+    for wrapper_name in _linked_wrapper_specs(args):
+        command_name = link_command_name(wrapper_name, prefix, suffix)
+        link_path = link_dir / command_name
+        try:
+            target = str(link_path.resolve(strict=False)) if (link_path.exists() or link_path.is_symlink()) else ""
+        except OSError:
+            target = ""
+        resolved = shutil.which(command_name) or ""
+        results.append(
+            {
+                "wrapper_name": wrapper_name,
+                "command_name": command_name,
+                "link_path": str(link_path),
+                "link_exists": "yes" if (link_path.exists() or link_path.is_symlink()) else "no",
+                "target": target,
+                "path_resolved": resolved,
+            }
+        )
+    return results
 
 
 def _wrapper_start_hints(target: Path, args: argparse.Namespace) -> list[str]:
@@ -741,6 +1114,10 @@ def _wrapper_start_hints(target: Path, args: argparse.Namespace) -> list[str]:
             display = str(wrapper_path)
         hints.append(display)
     return hints
+
+
+def _default_launchagent_label_for_target(target: Path) -> str:
+    return f"{DEFAULT_LABEL.rsplit('.', 1)[0]}.{safe_slug(target.name)}"
 
 
 def _monitor_start_command(target: Path, *, runner: str, host: str, port: int, language: str) -> list[str]:
@@ -768,6 +1145,39 @@ def _open_monitor_howto(*, host: str, port: int, runner: str, language: str) -> 
     threading.Timer(0.35, lambda: webbrowser.open(url)).start()
 
 
+def _stop_superseded_monitors_for_memory_root(*, target: Path, memory_root: Path) -> list[str]:
+    normalized_target = str(target.resolve())
+    normalized_memory_root = str(memory_root.resolve())
+    actions: list[str] = []
+    affected = False
+    for entry in active_monitor_runtime_entries():
+        if not isinstance(entry, dict):
+            continue
+        entry_root = str(entry.get("installation_root") or "").strip()
+        entry_memory_root = str(entry.get("memory_root") or "").strip()
+        if entry_root == normalized_target or entry_memory_root != normalized_memory_root:
+            continue
+        pid = int(entry.get("pid") or 0)
+        if pid > 0:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                actions.append(f"terminated superseded monitor pid={pid} root={entry_root}")
+            except ProcessLookupError:
+                actions.append(f"superseded monitor already exited pid={pid} root={entry_root}")
+            except PermissionError:
+                actions.append(f"could not terminate superseded monitor pid={pid} root={entry_root}: permission denied")
+        affected = True
+    if affected:
+        time.sleep(0.35)
+        mark_monitor_runtime_entries_stopped(
+            memory_root=memory_root,
+            exclude_installation_root=target,
+            reason_status="superseded",
+        )
+        active_monitor_runtime_entries(prune=True)
+    return actions
+
+
 def _autostart_monitor_after_install(
     target: Path,
     *,
@@ -775,12 +1185,14 @@ def _autostart_monitor_after_install(
     host: str,
     port: int,
     language: str,
+    memory_root: Path,
 ) -> tuple[bool, str]:
+    stop_actions = _stop_superseded_monitors_for_memory_root(target=target, memory_root=memory_root)
     command = _monitor_start_command(target, runner=runner, host=host, port=port, language=language)
     process = subprocess.Popen(
         command,
         cwd=str(target),
-        env={**os.environ, "AGENT_MEMORY_ROOT": str(target)},
+        env={**os.environ, ROOT_ENV_VAR: str(target)},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -790,9 +1202,14 @@ def _autostart_monitor_after_install(
     )
     time.sleep(0.75)
     if process.poll() is None:
-        return True, f"pid={process.pid} command={monitor_restart_command(target, runner=runner)}"
+        detail = f"pid={process.pid} command={monitor_restart_command(target, runner=runner)}"
+        if stop_actions:
+            detail += " superseded_monitors=" + "; ".join(stop_actions)
+        return True, detail
     stdout, stderr = process.communicate(timeout=1)
     detail = (stderr or stdout).strip() or f"exit {process.returncode}"
+    if stop_actions:
+        detail += " superseded_monitors=" + "; ".join(stop_actions)
     return False, detail
 
 
@@ -935,7 +1352,7 @@ User-only controls:
 - `hooks-status`
 
 Monitor:
-- `{monitor_restart_command(resolved_memory_root, runner=monitor_runner)}`
+- `{command_prefix} monitor --runner {monitor_runner} --replace-existing`
 """
 
 
@@ -1443,7 +1860,7 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
     launchagent_label = str(launchagent_profile.get("label") or DEFAULT_LABEL).strip() or DEFAULT_LABEL
     launchagent_path = str(launchagent_profile.get("path") or launch_agent_path(launchagent_label)).strip() or str(launch_agent_path(launchagent_label))
     launchagent_env_file = str(launchagent_profile.get("env_file") or DEFAULT_ENV_FILE).strip() or DEFAULT_ENV_FILE
-    launchagent_status = launchagent_runtime_status(label=launchagent_label, env_file=launchagent_env_file, plist_path=launchagent_path)
+    launchagent_status = launchagent_runtime_status(label=launchagent_label, env_file=launchagent_env_file, plist_path=launchagent_path, root=root)
     expected_launchagent_path = str(launch_agent_path(launchagent_label))
     if launchagent_path != expected_launchagent_path and str((launchagent_status.get("installed") or {}).get("plist_path") or "") == expected_launchagent_path:
         findings.append(
@@ -1745,31 +2162,34 @@ def installation_language_for_target(*, target: Path, memory_root: Path | None =
 def agent_memory_script_for_root(memory_root: Path) -> str:
     if (memory_root / "scripts" / "agent_context_engine.py").exists():
         return "scripts/agent_context_engine.py"
-    if (memory_root / "scripts" / "agent_memory.py").exists():
-        return "scripts/agent_memory.py"
     return "docs/skills/agent-context-engine/scripts/agent_context_engine.py"
 
 
 def agent_memory_cli_for_root(memory_root: Path) -> str:
     if (memory_root / "scripts" / "agent-context-engine").exists():
         return "./scripts/agent-context-engine"
-    if (memory_root / "scripts" / "agent-memory").exists():
-        return "./scripts/agent-memory"
     return "./docs/skills/agent-context-engine/scripts/agent-context-engine"
 
 
 def agent_memory_cli_path_for_root(memory_root: Path) -> Path:
     if (memory_root / "scripts" / "agent-context-engine").exists():
         return memory_root / "scripts" / "agent-context-engine"
-    if (memory_root / "scripts" / "agent-memory").exists():
-        return memory_root / "scripts" / "agent-memory"
     nested = memory_root / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine"
     if nested.exists():
         return nested
-    return memory_root / "docs" / "skills" / "agent-memory" / "scripts" / "agent-memory"
+    return memory_root / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine"
 
 
 def agent_memory_command_prefix_for_target(target: Path, memory_root: Path) -> str:
+    user_cli = user_cli_link_path()
+    try:
+        if target.resolve().is_relative_to(user_cli.parent.resolve()):
+            return str(user_cli)
+    except AttributeError:
+        target_text = str(target.resolve())
+        parent_text = str(user_cli.parent.resolve())
+        if target_text == parent_text or target_text.startswith(parent_text + os.sep):
+            return str(user_cli)
     cli_path = agent_memory_cli_for_root(memory_root)
     if target.resolve() == memory_root.resolve():
         return cli_path
@@ -1801,7 +2221,7 @@ trap 'rm -f "$TMP" "$OUT" "$ERR"' EXIT
 cat > "$TMP"
 
 set +e
-env AGENT_MEMORY_ROOT="$MEMORY_ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${{AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}}" python3 "$MEMORY_ROOT/{script_rel}" log-hook --client cursor \\
+env AGENT_CONTEXT_ENGINE_ROOT="$MEMORY_ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${{AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}}" python3 "$MEMORY_ROOT/{script_rel}" log-hook --client cursor \\
   < "$TMP" \\
   > "$OUT" \\
   2> "$ERR"
@@ -1905,11 +2325,13 @@ def antigravity_hook_wrapper(memory_root: Path) -> str:
     return (
         template
         .replace("__AGENT_MEMORY_SCRIPT__", script_rel)
-        .replace("__AGENT_MEMORY_ROOT__", str(memory_root.resolve()))
+        .replace("__AGENT_CONTEXT_ENGINE_ROOT__", str(memory_root.resolve()))
     )
 
 
 def managed_install_conflicts(target: Path) -> list[Path]:
+    if _looks_like_agent_memory_checkout(target) and not installation_profile_path(target).exists():
+        return []
     return [target / relative for relative in MANAGED_INSTALL_PATHS if (target / relative).exists()]
 
 
@@ -1954,18 +2376,19 @@ def cmd_cursor_enable(args: argparse.Namespace) -> int:
 
 def cmd_antigravity_enable(args: argparse.Namespace) -> int:
     memory_root = Path(args.memory_root).expanduser().resolve() if args.memory_root else ROOT
+    install_root = ROOT
     if args.target:
         target = Path(args.target).expanduser().resolve()
         print(f"warning: project-specific Antigravity hooks are deprecated; use the global wrapper instead.")
-        print(f"  global wrapper: {agent_memory_cli_for_root(memory_root)} global-wrapper-enable agy-memory")
-        print(f"  run from anywhere: agy-memory")
+        print(f"  global wrapper: {agent_memory_cli_for_root(memory_root)} global-wrapper-enable agy-ace")
+        print(f"  run from anywhere: agy-ace")
         print(f"  requested target is unsupported in global-only mode: {target}")
     else:
-        target = memory_root
+        target = install_root
 
-    if target.resolve() != memory_root.resolve():
+    if target.resolve() != install_root.resolve():
         print(f"error: refusing to create project-specific Antigravity hooks in {target}")
-        print("Antigravity Agent Context Engine is now global-only. Use agy-memory to start Antigravity with hooks.")
+        print("Antigravity Agent Context Engine is now global-only. Use agy-ace to start Antigravity with hooks.")
         return 1
 
     command_prefix = agent_memory_command_prefix_for_target(target, memory_root)
@@ -1986,24 +2409,25 @@ def cmd_antigravity_enable(args: argparse.Namespace) -> int:
     for path in entrypoints:
         print(f"updated entrypoint: {path}")
     print(f"toggle command: {result.get('command') or integration_hook_command(client='antigravity', action='enable', target_root=target, root=memory_root)}")
-    print("next: ensure agy-memory is linked globally and start Antigravity with `agy-memory`")
+    print("next: ensure agy-ace is linked globally and start Antigravity with `agy-ace`")
     return 0
 
 
 def cmd_gemini_enable(args: argparse.Namespace) -> int:
     memory_root = Path(args.memory_root).expanduser().resolve() if getattr(args, "memory_root", None) else ROOT
+    install_root = ROOT
     if args.target:
         target = Path(args.target).expanduser().resolve()
         print(f"warning: project-specific Gemini hooks are deprecated; use the global wrapper instead.")
-        print(f"  global wrapper: {agent_memory_cli_for_root(memory_root)} global-wrapper-enable gemini-memory")
-        print(f"  run from anywhere: gemini-memory")
+        print(f"  global wrapper: {agent_memory_cli_for_root(memory_root)} global-wrapper-enable gemini-ace")
+        print(f"  run from anywhere: gemini-ace")
         print(f"  requested target is unsupported in global-only mode: {target}")
     else:
-        target = memory_root
+        target = install_root
 
-    if target.resolve() != memory_root.resolve():
+    if target.resolve() != install_root.resolve():
         print(f"error: refusing to create project-specific Gemini hooks in {target}")
-        print("Gemini Agent Context Engine is now global-only. Use gemini-memory to start Gemini with hooks.")
+        print("Gemini Agent Context Engine is now global-only. Use gemini-ace to start Gemini with hooks.")
         return 1
 
     command_prefix = agent_memory_command_prefix_for_target(target, memory_root)
@@ -2020,7 +2444,7 @@ def cmd_gemini_enable(args: argparse.Namespace) -> int:
     for path in entrypoints:
         print(f"updated entrypoint: {path}")
     print(f"toggle command: {result.get('command') or integration_hook_command(client='gemini', action='enable', target_root=target, root=target)}")
-    print("next: ensure gemini-memory is linked globally and start Gemini with `gemini-memory`")
+    print("next: ensure gemini-ace is linked globally and start Gemini with `gemini-ace`")
     return 0
 
 
@@ -2044,20 +2468,21 @@ def cmd_cursor_status(args: argparse.Namespace) -> int:
 
 def cmd_opencode_enable(args: argparse.Namespace) -> int:
     memory_root = Path(args.memory_root).expanduser().resolve() if args.memory_root else ROOT
+    install_root = ROOT
     if args.target:
         target = Path(args.target).expanduser().resolve()
         print(f"warning: project-specific OpenCode hooks are deprecated; use the global wrapper instead.")
-        print(f"  global wrapper: {agent_memory_cli_for_root(memory_root)} global-wrapper-enable opencode-memory")
-        print(f"  run from anywhere: opencode-memory [project]")
+        print(f"  global wrapper: {agent_memory_cli_for_root(memory_root)} global-wrapper-enable opencode-ace")
+        print(f"  run from anywhere: opencode-ace [project]")
         print(f"  requested target is unsupported in global-only mode: {target}")
     else:
-        target = memory_root
+        target = install_root
 
     # For global-only mode, the only plugin that should exist is inside the
-    # central Agent Memory root. Project-specific plugins are no longer created.
-    if target.resolve() != memory_root.resolve():
+    # central installation root. Project-specific plugins are no longer created.
+    if target.resolve() != install_root.resolve():
         print(f"error: refusing to create project-specific OpenCode plugin in {target}")
-        print("OpenCode Agent Context Engine is now global-only. Use opencode-memory to start OpenCode with hooks.")
+        print("OpenCode Agent Context Engine is now global-only. Use opencode-ace to start OpenCode with hooks.")
         return 1
 
     command_prefix = agent_memory_command_prefix_for_target(target, memory_root)
@@ -2079,7 +2504,7 @@ def cmd_opencode_enable(args: argparse.Namespace) -> int:
     for path in entrypoints:
         print(f"updated entrypoint: {path}")
     print(f"toggle command: {result.get('command') or integration_hook_command(client='opencode', action='enable', target_root=target, root=memory_root)}")
-    print("next: ensure opencode-memory is linked globally and start OpenCode with `opencode-memory [project]`")
+    print("next: ensure opencode-ace is linked globally and start OpenCode with `opencode-ace [project]`")
     return 0
 
 
@@ -2138,7 +2563,7 @@ def cmd_opencode_status(args: argparse.Namespace) -> int:
 def cmd_gemini_status(args: argparse.Namespace) -> int:
     if getattr(args, "target", None):
         print("warning: --target is deprecated for gemini-status; Gemini Agent Context Engine is global-only.")
-        print("use `gemini-memory` from any directory, or run `./scripts/agent-context-engine gemini-status` without --target.")
+        print("use `gemini-ace` from any directory, or run `./scripts/agent-context-engine gemini-status` without --target.")
     root = ROOT
     status = gemini_status(root=root, probe=bool(getattr(args, "probe", False)))
     print(f"client: {status['label']}")
@@ -2163,7 +2588,7 @@ def cmd_gemini_status(args: argparse.Namespace) -> int:
 def cmd_antigravity_status(args: argparse.Namespace) -> int:
     if getattr(args, "target", None):
         print("warning: --target is deprecated for antigravity-status; Antigravity Agent Context Engine is global-only.")
-        print("use `agy-memory` from any directory, or run `./scripts/agent-context-engine antigravity-status` without --target.")
+        print("use `agy-ace` from any directory, or run `./scripts/agent-context-engine antigravity-status` without --target.")
     root = ROOT
     status = antigravity_status(root=root)
     print(f"client: {status['label']}")
@@ -2404,7 +2829,7 @@ def install_wrapper_prefix(args: argparse.Namespace) -> str:
 def install_wrapper_suffix(args: argparse.Namespace) -> str:
     raw_suffix = getattr(args, "wrapper_suffix", None)
     if raw_suffix is None:
-        return ""
+        return "-ace"
     if raw_suffix and raw_suffix[0] not in "-_.":
         raw_suffix = "-" + raw_suffix
     suffix = safe_slug(raw_suffix)
@@ -2418,7 +2843,13 @@ def install_command_prefix(args: argparse.Namespace) -> str:
 
 
 def link_command_name(base: str, prefix: str, suffix: str = "") -> str:
-    return safe_slug(f"{prefix}{base}{suffix}")
+    rendered_base = base
+    if prefix or suffix:
+        if base.endswith("-memory"):
+            rendered_base = base[: -len("-memory")]
+        elif base.endswith("-ace"):
+            rendered_base = base[: -len("-ace")]
+    return safe_slug(f"{prefix}{rendered_base}{suffix}")
 
 
 def wrapper_script_path(root: Path, wrapper_name: str) -> Path:
@@ -2433,20 +2864,63 @@ def wrapper_script_path(root: Path, wrapper_name: str) -> Path:
     return root / "docs" / "skills" / "agent-memory" / "scripts" / wrapper_name
 
 
-def create_command_link(link_dir: Path, link_name: str, target: Path, *, force: bool) -> Path:
+def create_command_link(
+    link_dir: Path,
+    link_name: str,
+    target: Path,
+    *,
+    force: bool,
+    link_kind: str = "global_wrapper",
+    installation_root: Path | None = None,
+) -> Path:
     link = link_dir / link_name
     if link.exists() or link.is_symlink():
+        try:
+            existing = link.resolve(strict=False)
+        except OSError:
+            existing = None
+        if existing == target.resolve():
+            record_link_registry_entry(
+                logical_name=link_name,
+                link_kind=link_kind,
+                path=link,
+                target=target,
+                status="linked",
+                installation_root=installation_root,
+                command_name=link_name,
+            )
+            return link
         if not force:
             raise FileExistsError(f"link exists, use --force or a different --command-prefix: {link}")
+        if link.is_dir() and not link.is_symlink():
+            raise FileExistsError(f"cannot replace directory link target: {link}")
         link.unlink()
     link.symlink_to(target)
+    record_link_registry_entry(
+        logical_name=link_name,
+        link_kind=link_kind,
+        path=link,
+        target=target,
+        status="linked",
+        installation_root=installation_root,
+        command_name=link_name,
+    )
     return link
 
 
-def remove_command_link(link_dir: Path, link_name: str) -> Path:
+def remove_command_link(link_dir: Path, link_name: str, *, installation_root: Path | None = None) -> Path:
     link = link_dir / link_name
     if link.exists() or link.is_symlink():
         link.unlink()
+    record_link_registry_entry(
+        logical_name=link_name,
+        link_kind="global_wrapper",
+        path=link,
+        target=None,
+        status="removed",
+        installation_root=installation_root,
+        command_name=link_name,
+    )
     return link
 
 
@@ -2459,7 +2933,14 @@ def ensure_global_wrapper_link(link_dir: Path, wrapper_name: str, target_root: P
     if not target.exists():
         raise FileNotFoundError(f"missing wrapper script: {target}")
     link_name = link_command_name(wrapper_name, prefix, suffix)
-    return create_command_link(link_dir, link_name, target, force=force)
+    return create_command_link(
+        link_dir,
+        link_name,
+        target,
+        force=force,
+        link_kind="global_wrapper",
+        installation_root=target_root,
+    )
 
 
 def cmd_install(args: argparse.Namespace) -> int:
@@ -2642,7 +3123,31 @@ def cmd_install(args: argparse.Namespace) -> int:
     suffix = install_wrapper_suffix(args)
     monitor_host = str(getattr(args, "monitor_host", None) or DEFAULT_MONITOR_HOST).strip() or DEFAULT_MONITOR_HOST
     monitor_port = int(getattr(args, "monitor_port", None) or DEFAULT_MONITOR_PORT)
-    launchagent_label = str(getattr(args, "launchagent_label", None) or DEFAULT_LABEL).strip() or DEFAULT_LABEL
+    user_config = load_user_config()
+    resolved_monitor_port, monitor_port_adjust_reason = _resolve_final_monitor_port(
+        checkout_root=_checkout_root_from_path(Path.cwd()),
+        target_root=target,
+        target_memory_root=runtime_memory_root,
+        host=monitor_host,
+        requested_port=monitor_port,
+        user_config=user_config,
+    )
+    if resolved_monitor_port != monitor_port:
+        print(
+            _ui_text(
+                language,
+                en=(
+                    f"monitor port adjusted before install: {monitor_host}:{monitor_port} -> "
+                    f"{monitor_host}:{resolved_monitor_port} ({monitor_port_adjust_reason})"
+                ),
+                de=(
+                    f"Monitor-Port vor der Installation angepasst: {monitor_host}:{monitor_port} -> "
+                    f"{monitor_host}:{resolved_monitor_port} ({monitor_port_adjust_reason})"
+                ),
+            )
+        )
+        monitor_port = resolved_monitor_port
+    launchagent_label = str(getattr(args, "launchagent_label", None) or _default_launchagent_label_for_target(target)).strip() or _default_launchagent_label_for_target(target)
     launchagent_path = str(getattr(args, "launchagent_path", None) or launch_agent_path(launchagent_label)).strip() or str(launch_agent_path(launchagent_label))
     launchagent_env_file = str(getattr(args, "launchagent_env_file", None) or _default_launchagent_env_file_for_storage(runtime_memory_root)).strip() or _default_launchagent_env_file_for_storage(runtime_memory_root)
     codex_templates = SKILL_ROOT / "templates" / "codex-hooks"
@@ -2652,14 +3157,14 @@ def cmd_install(args: argparse.Namespace) -> int:
     copy_text(
         codex_templates / "hook_adapter.sh",
         target / ".codex" / "hooks" / "hook_adapter.sh",
-        {"__AGENT_MEMORY_SCRIPT__": script_abs, "__AGENT_MEMORY_ROOT__": root_abs},
+        {"__AGENT_MEMORY_SCRIPT__": script_abs, "__AGENT_CONTEXT_ENGINE_ROOT__": root_abs},
     )
     claude_templates = SKILL_ROOT / "templates" / "claude-hooks"
     copy_text(claude_templates / "settings.json", target / ".claude" / "settings.json")
     copy_text(
         claude_templates / "hook_adapter.sh",
         target / ".claude" / "hooks" / "hook_adapter.sh",
-        {"__AGENT_MEMORY_SCRIPT__": script_abs, "__AGENT_MEMORY_ROOT__": root_abs},
+        {"__AGENT_MEMORY_SCRIPT__": script_abs, "__AGENT_CONTEXT_ENGINE_ROOT__": root_abs},
     )
     antigravity_templates = SKILL_ROOT / "templates" / "antigravity-hooks"
     copy_text(
@@ -2672,7 +3177,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         target / ".agents" / "hooks" / "hook_adapter.sh",
         {
             "__AGENT_MEMORY_SCRIPT__": script_rel,
-            "__AGENT_MEMORY_ROOT__": str(target.resolve()),
+            "__AGENT_CONTEXT_ENGINE_ROOT__": str(target.resolve()),
         },
     )
     gemini_templates = SKILL_ROOT / "templates" / "gemini-hooks"
@@ -2680,7 +3185,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     copy_text(
         gemini_templates / "hook_adapter.sh",
         target / ".gemini" / "hooks" / "hook_adapter.sh",
-        {"__AGENT_MEMORY_SCRIPT__": script_abs, "__AGENT_MEMORY_ROOT__": root_abs},
+        {"__AGENT_MEMORY_SCRIPT__": script_abs, "__AGENT_CONTEXT_ENGINE_ROOT__": root_abs},
     )
     write_workspace_binding("codex", root=target, memory_root=target, written_by="install")
     write_workspace_binding("claude", root=target, memory_root=target, written_by="install")
@@ -2688,14 +3193,24 @@ def cmd_install(args: argparse.Namespace) -> int:
     agents_path = ensure_agents_memory_block(target, language=language, command_prefix=command_prefix)
     hook_entry_path = ensure_session_start_hook_entry(target, command_prefix=command_prefix, language=language, memory_root=target)
     entrypoints = ensure_harness_entrypoints(target)
+    ensure_opencode_project(
+        target,
+        memory_root=runtime_memory_root,
+    )
+    _run_integration_hook_action(client="opencode", action="enable", target=target, memory_root=runtime_memory_root)
+    try:
+        user_cli_link = ensure_user_cli_link(target, force=bool(args.force))
+    except FileExistsError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     for path in [
-        installed_skill / "scripts" / "agent-memory",
-        installed_skill / "scripts" / "codex-memory",
-        installed_skill / "scripts" / "claude-memory",
-        installed_skill / "scripts" / "agy-memory",
-        installed_skill / "scripts" / "antigravity-memory",
-        installed_skill / "scripts" / "gemini-memory",
-        installed_skill / "scripts" / "opencode-memory",
+        installed_skill / "scripts" / "agent-context-engine",
+        installed_skill / "scripts" / "codex-ace",
+        installed_skill / "scripts" / "claude-ace",
+        installed_skill / "scripts" / "agy-ace",
+        installed_skill / "scripts" / "antigravity-ace",
+        installed_skill / "scripts" / "gemini-ace",
+        installed_skill / "scripts" / "opencode-ace",
         target / ".codex" / "hooks" / "hook_adapter.sh",
         target / ".claude" / "hooks" / "hook_adapter.sh",
         target / ".agents" / "hooks" / "hook_adapter.sh",
@@ -2709,6 +3224,19 @@ def cmd_install(args: argparse.Namespace) -> int:
         except (RuntimeError, subprocess.CalledProcessError) as exc:
             print(
                 f"warn: runtime bootstrap failed; run `{agent_memory_cli_for_root(target)} repair-installation --apply` later: {exc}",
+                file=sys.stderr,
+            )
+    if os.environ.get("AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD", "") not in {"1", "true", "True", "yes"}:
+        try:
+            for action in ensure_monitor_frontend_build(
+                target,
+                install_dependencies=True,
+                force=False,
+            ):
+                print(f"monitor frontend: {action}")
+        except (RuntimeError, subprocess.CalledProcessError) as exc:
+            print(
+                f"warn: monitor frontend build failed; run `{agent_memory_cli_for_root(target)} repair-installation --apply --install-frontend-deps` later: {exc}",
                 file=sys.stderr,
             )
     instance_id = _default_instance_id_for_target(target, args)
@@ -2741,18 +3269,19 @@ def cmd_install(args: argparse.Namespace) -> int:
         last_used_memory_root=runtime_memory_root,
     )
     sync_instance_metadata(target)
-    if args.link_codex_memory or args.link_claude_memory or args.link_agy_memory or args.link_antigravity_memory or args.link_gemini_memory or args.link_opencode_memory:
+    linked_wrapper_specs = _linked_wrapper_specs(args)
+    if linked_wrapper_specs:
         link_dir = Path(args.link_dir).expanduser().resolve()
         link_dir.mkdir(parents=True, exist_ok=True)
     for flag_name, wrapper_name in [
-        ("link_codex_memory", "codex-memory"),
-        ("link_claude_memory", "claude-memory"),
-        ("link_agy_memory", "agy-memory"),
-        ("link_antigravity_memory", "antigravity-memory"),
-        ("link_gemini_memory", "gemini-memory"),
-        ("link_opencode_memory", "opencode-memory"),
+        ("link_codex_memory", "codex-ace"),
+        ("link_claude_memory", "claude-ace"),
+        ("link_agy_memory", "agy-ace"),
+        ("link_antigravity_memory", "antigravity-ace"),
+        ("link_gemini_memory", "gemini-ace"),
+        ("link_opencode_memory", "opencode-ace"),
     ]:
-        if not getattr(args, flag_name):
+        if not _link_flag_enabled(args, flag_name, default=wrapper_name != "antigravity-ace"):
             continue
         try:
             link = ensure_global_wrapper_link(
@@ -2801,6 +3330,8 @@ def cmd_install(args: argparse.Namespace) -> int:
     print(f"installation profile: {installation_profile_path(target)}")
     print(f"user config: {user_config_path()}")
     print(f"instance metadata: {instance_metadata_path_for_root(target)}")
+    print(f"link registry: {link_registry_path()}")
+    print(f"user cli shortcut: {user_cli_link}")
     print(f"updated agent instructions: {agents_path}")
     print(f"updated hook entry: {hook_entry_path}")
     print(f"repo index: {repos_index}")
@@ -2843,6 +3374,7 @@ def cmd_install(args: argparse.Namespace) -> int:
             host=monitor_host,
             port=monitor_port,
             language=language,
+            memory_root=runtime_memory_root,
         )
         if started:
             print(f"started monitor: {detail}")
@@ -2856,6 +3388,22 @@ def cmd_install(args: argparse.Namespace) -> int:
     else:
         print("next: run " + monitor_restart_command(target, runner=workflow_settings["monitor_runner"]))
     print(f"next: run {agent_memory_cli_for_root(target)} doctor")
+    wrapper_link_results = _verify_global_wrapper_links(args=args, prefix=prefix, suffix=suffix)
+    if wrapper_link_results:
+        print("global wrapper verification:")
+        for item in wrapper_link_results:
+            print(
+                f"- {item['command_name']}: "
+                + f"link_exists={item['link_exists']} "
+                + f"link_path={item['link_path']} "
+                + f"resolved={item['path_resolved'] or '-'}"
+            )
+            if item["link_exists"] == "yes" and not item["path_resolved"]:
+                print(
+                    f"warn: {item['command_name']} is linked but not currently resolvable from PATH; "
+                    + f"ensure {Path(args.link_dir).expanduser().resolve()} is on PATH",
+                    file=sys.stderr,
+                )
     start_hints = _wrapper_start_hints(target, args)
     print("next: start " + ", ".join(start_hints))
     print("info: /hooks can be used inside Codex to inspect installed hooks; approve any Codex hook safety review if shown")
@@ -2945,20 +3493,21 @@ def cmd_global_wrapper_enable(args: argparse.Namespace) -> int:
     link_dir.mkdir(parents=True, exist_ok=True)
     prefix = install_wrapper_prefix(args)
     suffix = install_wrapper_suffix(args)
+    wrapper_name = _normalize_wrapper_script_name(args.wrapper)
     try:
-        link = ensure_global_wrapper_link(link_dir, args.wrapper, ROOT, force=args.force, prefix=prefix, suffix=suffix)
+        link = ensure_global_wrapper_link(link_dir, wrapper_name, ROOT, force=args.force, prefix=prefix, suffix=suffix)
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    print(f"linked {link} -> {wrapper_script_path(ROOT, args.wrapper)}")
-    print(f"global command: {link_command_name(args.wrapper, prefix, suffix)}")
+    print(f"linked {link} -> {wrapper_script_path(ROOT, wrapper_name)}")
+    print(f"global command: {link_command_name(wrapper_name, prefix, suffix)}")
     append_integration_history(
-        client=args.wrapper,
+        client=wrapper_name,
         action="global_wrapper_enabled",
         root=ROOT,
         source="cli",
         actor="agent-memory-cli",
-        details={"link": str(link), "command_name": link_command_name(args.wrapper, prefix, suffix)},
+        details={"link": str(link), "command_name": link_command_name(wrapper_name, prefix, suffix)},
     )
     return 0
 
@@ -2967,11 +3516,12 @@ def cmd_global_wrapper_disable(args: argparse.Namespace) -> int:
     link_dir = Path(args.link_dir).expanduser().resolve()
     prefix = install_wrapper_prefix(args)
     suffix = install_wrapper_suffix(args)
-    link_name = link_command_name(args.wrapper, prefix, suffix)
-    link = remove_command_link(link_dir, link_name)
+    wrapper_name = _normalize_wrapper_script_name(args.wrapper)
+    link_name = link_command_name(wrapper_name, prefix, suffix)
+    link = remove_command_link(link_dir, link_name, installation_root=ROOT)
     print(f"removed global wrapper link: {link}")
     append_integration_history(
-        client=args.wrapper,
+        client=wrapper_name,
         action="global_wrapper_disabled",
         root=ROOT,
         source="cli",
@@ -2984,6 +3534,7 @@ def cmd_global_wrapper_disable(args: argparse.Namespace) -> int:
 def cmd_global_wrapper_status(args: argparse.Namespace) -> int:
     link_dir = Path(args.link_dir).expanduser().resolve()
     profile = load_installation_profile(ROOT)
+    registry = dict((load_link_registry().get("entries") or {}))
     wrapper_naming = dict(profile.get("wrapper_naming") or {})
     prefix = str(wrapper_naming.get("prefix") or "")
     suffix = str(wrapper_naming.get("suffix") or "")
@@ -2991,10 +3542,17 @@ def cmd_global_wrapper_status(args: argparse.Namespace) -> int:
         configured_name = link_command_name(wrapper_name, prefix, suffix)
         command = shutil.which(configured_name)
         local_link = link_dir / configured_name
-        print(f"{wrapper_name}:")
+        print(f"{configured_name}:")
+        print(f"  wrapper_script: {wrapper_name}")
         print(f"  configured_command: {configured_name}")
         print(f"  path_linked: {'yes' if command else 'no'}")
         print(f"  resolved: {command or '-'}")
         print(f"  link_dir_entry: {local_link if local_link.exists() or local_link.is_symlink() else '-'}")
         print(f"  root_wrapper: {wrapper_script_path(ROOT, wrapper_name)}")
+        metadata = dict(registry.get(configured_name) or {})
+        print(f"  linked_at: {metadata.get('created_at') or '-'}")
+        print(f"  last_changed_at: {metadata.get('updated_at') or '-'}")
+        print(f"  last_changed_by_version: {metadata.get('changed_by_version') or '-'}")
+        print(f"  registry_status: {metadata.get('status') or '-'}")
+        print(f"  registry_target: {metadata.get('target') or '-'}")
     return 0

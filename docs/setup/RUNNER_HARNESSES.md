@@ -13,18 +13,18 @@ Use it together with:
 
 Agent Context Engine currently supports these interactive clients and wrappers:
 
-- `codex` via `codex-memory`
-- `claude` via `claude-memory`
+- `codex` via `codex-ace` by default
+- `claude` via `claude-ace` by default
 - `cursor` via `cursor-enable --target <project-path>`
-- `antigravity` via `agy-memory`
-- `gemini` via `gemini-memory`
-- `opencode` via `opencode-memory`
+- `antigravity` via `agy-ace` by default
+- `gemini` via `gemini-ace` by default
+- `opencode` via `opencode-ace` by default
 
 Naming note:
 
 - The Agent Context Engine client key is `antigravity`.
-- The preferred wrapper command is `agy-memory`.
-- `antigravity-memory` remains a compatibility alias only.
+- The preferred wrapper command is `agy-ace`.
+- `antigravity-ace` remains a compatibility alias only.
 
 ## Install-Time Behavior
 
@@ -55,7 +55,7 @@ by default:
 - Agent guidance in `AGENTS.md`
 - startup contract in `session-start-hook-entry.md`
 - local CLI under `scripts/agent-context-engine` or `docs/skills/agent-context-engine/scripts/agent-context-engine`
-- optional `.venv/` when `install --bootstrap-runtime` is used
+- default `.venv/` when `install` runs normally; use `--no-bootstrap-runtime` to skip it
 
 Central installation does not automatically activate every client in every other
 project folder.
@@ -96,23 +96,23 @@ Rules:
 
 Optional global wrappers can be linked into `~/.local/bin`:
 
-- `codex-memory`
-- `claude-memory`
-- `agy-memory`
-- `gemini-memory`
-- `opencode-memory`
+- `codex-ace`
+- `claude-ace`
+- `agy-ace`
+- `gemini-ace`
+- `opencode-ace`
 
 `cursor` has no single global wrapper. It is activated per project.
 
-OpenCode is started through the global `opencode-memory` wrapper. OpenCode loads
-plugins only from the startup directory, so `opencode-memory` starts OpenCode
+OpenCode is started through the global `opencode-ace` wrapper. OpenCode loads
+plugins only from the startup directory, so `opencode-ace` starts OpenCode
 from the central Agent Context Engine root where `.opencode/plugins/agent-memory.js`
 lives. The original shell folder is preserved as the initial project/workdir
 context via `AGENT_MEMORY_LAUNCH_CWD` and passed back to OpenCode as the
 positional project argument.
 
-Antigravity and Gemini are started through the global `agy-memory` and
-`gemini-memory` wrappers. Their hook configs are loaded from the current working
+Antigravity and Gemini are started through the global `agy-ace` and
+`gemini-ace` wrappers. Their hook configs are loaded from the current working
 directory, so the wrappers start the runner from the central Agent Context Engine root
 where `.agents/hooks.json` and `.gemini/settings.json` live. The original shell
 folder is added back as a workspace via `--add-dir` / `--include-directories`,
@@ -140,9 +140,9 @@ global command names blindly. Use:
 
 Current naming note:
 
-- the preferred public default is `--wrapper-suffix ace`, which produces `codex-memory-ace`
-- `--wrapper-prefix test-` produces `test-codex-memory`
-- `--wrapper-suffix v2` produces `codex-memory-v2`
+- the preferred public default is `--wrapper-suffix ace`, which produces `codex-ace`
+- `--wrapper-prefix test-` produces `test-codex`
+- `--wrapper-suffix v2` produces `codex-v2`
 
 Example:
 
@@ -151,16 +151,19 @@ python3 scripts/agent_context_engine.py install \
   --target /path/to/second-agent-context-engine-root \
   --instance-name client-a \
   --bootstrap-runtime \
-  --link-codex-memory \
-  --link-claude-memory \
-  --link-agy-memory \
-  --link-gemini-memory \
-  --link-opencode-memory \
+  --link-codex-ace \
+  --link-claude-ace \
+  --link-agy-ace \
+  --link-gemini-ace \
+  --link-opencode-ace \
   --no-interactive
 ```
 
 The installation profile now also persists the default monitor host/port and
-LaunchAgent identity for the instance. By default user-scoped metadata lives in `~/.agent-context-engine`, the default install root lives in `~/.agent-context-engine/instances/default/install`, and runtime data lives in `~/.agent-context-engine/instances/default/memory`. Use:
+LaunchAgent identity for the instance. By default user-scoped metadata lives in
+`~/.agent-context-engine`, the default install root lives in
+`~/.agent-context-engine/install`, and runtime data lives in
+`~/.agent-context-engine/memory`. Use:
 
 - `--memory-root <path>` when runtime data should live somewhere else
 - `--monitor-host <host>`
@@ -186,7 +189,7 @@ templates, wrappers, and monitor assets.
 Use these after the central installation exists:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine cursor-enable --target /path/to/project --memory-root /path/to/agent-memory-root
+./docs/skills/agent-context-engine/scripts/agent-context-engine cursor-enable --target /path/to/project --memory-root /path/to/agent-context-engine-root
 ```
 
 For `codex`, `claude`, and `cursor`, the workspace hook setup now also writes a
@@ -209,9 +212,9 @@ Agent Context Engine root, then use the global wrapper from any directory:
 After enabling the central bridge:
 
 ```sh
-agy-memory
-gemini-memory
-opencode-memory [project]
+agy-ace
+gemini-ace
+opencode-ace [project]
 ```
 
 Per-project `antigravity-enable --target`, `gemini-enable --target`, and

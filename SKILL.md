@@ -6,15 +6,15 @@ agent work.
 
 Agent Context Engine is a local-first package for:
 
-- Codex sessions started through `codex-memory`
-- Claude Code sessions started through `claude-memory`
+- Codex sessions started through `codex-ace` by default
+- Claude Code sessions started through `claude-ace` by default
 - Cursor IDE projects enabled with `agent-memory cursor-enable`
-- Antigravity CLI sessions started globally through `agy-memory`
-- Gemini CLI sessions started globally through `gemini-memory`
-- OpenCode sessions started globally through `opencode-memory`
+- Antigravity CLI sessions started globally through `agy-ace` by default
+- Gemini CLI sessions started globally through `gemini-ace` by default
+- OpenCode sessions started globally through `opencode-ace` by default
 
 There is no per-project activation for Antigravity, Gemini, or OpenCode. The
-`*-memory` wrappers start the runner from the central Agent Context Engine root so the
+the default `*-ace` wrappers start the runner from the central Agent Context Engine root so the
 hook bridge loads, while preserving the original launch directory as project
 context.
 - local session logs, summaries, handovers, retrieval, graph artifacts, and
@@ -40,11 +40,11 @@ python3 scripts/agent_context_engine.py install \
   --target /path/to/agent-context-engine-root \
   --language en \
   --wrapper-suffix ace \
-  --link-codex-memory \
-  --link-claude-memory \
-  --link-agy-memory \
-  --link-gemini-memory \
-  --link-opencode-memory \
+  --link-codex-ace \
+  --link-claude-ace \
+  --link-agy-ace \
+  --link-gemini-ace \
+  --link-opencode-ace \
   --no-interactive
 ```
 
@@ -62,11 +62,11 @@ python3 docs/skills/agent-context-engine/scripts/agent_context_engine.py install
   --target /path/to/agent-context-engine-root \
   --language en \
   --wrapper-suffix ace \
-  --link-codex-memory \
-  --link-claude-memory \
-  --link-agy-memory \
-  --link-gemini-memory \
-  --link-opencode-memory \
+  --link-codex-ace \
+  --link-claude-ace \
+  --link-agy-ace \
+  --link-gemini-ace \
+  --link-opencode-ace \
   --no-interactive
 ```
 
@@ -77,8 +77,8 @@ Ask the user for these choices when they are not already clear:
 - target root for the central Agent Context Engine installation
 - preferred interaction language for future agents: `en` or `de`
 - which harnesses should be prepared now
-- whether to create global `codex-memory`, `claude-memory`, `agy-memory`,
-  `gemini-memory`, and `opencode-memory` commands
+- whether to create global `codex-ace`, `claude-ace`, `agy-ace`,
+  `gemini-ace`, and `opencode-ace` commands
 - whether this is a second local installation that needs `--instance-name`
 - which local projects should be added to `docs/knowledge/repos.md`
 - whether Cursor IDE should be enabled for a specific project folder
@@ -92,34 +92,34 @@ Use `--no-interactive` for automation once the choices are known.
 Codex:
 
 ```sh
-codex-memory
+codex-ace
 ```
 
 Claude Code:
 
 ```sh
-claude-memory
+claude-ace
 ```
 
 Antigravity CLI:
 
 ```sh
-agy-memory
+agy-ace
 ```
 
 Gemini CLI:
 
 ```sh
-gemini-memory
+gemini-ace
 ```
 
 OpenCode:
 
 ```sh
-opencode-memory [project]
+opencode-ace [project]
 ```
 
-OpenCode loads plugins from its startup directory, so `opencode-memory` starts
+OpenCode loads plugins from its startup directory, so `opencode-ace` starts
 OpenCode from the central Agent Context Engine root. The original shell folder is
 preserved as the project context. Pass the project as a positional argument; do
 not use `opencode run --dir <project>`, because that would also load plugins from

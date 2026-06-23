@@ -17,6 +17,9 @@ minimal HTML fallback.
 - Keep HTTP handlers thin and route to application/read-model services.
 - Serve `frontend/dist` when present.
 - Use `interfaces/http/html.py` only as a minimal fallback.
+- Expose enough installation and runtime metadata for operators to understand
+  active install roots, memory roots, launchagent identity, monitor runtime
+  registry state, link registry state, and version drift.
 
 ## Inputs / Outputs
 - Inputs: local HTTP requests, query params, JSON bodies, monitor token.
@@ -40,6 +43,9 @@ minimal HTML fallback.
 - OpenAPI generation check passes.
 - Canonical routes and compatibility aliases remain documented.
 - HTTP route code has no hidden business policy branches.
+- `/api/status` includes monitor version, backend version, installation
+  timestamps, update timestamps, and integration/runtime bookkeeping required
+  by the monitor.
 
 ## Tests / Checks
 - `python3 scripts/generate_openapi.py --check`

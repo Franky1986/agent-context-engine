@@ -280,7 +280,7 @@ def extract_json_object(text: str) -> Any:
 
 
 def run_classifier_llm(runner: str, model: str | None, prompt: str, timeout: int) -> str:
-    env = {**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_ROOT": str(ROOT)}
+    env = {**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)}
     if runner == "codex":
         if not shutil.which("codex"):
             raise RuntimeError("codex executable not found")

@@ -10,13 +10,17 @@ from typing import Any
 from ..adapters.launchagent import DEFAULT_LABEL, launch_agent_path, launchagent_loaded, launchagent_runtime_status, load_env_file
 from .instance_profile import (
     instance_metadata_path_for_root,
+    link_registry_path,
+    load_link_registry,
     load_installation_profile,
+    load_instance_metadata,
     load_storage_profile,
     resolve_monitor_profile,
     resolve_storage_profile,
     resolve_wrapper_naming,
     storage_profile_path,
     sync_instance_metadata,
+    user_cli_link_path,
     user_config_path,
 )
 from .installation import frontend_build_status, python_runtime_status
@@ -137,6 +141,30 @@ def run_doctor_checks(
     lines.append(f"ok  storage profile: {storage_profile_path(Path(storage_profile['memory_root']))}")
     lines.append(f"ok  user config: {user_config_path()}")
     lines.append(f"ok  instance metadata: {instance_metadata_path_for_root(ROOT)}")
+    lines.append(f"ok  link registry: {link_registry_path()}")
+    lines.append(f"ok  user cli shortcut: {user_cli_link_path()}")
+    instance_metadata = load_instance_metadata(instance_id)
+    link_registry = load_link_registry()
+    if instance_metadata:
+        if str(instance_metadata.get("installed_at") or "").strip():
+            lines.append(
+                "ok  installed at: "
+                + f"{instance_metadata.get('installed_at')} "
+                + f"(version={instance_metadata.get('installed_by_version') or '-'})"
+            )
+        if str(instance_metadata.get("last_updated_at") or "").strip():
+            lines.append(
+                "ok  last updated at: "
+                + f"{instance_metadata.get('last_updated_at')} "
+                + f"(version={instance_metadata.get('last_updated_by_version') or '-'})"
+            )
+    ace_entry = dict((link_registry.get("entries") or {}).get("ace") or {})
+    if ace_entry:
+        lines.append(
+            "ok  user cli target: "
+            + f"{ace_entry.get('target') or '-'} "
+            + f"(updated={ace_entry.get('updated_at') or '-'})"
+        )
     lines.append(
         "ok  storage mode: "
         + ("legacy-co-located" if str(storage_profile.get("memory_root")) == str((ROOT / "memory").resolve()) else "external-or-explicit")
@@ -264,6 +292,7 @@ def run_doctor_checks(
         label=launch_label,
         env_file=str(launchagent_profile.get("env_file") or DEFAULT_ENV_FILE),
         plist_path=launch_path,
+        root=ROOT,
     )
     if bool((launchagent_status.get("drift") or {}).get("detected")):
         lines.append("warn  LaunchAgent drift: " + "; ".join((launchagent_status.get("drift") or {}).get("reasons") or []))

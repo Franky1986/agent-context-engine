@@ -90,7 +90,7 @@ def trigger_cursor_agent_login(session_id: str, *, cool_down_seconds: int = 300)
                 close_fds=True,
                 env={
                     **os.environ,
-                    "AGENT_MEMORY_ROOT": str(ROOT),
+                    "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT),
                 },
             )
         marker_path.write_text(

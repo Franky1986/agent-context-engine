@@ -26,6 +26,16 @@ from .runners import (
 )
 
 
+def _rel(path: Path | str) -> str:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        try:
+            return str(candidate.relative_to(ROOT))
+        except ValueError:
+            return str(candidate)
+    return str(candidate)
+
+
 def run_codex_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite3.Row], dream_run_id: str, timeout: int, model: str | None) -> list[Path]:
     run_dir = DREAM_DIR / "runs" / safe_slug(dream_run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -45,7 +55,7 @@ def run_codex_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite3
         capture_output=True,
         timeout=timeout,
         cwd=str(ROOT),
-        env=codex_subprocess_env(extra={"AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_ROOT": str(ROOT)}),
+        env=codex_subprocess_env(extra={"AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)}),
     )
     duration_ms = int((monotonic() - started_mono) * 1000)
     tool_event_detected = codex_stdout_has_tool_events(proc.stdout)
@@ -71,8 +81,8 @@ def run_codex_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite3
                 "returncode": proc.returncode,
                 "stdout": proc.stdout[-12000:],
                 "stderr": proc.stderr[-12000:],
-                "prompt_path": str(prompt_path.relative_to(ROOT)),
-                "response_path": str(response_path.relative_to(ROOT)),
+                "prompt_path": _rel(prompt_path),
+                "response_path": _rel(response_path),
             }
         ),
         encoding="utf-8",
@@ -87,7 +97,7 @@ def run_codex_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite3
     dream_path = MEMORY_DIR / "memories" / "dreams" / project_slug / f"{safe_slug(dream_run_id)}.md"
     dream_path.parent.mkdir(parents=True, exist_ok=True)
     dream_path.write_text(response + "\n", encoding="utf-8")
-    project_path = append_project_memory_ref(session, summary_rel, str(dream_path.relative_to(ROOT)), dream_run_id, "codex", model)
+    project_path = append_project_memory_ref(session, summary_rel, _rel(dream_path), dream_run_id, "codex", model)
     return [dream_path, project_path, prompt_path, response_path, meta_path]
 
 
@@ -124,8 +134,8 @@ def run_claude_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
                 "returncode": proc.returncode,
                 "stdout": proc.stdout[-12000:],
                 "stderr": proc.stderr[-12000:],
-                "prompt_path": str(prompt_path.relative_to(ROOT)),
-                "response_path": str(response_path.relative_to(ROOT)),
+                "prompt_path": _rel(prompt_path),
+                "response_path": _rel(response_path),
             }
         ),
         encoding="utf-8",
@@ -139,7 +149,7 @@ def run_claude_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
     dream_path = MEMORY_DIR / "memories" / "dreams" / project_slug / f"{safe_slug(dream_run_id)}.md"
     dream_path.parent.mkdir(parents=True, exist_ok=True)
     dream_path.write_text(response + "\n", encoding="utf-8")
-    project_path = append_project_memory_ref(session, summary_rel, str(dream_path.relative_to(ROOT)), dream_run_id, "claude", model)
+    project_path = append_project_memory_ref(session, summary_rel, _rel(dream_path), dream_run_id, "claude", model)
     return [dream_path, project_path, prompt_path, response_path, meta_path]
 
 
@@ -161,7 +171,7 @@ def run_cursor_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
         capture_output=True,
         timeout=timeout,
         cwd=str(ROOT),
-        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_ROOT": str(ROOT)},
+        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
     )
     duration_ms = int((monotonic() - started_mono) * 1000)
     meta_path.write_text(
@@ -183,8 +193,8 @@ def run_cursor_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
                 "returncode": proc.returncode,
                 "stdout": proc.stdout[-12000:],
                 "stderr": proc.stderr[-12000:],
-                "prompt_path": str(prompt_path.relative_to(ROOT)),
-                "response_path": str(response_path.relative_to(ROOT)),
+                "prompt_path": _rel(prompt_path),
+                "response_path": _rel(response_path),
             }
         ),
         encoding="utf-8",
@@ -198,7 +208,7 @@ def run_cursor_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
     dream_path = MEMORY_DIR / "memories" / "dreams" / project_slug / f"{safe_slug(dream_run_id)}.md"
     dream_path.parent.mkdir(parents=True, exist_ok=True)
     dream_path.write_text(response + "\n", encoding="utf-8")
-    project_path = append_project_memory_ref(session, summary_rel, str(dream_path.relative_to(ROOT)), dream_run_id, "cursor", model)
+    project_path = append_project_memory_ref(session, summary_rel, _rel(dream_path), dream_run_id, "cursor", model)
     return [dream_path, project_path, prompt_path, response_path, meta_path]
 
 
@@ -220,7 +230,7 @@ def run_gemini_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
         capture_output=True,
         timeout=timeout,
         cwd=str(ROOT),
-        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_ROOT": str(ROOT)},
+        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
     )
     duration_ms = int((monotonic() - started_mono) * 1000)
     meta_path.write_text(
@@ -240,8 +250,8 @@ def run_gemini_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
                 "returncode": proc.returncode,
                 "stdout": proc.stdout[-12000:],
                 "stderr": proc.stderr[-12000:],
-                "prompt_path": str(prompt_path.relative_to(ROOT)),
-                "response_path": str(response_path.relative_to(ROOT)),
+                "prompt_path": _rel(prompt_path),
+                "response_path": _rel(response_path),
             }
         ),
         encoding="utf-8",
@@ -255,7 +265,7 @@ def run_gemini_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
     dream_path = MEMORY_DIR / "memories" / "dreams" / project_slug / f"{safe_slug(dream_run_id)}.md"
     dream_path.parent.mkdir(parents=True, exist_ok=True)
     dream_path.write_text(response + "\n", encoding="utf-8")
-    project_path = append_project_memory_ref(session, summary_rel, str(dream_path.relative_to(ROOT)), dream_run_id, "gemini", model)
+    project_path = append_project_memory_ref(session, summary_rel, _rel(dream_path), dream_run_id, "gemini", model)
     return [dream_path, project_path, prompt_path, response_path, meta_path]
 
 
@@ -277,7 +287,7 @@ def run_antigravity_dream(session: sqlite3.Row, summary_rel: str, events: list[s
         capture_output=True,
         timeout=timeout,
         cwd=str(ROOT),
-        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_ROOT": str(ROOT)},
+        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
     )
     duration_ms = int((monotonic() - started_mono) * 1000)
     meta_path.write_text(
@@ -297,8 +307,8 @@ def run_antigravity_dream(session: sqlite3.Row, summary_rel: str, events: list[s
                 "returncode": proc.returncode,
                 "stdout": proc.stdout[-12000:],
                 "stderr": proc.stderr[-12000:],
-                "prompt_path": str(prompt_path.relative_to(ROOT)),
-                "response_path": str(response_path.relative_to(ROOT)),
+                "prompt_path": _rel(prompt_path),
+                "response_path": _rel(response_path),
             }
         ),
         encoding="utf-8",
@@ -312,7 +322,7 @@ def run_antigravity_dream(session: sqlite3.Row, summary_rel: str, events: list[s
     dream_path = MEMORY_DIR / "memories" / "dreams" / project_slug / f"{safe_slug(dream_run_id)}.md"
     dream_path.parent.mkdir(parents=True, exist_ok=True)
     dream_path.write_text(response + "\n", encoding="utf-8")
-    project_path = append_project_memory_ref(session, summary_rel, str(dream_path.relative_to(ROOT)), dream_run_id, "antigravity", model)
+    project_path = append_project_memory_ref(session, summary_rel, _rel(dream_path), dream_run_id, "antigravity", model)
     return [dream_path, project_path, prompt_path, response_path, meta_path]
 
 
@@ -334,7 +344,7 @@ def run_opencode_dream(session: sqlite3.Row, summary_rel: str, events: list[sqli
         capture_output=True,
         timeout=timeout,
         cwd=str(ROOT),
-        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_ROOT": str(ROOT)},
+        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
     )
     duration_ms = int((monotonic() - started_mono) * 1000)
     meta_path.write_text(
@@ -355,8 +365,8 @@ def run_opencode_dream(session: sqlite3.Row, summary_rel: str, events: list[sqli
                 "returncode": proc.returncode,
                 "stdout": proc.stdout[-12000:],
                 "stderr": proc.stderr[-12000:],
-                "prompt_path": str(prompt_path.relative_to(ROOT)),
-                "response_path": str(response_path.relative_to(ROOT)),
+                "prompt_path": _rel(prompt_path),
+                "response_path": _rel(response_path),
             }
         ),
         encoding="utf-8",
@@ -370,7 +380,7 @@ def run_opencode_dream(session: sqlite3.Row, summary_rel: str, events: list[sqli
     dream_path = MEMORY_DIR / "memories" / "dreams" / project_slug / f"{safe_slug(dream_run_id)}.md"
     dream_path.parent.mkdir(parents=True, exist_ok=True)
     dream_path.write_text(response + "\n", encoding="utf-8")
-    project_path = append_project_memory_ref(session, summary_rel, str(dream_path.relative_to(ROOT)), dream_run_id, "opencode", model)
+    project_path = append_project_memory_ref(session, summary_rel, _rel(dream_path), dream_run_id, "opencode", model)
     return [dream_path, project_path, prompt_path, response_path, meta_path]
 
 

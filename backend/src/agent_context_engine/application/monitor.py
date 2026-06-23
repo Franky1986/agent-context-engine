@@ -10,7 +10,10 @@ from ..adapters.launchagent import DEFAULT_ENV_FILE, DEFAULT_LABEL, launchagent_
 from .firewall import firewall_status
 from .hooks_state import hooks_control_status
 from .instance_profile import (
+    active_monitor_runtime_entries,
     instance_metadata_path_for_root,
+    link_registry_path,
+    load_link_registry,
     load_installation_profile,
     load_instance_metadata,
     load_storage_profile,
@@ -124,6 +127,15 @@ def monitor_status(
     storage = resolve_storage_profile(root)
     runtime_storage_profile = load_storage_profile(Path(str(storage.get("memory_root") or root / "memory")))
     instance_metadata = sync_instance_metadata(root)
+    active_monitor_entries = active_monitor_runtime_entries()
+    current_monitor_entry = next(
+        (
+            entry
+            for entry in active_monitor_entries
+            if str(entry.get("installation_root") or "") == str(root.resolve())
+        ),
+        {},
+    )
 
     return {
         "runner": runner,
@@ -141,6 +153,10 @@ def monitor_status(
         "user_config_path": str(user_config_path()),
         "instance_metadata_path": str(instance_metadata_path_for_root(root)),
         "instance_metadata": instance_metadata,
+        "installed_at": str(instance_metadata.get("installed_at") or ""),
+        "installed_by_version": str(instance_metadata.get("installed_by_version") or ""),
+        "last_updated_at": str(instance_metadata.get("last_updated_at") or ""),
+        "last_updated_by_version": str(instance_metadata.get("last_updated_by_version") or ""),
         "sessions": conn.execute("select count(*) as c from sessions").fetchone()["c"],
         "events": conn.execute("select count(*) as c from events").fetchone()["c"],
         "pending_summaries": conn.execute(
@@ -159,7 +175,13 @@ def monitor_status(
         "hooks": hooks_control_status(root=root),
         "integrations": integration_summary(root=root, probe_gemini=False),
         "monitor_process": _monitor_process_status(runner=runner, root=root, monitor_version=monitor_version, monitor_context=monitor_context),
-        "launchagent": launchagent_runtime_status(label=launchagent_label, env_file=launchagent_env_file, plist_path=launchagent_path),
+        "monitor_runtime_registry": {
+            "current": current_monitor_entry,
+            "active_entries": active_monitor_entries,
+        },
+        "link_registry_path": str(link_registry_path()),
+        "link_registry": load_link_registry(),
+        "launchagent": launchagent_runtime_status(label=launchagent_label, env_file=launchagent_env_file, plist_path=launchagent_path, root=root),
     }
 
 
@@ -170,7 +192,7 @@ def monitor_reconcile_runtime(*, root: Path) -> dict[str, Any]:
     launchagent_path = str(launchagent_profile.get("path") or "")
     launchagent_env_file = str(launchagent_profile.get("env_file") or DEFAULT_ENV_FILE)
     return {
-        "launchagent": reconcile_launchagent(label=launchagent_label, env_file=launchagent_env_file, plist_path=launchagent_path),
+        "launchagent": reconcile_launchagent(label=launchagent_label, env_file=launchagent_env_file, plist_path=launchagent_path, root=root),
         "monitor_restart_command": monitor_restart_command(root),
         "root": str(root),
     }

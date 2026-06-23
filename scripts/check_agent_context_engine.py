@@ -398,11 +398,11 @@ def check_fresh_install_smoke() -> CheckResult:
                 str(target),
                 "--instance-name",
                 "smoke",
-                "--link-codex-memory",
-                "--link-claude-memory",
-                "--link-agy-memory",
-                "--link-gemini-memory",
-                "--link-opencode-memory",
+                "--link-codex-ace",
+                "--link-claude-ace",
+                "--link-agy-ace",
+                "--link-gemini-ace",
+                "--link-opencode-ace",
                 "--no-install-launchagent",
                 "--link-dir",
                 str(link_dir),
@@ -429,11 +429,11 @@ def check_fresh_install_smoke() -> CheckResult:
             target / ".gemini" / "hooks" / "hook_adapter.sh",
             target / ".cursor" / "rules" / "everyChat.mdc",
             target / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine",
-            link_dir / "smoke-codex-memory",
-            link_dir / "smoke-claude-memory",
-            link_dir / "smoke-agy-memory",
-            link_dir / "smoke-gemini-memory",
-            link_dir / "smoke-opencode-memory",
+            link_dir / "smoke-codex-ace",
+            link_dir / "smoke-claude-ace",
+            link_dir / "smoke-agy-ace",
+            link_dir / "smoke-gemini-ace",
+            link_dir / "smoke-opencode-ace",
         ]
         missing = [str(path) for path in expected if not path.exists() and not path.is_symlink()]
         if missing:
@@ -458,7 +458,7 @@ def check_fresh_install_smoke() -> CheckResult:
             "\n".join(
                 [
                     f"target={target}",
-                    "links=smoke-codex-memory, smoke-claude-memory, smoke-agy-memory, smoke-gemini-memory, smoke-opencode-memory",
+                    "links=smoke-codex-ace, smoke-claude-ace, smoke-agy-ace, smoke-gemini-ace, smoke-opencode-ace",
                     "doctor=ok",
                 ]
             ),

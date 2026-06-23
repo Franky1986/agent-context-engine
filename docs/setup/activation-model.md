@@ -22,11 +22,11 @@ starting the client from that root is usually enough.
 
 Start the client through an Agent Context Engine wrapper such as:
 
-- `codex-memory`
-- `claude-memory`
-- `agy-memory`
-- `gemini-memory`
-- `opencode-memory`
+- `codex-ace`
+- `claude-ace`
+- `agy-ace`
+- `gemini-ace`
+- `opencode-ace`
 
 This mode is useful when:
 

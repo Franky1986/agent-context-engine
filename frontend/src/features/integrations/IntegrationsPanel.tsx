@@ -88,11 +88,11 @@ export function IntegrationsPanel({ language = 'en', showHeading = true }: Integ
 
   function fallbackWrapperCommand(item: IntegrationStatusItem) {
     if (item.wrapper_command) return text(item.wrapper_command);
-    if (item.client === 'codex') return './scripts/codex-memory';
-    if (item.client === 'claude') return './scripts/claude-memory';
-    if (item.client === 'antigravity') return './scripts/agy-memory';
-    if (item.client === 'gemini') return './scripts/gemini-memory';
-    if (item.client === 'opencode') return './scripts/opencode-memory';
+    if (item.client === 'codex') return './scripts/codex-ace';
+    if (item.client === 'claude') return './scripts/claude-ace';
+    if (item.client === 'antigravity') return './scripts/agy-ace';
+    if (item.client === 'gemini') return './scripts/gemini-ace';
+    if (item.client === 'opencode') return './scripts/opencode-ace';
     return '';
   }
 
@@ -325,7 +325,7 @@ export function IntegrationsPanel({ language = 'en', showHeading = true }: Integ
   }
 
   function globalWrapperCommand(item: IntegrationStatusItem) {
-    if (item.client === 'antigravity') return 'agy-memory';
+    if (item.client === 'antigravity') return 'agy-ace';
     return text(item.global_command_name, fallbackUsageMode(item) === 'wrapper' ? text(fallbackWrapperCommand(item)).replace('./scripts/', '') : '');
   }
 

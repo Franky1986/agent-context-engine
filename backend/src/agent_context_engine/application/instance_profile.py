@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,8 +17,13 @@ USER_STATE_ROOT_NAME = ".agent-context-engine"
 USER_CONFIG_FILENAME = "config.json"
 USER_INSTANCES_DIRNAME = "instances"
 USER_ACTIVE_DIRNAME = "active"
+USER_CLI_LINK_NAME = "ace"
+MONITOR_RUNTIME_REGISTRY_FILENAME = "monitor-runtime.json"
+LINK_REGISTRY_FILENAME = "link-registry.json"
 USER_CONFIG_VERSION = 1
 INSTANCE_METADATA_VERSION = 1
+MONITOR_RUNTIME_REGISTRY_VERSION = 1
+LINK_REGISTRY_VERSION = 1
 WORKFLOW_RUNNER_DEFAULTS = {
     "monitor_runner": "codex",
     "dream_runner": "codex",
@@ -53,6 +59,18 @@ def user_config_path(home: Path | None = None) -> Path:
     return user_state_root(home) / USER_CONFIG_FILENAME
 
 
+def user_cli_link_path(home: Path | None = None) -> Path:
+    return user_state_root(home) / USER_CLI_LINK_NAME
+
+
+def monitor_runtime_registry_path(home: Path | None = None) -> Path:
+    return user_state_root(home) / MONITOR_RUNTIME_REGISTRY_FILENAME
+
+
+def link_registry_path(home: Path | None = None) -> Path:
+    return user_state_root(home) / LINK_REGISTRY_FILENAME
+
+
 def user_instances_dir(home: Path | None = None) -> Path:
     return user_state_root(home) / USER_INSTANCES_DIRNAME
 
@@ -62,10 +80,14 @@ def instance_root(instance_id: str, home: Path | None = None) -> Path:
 
 
 def default_instance_install_root(*, instance_id: str = "default", home: Path | None = None) -> Path:
+    if safe_instance_id(instance_id) == "default":
+        return (user_state_root(home) / "install").resolve()
     return (instance_root(instance_id, home) / "install").resolve()
 
 
 def default_instance_memory_root(*, instance_id: str = "default", home: Path | None = None) -> Path:
+    if safe_instance_id(instance_id) == "default":
+        return (user_state_root(home) / "memory").resolve()
     return (instance_root(instance_id, home) / "memory").resolve()
 
 
@@ -93,8 +115,6 @@ def safe_instance_id(value: str) -> str:
 def agent_memory_cli_for_root(root: Path = ROOT) -> str:
     if (root / "scripts" / "agent-context-engine").exists():
         return "./scripts/agent-context-engine"
-    if (root / "scripts" / "agent-memory").exists():
-        return "./scripts/agent-memory"
     return "./docs/skills/agent-context-engine/scripts/agent-context-engine"
 
 
@@ -123,7 +143,7 @@ def _normalize_path_strings(values: list[object] | tuple[object, ...] | None) ->
 
 def default_installation_profile() -> dict[str, Any]:
     return {
-        "version": 3,
+        "version": 4,
         "instance_id": ROOT.name,
         "root": str(ROOT.resolve()),
         "platform": "mac",
@@ -138,13 +158,19 @@ def default_installation_profile() -> dict[str, Any]:
         "workspace_roots": {client: [] for client in WORKSPACE_ROOT_CLIENTS},
         "wrapper_naming": {
             "prefix": "",
-            "suffix": "",
+            "suffix": "-ace",
             "template": "{prefix}{base}{suffix}",
         },
         "monitor": {
             "host": DEFAULT_MONITOR_HOST,
             "port": DEFAULT_MONITOR_PORT,
             "language": "en",
+            "last_started_at": "",
+            "last_started_by": "",
+            "last_stopped_at": "",
+            "last_seen_at": "",
+            "last_known_url": "",
+            "last_known_pid": 0,
         },
         "launchagent": {
             "label": DEFAULT_LABEL,
@@ -306,6 +332,82 @@ def save_instance_metadata(instance_id: str, payload: dict[str, Any], home: Path
     return payload
 
 
+def default_link_registry() -> dict[str, Any]:
+    return {
+        "version": LINK_REGISTRY_VERSION,
+        "updated_at": "",
+        "entries": {},
+    }
+
+
+def load_link_registry(home: Path | None = None) -> dict[str, Any]:
+    defaults = default_link_registry()
+    path = link_registry_path(home)
+    if not path.exists():
+        return defaults
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return defaults
+    if not isinstance(payload, dict):
+        return defaults
+    entries = payload.get("entries")
+    normalized = dict(defaults)
+    normalized["version"] = max(1, int(payload.get("version") or LINK_REGISTRY_VERSION))
+    normalized["updated_at"] = str(payload.get("updated_at") or "")
+    normalized["entries"] = dict(entries) if isinstance(entries, dict) else {}
+    return normalized
+
+
+def save_link_registry(payload: dict[str, Any], home: Path | None = None) -> dict[str, Any]:
+    current = load_link_registry(home)
+    current.update(payload or {})
+    current["version"] = max(1, int(current.get("version") or LINK_REGISTRY_VERSION))
+    current["updated_at"] = _utc_timestamp()
+    entries = current.get("entries")
+    current["entries"] = dict(entries) if isinstance(entries, dict) else {}
+    path = link_registry_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(current, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return current
+
+
+def record_link_registry_entry(
+    *,
+    logical_name: str,
+    link_kind: str,
+    path: Path,
+    target: Path | None,
+    status: str,
+    installation_root: Path | None = None,
+    command_name: str | None = None,
+    changed_by_version: str | None = None,
+    home: Path | None = None,
+) -> dict[str, Any]:
+    registry = load_link_registry(home)
+    entries = dict(registry.get("entries") or {})
+    key = str(logical_name).strip()
+    now = _utc_timestamp()
+    existing = dict(entries.get(key) or {})
+    created_at = str(existing.get("created_at") or now)
+    entry = {
+        "logical_name": key,
+        "link_kind": str(link_kind).strip(),
+        "status": str(status).strip(),
+        "path": str(path.expanduser().resolve(strict=False)),
+        "target": str(target.expanduser().resolve(strict=False)) if target is not None else "",
+        "installation_root": str(installation_root.expanduser().resolve(strict=False)) if installation_root is not None else "",
+        "command_name": str(command_name or key).strip(),
+        "created_at": created_at,
+        "updated_at": now,
+        "last_verified_at": now,
+        "changed_by_version": str(changed_by_version or PRODUCT_VERSION).strip() or PRODUCT_VERSION,
+    }
+    entries[key] = entry
+    save_link_registry({"entries": entries}, home=home)
+    return entry
+
+
 def _write_symlink(path: Path, target: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_symlink() or path.exists():
@@ -367,7 +469,7 @@ def _git_checkout_metadata(root: Path) -> dict[str, Any]:
 def _normalize_installation_profile(payload: dict[str, Any] | None) -> dict[str, Any]:
     profile = default_installation_profile()
     if isinstance(payload, dict):
-        profile["version"] = max(2, int(payload.get("version") or 3))
+        profile["version"] = max(2, int(payload.get("version") or 4))
         profile["instance_id"] = str(payload.get("instance_id") or profile["instance_id"]).strip() or profile["instance_id"]
         profile["root"] = str(payload.get("root") or profile["root"]).strip() or profile["root"]
         profile["platform"] = str(payload.get("platform") or "mac")
@@ -433,6 +535,12 @@ def _normalize_installation_profile(payload: dict[str, Any] | None) -> dict[str,
                 "host": host,
                 "port": max(1, min(port, 65535)),
                 "language": language if language in {"en", "de"} else "en",
+                "last_started_at": str(monitor.get("last_started_at") or ""),
+                "last_started_by": str(monitor.get("last_started_by") or ""),
+                "last_stopped_at": str(monitor.get("last_stopped_at") or ""),
+                "last_seen_at": str(monitor.get("last_seen_at") or ""),
+                "last_known_url": str(monitor.get("last_known_url") or ""),
+                "last_known_pid": int(monitor.get("last_known_pid") or 0),
             }
         launchagent = payload.get("launchagent")
         if isinstance(launchagent, dict):
@@ -531,6 +639,14 @@ def merge_installation_profile(
             except (TypeError, ValueError):
                 port = DEFAULT_MONITOR_PORT
             current_monitor["port"] = max(1, min(port, 65535))
+        for key in ("last_started_at", "last_started_by", "last_stopped_at", "last_seen_at", "last_known_url"):
+            if key in monitor:
+                current_monitor[key] = str(monitor.get(key) or "")
+        if "last_known_pid" in monitor:
+            try:
+                current_monitor["last_known_pid"] = max(0, int(monitor.get("last_known_pid") or 0))
+            except (TypeError, ValueError):
+                current_monitor["last_known_pid"] = 0
         profile["monitor"] = current_monitor
     if launchagent:
         current_launchagent = dict(profile.get("launchagent") or {})
@@ -642,32 +758,274 @@ def ensure_storage_profile(
     return profile
 
 
+def _blank_monitor_runtime_registry() -> dict[str, Any]:
+    return {
+        "version": MONITOR_RUNTIME_REGISTRY_VERSION,
+        "updated_at": "",
+        "entries": [],
+    }
+
+
+def _normalize_monitor_runtime_entry(payload: dict[str, Any] | None) -> dict[str, Any]:
+    data = payload if isinstance(payload, dict) else {}
+    try:
+        configured_port = max(0, min(int(data.get("configured_port") or 0), 65535))
+    except (TypeError, ValueError):
+        configured_port = 0
+    try:
+        active_port = max(0, min(int(data.get("active_port") or 0), 65535))
+    except (TypeError, ValueError):
+        active_port = 0
+    try:
+        pid = max(0, int(data.get("pid") or 0))
+    except (TypeError, ValueError):
+        pid = 0
+    return {
+        "instance_id": str(data.get("instance_id") or "").strip(),
+        "installation_root": str(data.get("installation_root") or "").strip(),
+        "memory_root": str(data.get("memory_root") or "").strip(),
+        "configured_host": str(data.get("configured_host") or "").strip(),
+        "configured_port": configured_port,
+        "active_host": str(data.get("active_host") or "").strip(),
+        "active_port": active_port,
+        "pid": pid,
+        "status": str(data.get("status") or "").strip() or "unknown",
+        "runner": str(data.get("runner") or "").strip(),
+        "language": str(data.get("language") or "").strip(),
+        "monitor_version": str(data.get("monitor_version") or ""),
+        "product_version": str(data.get("product_version") or ""),
+        "started_at": str(data.get("started_at") or ""),
+        "updated_at": str(data.get("updated_at") or ""),
+        "stopped_at": str(data.get("stopped_at") or ""),
+        "last_known_url": str(data.get("last_known_url") or ""),
+    }
+
+
+def load_monitor_runtime_registry(home: Path | None = None) -> dict[str, Any]:
+    path = monitor_runtime_registry_path(home)
+    if not path.exists():
+        return _blank_monitor_runtime_registry()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return _blank_monitor_runtime_registry()
+    if not isinstance(payload, dict):
+        return _blank_monitor_runtime_registry()
+    entries = payload.get("entries")
+    normalized_entries: list[dict[str, Any]] = []
+    if isinstance(entries, list):
+        normalized_entries = [_normalize_monitor_runtime_entry(item) for item in entries if isinstance(item, dict)]
+    return {
+        "version": max(1, int(payload.get("version") or MONITOR_RUNTIME_REGISTRY_VERSION)),
+        "updated_at": str(payload.get("updated_at") or ""),
+        "entries": normalized_entries,
+    }
+
+
+def save_monitor_runtime_registry(payload: dict[str, Any], home: Path | None = None) -> dict[str, Any]:
+    registry = load_monitor_runtime_registry(home)
+    if isinstance(payload, dict):
+        registry["version"] = max(1, int(payload.get("version") or registry.get("version") or MONITOR_RUNTIME_REGISTRY_VERSION))
+        registry["updated_at"] = str(payload.get("updated_at") or registry.get("updated_at") or "")
+        entries = payload.get("entries")
+        if isinstance(entries, list):
+            registry["entries"] = [_normalize_monitor_runtime_entry(item) for item in entries if isinstance(item, dict)]
+    path = monitor_runtime_registry_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(registry, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return registry
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def active_monitor_runtime_entries(home: Path | None = None, *, prune: bool = True) -> list[dict[str, Any]]:
+    registry = load_monitor_runtime_registry(home)
+    changed = False
+    active_entries: list[dict[str, Any]] = []
+    normalized_entries: list[dict[str, Any]] = []
+    for entry in list(registry.get("entries") or []):
+        normalized = _normalize_monitor_runtime_entry(entry)
+        live = _pid_alive(int(normalized.get("pid") or 0))
+        if normalized.get("status") in {"running", "starting"} and not live:
+            normalized["status"] = "stale"
+            normalized["pid"] = 0
+            normalized["stopped_at"] = normalized.get("stopped_at") or _utc_timestamp()
+            normalized["updated_at"] = _utc_timestamp()
+            changed = True
+        if normalized.get("status") in {"running", "starting"} and live:
+            active_entries.append(normalized)
+        normalized_entries.append(normalized)
+    if prune and changed:
+        save_monitor_runtime_registry(
+            {
+                "version": registry.get("version") or MONITOR_RUNTIME_REGISTRY_VERSION,
+                "updated_at": _utc_timestamp(),
+                "entries": normalized_entries,
+            },
+            home=home,
+        )
+    return active_entries
+
+
+def mark_monitor_runtime_entries_stopped(
+    *,
+    installation_root: Path | None = None,
+    memory_root: Path | None = None,
+    exclude_installation_root: Path | None = None,
+    reason_status: str = "stopped",
+    home: Path | None = None,
+) -> list[dict[str, Any]]:
+    registry = load_monitor_runtime_registry(home)
+    entries = list(registry.get("entries") or [])
+    normalized_installation_root = str(installation_root.resolve()) if installation_root is not None else ""
+    normalized_memory_root = str(memory_root.resolve()) if memory_root is not None else ""
+    normalized_exclude_root = str(exclude_installation_root.resolve()) if exclude_installation_root is not None else ""
+    if not normalized_installation_root and not normalized_memory_root:
+        return []
+
+    now = _utc_timestamp()
+    changed_entries: list[dict[str, Any]] = []
+    updated_entries: list[dict[str, Any]] = []
+    for entry in entries:
+        normalized = _normalize_monitor_runtime_entry(entry)
+        entry_installation_root = str(normalized.get("installation_root") or "").strip()
+        entry_memory_root = str(normalized.get("memory_root") or "").strip()
+        matches_installation = bool(normalized_installation_root) and entry_installation_root == normalized_installation_root
+        matches_memory = bool(normalized_memory_root) and entry_memory_root == normalized_memory_root
+        excluded = bool(normalized_exclude_root) and entry_installation_root == normalized_exclude_root
+        if excluded or not (matches_installation or matches_memory):
+            updated_entries.append(normalized)
+            continue
+        if normalized.get("status") not in {"running", "starting"}:
+            updated_entries.append(normalized)
+            continue
+        normalized["status"] = reason_status
+        normalized["active_host"] = ""
+        normalized["active_port"] = 0
+        normalized["pid"] = 0
+        normalized["stopped_at"] = now
+        normalized["updated_at"] = now
+        updated_entries.append(normalized)
+        changed_entries.append(dict(normalized))
+
+    if changed_entries:
+        save_monitor_runtime_registry(
+            {
+                "version": registry.get("version") or MONITOR_RUNTIME_REGISTRY_VERSION,
+                "updated_at": now,
+                "entries": updated_entries,
+            },
+            home=home,
+        )
+    return changed_entries
+
+
+def record_monitor_runtime(
+    *,
+    instance_id: str,
+    installation_root: Path,
+    memory_root: Path,
+    configured_host: str,
+    configured_port: int,
+    active_host: str,
+    active_port: int,
+    pid: int,
+    status: str,
+    runner: str,
+    language: str,
+    monitor_version: str,
+    product_version: str,
+    started_at: str | None = None,
+    stopped_at: str | None = None,
+    last_known_url: str = "",
+    home: Path | None = None,
+) -> dict[str, Any]:
+    registry = load_monitor_runtime_registry(home)
+    entries = list(registry.get("entries") or [])
+    now = _utc_timestamp()
+    entry = _normalize_monitor_runtime_entry(
+        {
+            "instance_id": safe_instance_id(instance_id),
+            "installation_root": str(installation_root.resolve()),
+            "memory_root": str(memory_root.resolve()),
+            "configured_host": configured_host,
+            "configured_port": configured_port,
+            "active_host": active_host,
+            "active_port": active_port,
+            "pid": pid,
+            "status": status,
+            "runner": runner,
+            "language": language,
+            "monitor_version": monitor_version,
+            "product_version": product_version,
+            "started_at": started_at or now,
+            "updated_at": now,
+            "stopped_at": stopped_at or "",
+            "last_known_url": last_known_url,
+        }
+    )
+    replaced = False
+    for index, existing in enumerate(entries):
+        normalized = _normalize_monitor_runtime_entry(existing)
+        if normalized.get("instance_id") == entry["instance_id"] or normalized.get("installation_root") == entry["installation_root"]:
+            entries[index] = {**normalized, **entry}
+            replaced = True
+            break
+    if not replaced:
+        entries.append(entry)
+    save_monitor_runtime_registry(
+        {
+            "version": registry.get("version") or MONITOR_RUNTIME_REGISTRY_VERSION,
+            "updated_at": now,
+            "entries": entries,
+        },
+        home=home,
+    )
+    return entry
+
+
 def resolve_wrapper_naming(root: Path = ROOT) -> dict[str, str]:
     naming = dict(load_installation_profile(root).get("wrapper_naming") or {})
     return {
         "prefix": str(naming.get("prefix") or ""),
-        "suffix": str(naming.get("suffix") or ""),
+        "suffix": str(naming.get("suffix") or "-ace"),
         "template": str(naming.get("template") or "{prefix}{base}{suffix}") or "{prefix}{base}{suffix}",
     }
 
 
 def resolve_wrapper_command_name(base_name: str, *, root: Path = ROOT) -> str:
     naming = resolve_wrapper_naming(root)
+    normalized_base = base_name
+    if naming["prefix"] or naming["suffix"]:
+        if base_name.endswith("-memory"):
+            normalized_base = base_name[: -len("-memory")]
+        elif base_name.endswith("-ace"):
+            normalized_base = base_name[: -len("-ace")]
     template = naming["template"]
     try:
-        rendered = template.format(prefix=naming["prefix"], base=base_name, suffix=naming["suffix"])
+        rendered = template.format(prefix=naming["prefix"], base=normalized_base, suffix=naming["suffix"])
     except Exception:
-        rendered = f"{naming['prefix']}{base_name}{naming['suffix']}"
-    return rendered.strip() or base_name
+        rendered = f"{naming['prefix']}{normalized_base}{naming['suffix']}"
+    return rendered.strip() or normalized_base
 
 
 def resolve_runner_wrapper_name(client: str, *, root: Path = ROOT) -> str:
     mapping = {
-        "codex": "codex-memory",
-        "claude": "claude-memory",
-        "antigravity": "agy-memory",
-        "gemini": "gemini-memory",
-        "opencode": "opencode-memory",
+        "codex": "codex-ace",
+        "claude": "claude-ace",
+        "antigravity": "agy-ace",
+        "gemini": "gemini-ace",
+        "opencode": "opencode-ace",
     }
     base_name = mapping.get(str(client or "").strip().lower(), "")
     return resolve_wrapper_command_name(base_name, root=root) if base_name else ""
