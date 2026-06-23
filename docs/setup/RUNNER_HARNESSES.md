@@ -54,7 +54,7 @@ by default:
 - OpenCode plugin bridge under `.opencode/plugins/` in the central root
 - Agent guidance in `AGENTS.md`
 - startup contract in `session-start-hook-entry.md`
-- local CLI under `scripts/agent-context-engine` or `docs/skills/agent-context-engine/scripts/agent-context-engine`
+- local CLI under `scripts/ace` (shortcut to `scripts/agent-context-engine`) or `docs/skills/agent-context-engine/scripts/agent-context-engine`
 - default `.venv/` when `install` runs normally; use `--no-bootstrap-runtime` to skip it
 
 Central installation does not automatically activate every client in every other

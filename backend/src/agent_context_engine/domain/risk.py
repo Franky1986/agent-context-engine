@@ -288,7 +288,7 @@ def extract_command_from_tool_input(tool_input: Any) -> str:
     if isinstance(tool_input, str):
         return tool_input
     if isinstance(tool_input, dict):
-        for key in ("command", "cmd", "shell_command", "script"):
+        for key in ("command", "cmd", "shell_command", "script", "command_line", "commandLine", "CommandLine"):
             value = tool_input.get(key)
             if isinstance(value, str):
                 return value
@@ -366,6 +366,10 @@ def _tool_input_looks_like_local_read(tool_input: Any) -> bool:
             "target_file",
             "source_file",
             "uri",
+            "absolute_path",
+            "AbsolutePath",
+            "relative_path",
+            "RelativePath",
         )
         for key in path_keys:
             value = tool_input.get(key)
@@ -544,6 +548,9 @@ def is_agent_memory_cli_command(command: str) -> bool:
             break
         normalized = " ".join(unwrapped.strip().split())
     patterns = (
+        "agent-context-engine ",
+        "./scripts/ace ",
+        "scripts/ace ",
         "./scripts/agent-context-engine ",
         "scripts/agent-context-engine ",
         "./docs/skills/agent-context-engine/scripts/agent-context-engine ",
@@ -557,8 +564,22 @@ def is_agent_memory_cli_command(command: str) -> bool:
         "python ./docs/skills/agent-context-engine/scripts/agent_context_engine.py ",
         "python docs/skills/agent-context-engine/scripts/agent_context_engine.py ",
     )
-    exact = {"./scripts/agent-context-engine", "scripts/agent-context-engine", "./docs/skills/agent-context-engine/scripts/agent-context-engine"}
-    return normalized in exact or normalized.endswith("/scripts/agent-context-engine") or normalized.endswith("/docs/skills/agent-context-engine/scripts/agent-context-engine") or normalized.startswith(patterns)
+    exact = {
+        "agent-context-engine",
+        "./scripts/ace",
+        "scripts/ace",
+        "./scripts/agent-context-engine",
+        "scripts/agent-context-engine",
+        "./docs/skills/agent-context-engine/scripts/agent-context-engine",
+    }
+    return (
+        normalized in exact
+        or normalized.endswith("/agent-context-engine")
+        or normalized.endswith("/scripts/ace")
+        or normalized.endswith("/scripts/agent-context-engine")
+        or normalized.endswith("/docs/skills/agent-context-engine/scripts/agent-context-engine")
+        or normalized.startswith(patterns)
+    )
 
 
 def is_agent_memory_self_approval_command(command: str) -> bool:

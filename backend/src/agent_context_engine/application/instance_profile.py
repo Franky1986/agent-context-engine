@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -113,6 +114,22 @@ def safe_instance_id(value: str) -> str:
 
 
 def agent_memory_cli_for_root(root: Path = ROOT) -> str:
+    if (root / "scripts" / "ace").exists():
+        return "./scripts/ace"
+    if (root / "scripts" / "agent-context-engine").exists():
+        return "./scripts/agent-context-engine"
+    return "./docs/skills/agent-context-engine/scripts/agent-context-engine"
+
+
+def preferred_agent_memory_cli_for_root(root: Path = ROOT) -> str:
+    cli_target = (root / "scripts" / "agent-context-engine").resolve()
+    bare = shutil.which("agent-context-engine")
+    if bare:
+        try:
+            if Path(bare).resolve() == cli_target:
+                return "agent-context-engine"
+        except OSError:
+            pass
     if (root / "scripts" / "agent-context-engine").exists():
         return "./scripts/agent-context-engine"
     return "./docs/skills/agent-context-engine/scripts/agent-context-engine"

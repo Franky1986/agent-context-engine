@@ -48,6 +48,7 @@ def _watched_runtime_paths(root: Path) -> list[Path]:
         root / "backend" / "src" / "agent_memory" / "interfaces" / "http" / "version.py",
         root / "backend" / "src" / "agent_memory" / "adapters" / "launchagent.py",
         root / "backend" / "src" / "agent_memory" / "interfaces" / "cli" / "main.py",
+        root / "scripts" / "ace",
         root / "scripts" / "agent-memory",
         root / DEFAULT_ENV_FILE,
     ]

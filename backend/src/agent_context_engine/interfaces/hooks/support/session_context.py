@@ -9,13 +9,17 @@ from ....infrastructure.config import ROOT, json_dumps, session_short, sh_quote
 from ....application.personal import PERSONAL_ROOT, parse_frontmatter, personal_files, startup_safe_personal_context
 from ....application.firewall import active_firewall_override, firewall_status
 from .payloads import normalized_path, one_line
+from ....application.instance_profile import preferred_agent_memory_cli_for_root
 
 
 SESSION_START_HOOK_ENTRY = ROOT / "session-start-hook-entry.md"
 
 
 def agent_memory_command_prefix() -> str:
-    return f"cd {sh_quote(str(ROOT))} && ./scripts/agent-context-engine"
+    cli = preferred_agent_memory_cli_for_root(ROOT)
+    if cli == "agent-context-engine":
+        return cli
+    return f"cd {sh_quote(str(ROOT))} && {cli}"
 
 
 def _default_startup_entry(command_prefix: str) -> str:

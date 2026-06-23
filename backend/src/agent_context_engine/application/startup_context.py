@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import re
 
-from .instance_profile import agent_memory_cli_for_root, monitor_restart_command, resolve_monitor_profile
+from .instance_profile import monitor_restart_command, preferred_agent_memory_cli_for_root, resolve_monitor_profile
 from .personal import PERSONAL_ROOT, parse_frontmatter, personal_files
 from ..infrastructure.config import REPOS_INDEX, ROOT
 
@@ -124,6 +124,7 @@ def cmd_repo_context(args: argparse.Namespace) -> int:
 
 
 def cmd_session_start_context(args: argparse.Namespace) -> int:
+    cli_prefix = preferred_agent_memory_cli_for_root(ROOT)
     print("# Agent Context Engine Session Start Context")
     print("")
     print("## Session Start")
@@ -135,24 +136,24 @@ def cmd_session_start_context(args: argparse.Namespace) -> int:
     print("")
     print("## CLI Workflow")
     print("")
-    print("- `./scripts/agent-context-engine session-start-context`")
-    print("- `./scripts/agent-context-engine last --limit 10`")
-    print('- `./scripts/agent-context-engine use "<session|title|search terms>"`')
-    print('- `./scripts/agent-context-engine handover "<session|title|search terms>"`')
-    print('- `./scripts/agent-context-engine retrieve "<question or search terms>" --limit 10`')
-    print('- `./scripts/agent-context-engine search "<search terms>" --limit 5`')
-    print("- `./scripts/agent-context-engine retrieval-runs --limit 10`")
-    print("- `./scripts/agent-context-engine retrieval-run <retrieval_run_id>`")
-    print("- `./scripts/agent-context-engine personal-context --list`")
-    print("- `./scripts/agent-context-engine personal-context <identifier>`")
-    print("- `./scripts/agent-context-engine repo-context --list`")
-    print("- `./scripts/agent-context-engine repo-context <identifier>`")
+    print(f"- `{cli_prefix} session-start-context`")
+    print(f"- `{cli_prefix} last --limit 10`")
+    print(f'- `{cli_prefix} use "<session|title|search terms>"`')
+    print(f'- `{cli_prefix} handover "<session|title|search terms>"`')
+    print(f'- `{cli_prefix} retrieve "<question or search terms>" --limit 10`')
+    print(f'- `{cli_prefix} search "<search terms>" --limit 5`')
+    print(f"- `{cli_prefix} retrieval-runs --limit 10`")
+    print(f"- `{cli_prefix} retrieval-run <retrieval_run_id>`")
+    print(f"- `{cli_prefix} personal-context --list`")
+    print(f"- `{cli_prefix} personal-context <identifier>`")
+    print(f"- `{cli_prefix} repo-context --list`")
+    print(f"- `{cli_prefix} repo-context <identifier>`")
     print("")
     print("## Monitor Workflow")
     print("")
     monitor_profile = resolve_monitor_profile(ROOT)
     restart_command = monitor_restart_command(ROOT)
-    cli_prefix = agent_memory_cli_for_root(ROOT)
+    cli_prefix = preferred_agent_memory_cli_for_root(ROOT)
     print(f"- `{restart_command}`")
     print(f"- `{cli_prefix} runtime-reconcile`")
     print(f"- Local URL after start: `http://{monitor_profile['host']}:{monitor_profile['port']}/?lang={monitor_profile['language']}`")

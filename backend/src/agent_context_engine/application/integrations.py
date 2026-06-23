@@ -11,7 +11,7 @@ from typing import Any
 from ..adapters.runners.cursor import CURSOR_EVENTS, cursor_hook_entry, cursor_paths, enable_cursor_hooks, is_agent_memory_cursor_hook, load_cursor_hooks, write_cursor_hooks
 from .hooks_state import hook_runner_status
 from ..infrastructure.config import ANTIGRAVITY_DREAM_MODEL, OPENCODE_DREAM_MODEL, ROOT, SCRIPT_PATH, SKILL_ROOT, sh_quote
-from .instance_profile import agent_memory_cli_for_root, load_installation_profile, resolve_runner_wrapper_name, resolve_wrapper_command_name
+from .instance_profile import agent_memory_cli_for_root, load_installation_profile, preferred_agent_memory_cli_for_root, resolve_runner_wrapper_name, resolve_wrapper_command_name
 
 
 GEMINI_MINI_PREFERENCE = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]
@@ -24,6 +24,10 @@ INTEGRATION_HISTORY_PATH = Path("memory") / "status" / "integration-history.json
 
 def _root_prefixed(command: str, *, root: Path = ROOT) -> str:
     return f"cd {sh_quote(str(root.resolve()))} && {command}"
+
+
+def _agent_memory_cli_display(root: Path = ROOT) -> str:
+    return preferred_agent_memory_cli_for_root(root)
 
 
 def workspace_binding_path(client: str, *, root: Path = ROOT) -> Path | None:
@@ -145,7 +149,7 @@ def _effective_binding_hooks_state(local_state: str, binding_state: str) -> tupl
 
 
 def integration_hook_command(*, client: str, action: str, target_root: Path | None = None, root: Path = ROOT) -> str:
-    command = f"./scripts/agent-context-engine integration-hooks --client {client} --action {action}"
+    command = f"{_agent_memory_cli_display(root)} integration-hooks --client {client} --action {action}"
     if target_root is not None:
         command += f" --target {sh_quote(str(target_root.resolve()))}"
     return _root_prefixed(command, root=root)
@@ -200,9 +204,9 @@ def _global_wrapper_status(command_name: str) -> dict[str, Any]:
 
 def _global_wrapper_activation(command_name: str, *, root: Path = ROOT) -> dict[str, Any]:
     return {
-        "global_activation_command": _root_prefixed(f"./scripts/agent-context-engine global-wrapper-enable {command_name}", root=root),
-        "global_deactivation_command": _root_prefixed(f"./scripts/agent-context-engine global-wrapper-disable {command_name}", root=root),
-        "global_status_command": _root_prefixed("./scripts/agent-context-engine global-wrapper-status", root=root),
+        "global_activation_command": _root_prefixed(f"{_agent_memory_cli_display(root)} global-wrapper-enable {command_name}", root=root),
+        "global_deactivation_command": _root_prefixed(f"{_agent_memory_cli_display(root)} global-wrapper-disable {command_name}", root=root),
+        "global_status_command": _root_prefixed(f"{_agent_memory_cli_display(root)} global-wrapper-status", root=root),
     }
 
 
@@ -1231,8 +1235,11 @@ def render_opencode_config(
     return json.dumps(config, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
-def render_opencode_plugin(memory_root: Path = ROOT) -> str:
+def render_opencode_plugin(root: Path = ROOT, memory_root: Path | None = None) -> str:
+    if memory_root is None:
+        memory_root = root
     script = str(SCRIPT_PATH)
+    install_root_text = str(root)
     memory_root_text = str(memory_root)
     hooks_state_rel = str(Path("memory") / "local" / "hooks-state.json")
     return f"""import {{ appendFileSync, mkdirSync, readFileSync }} from "node:fs"
@@ -1246,11 +1253,12 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
 
   const python = "python3"
   const script = {json.dumps(script)}
+  const installRoot = {json.dumps(install_root_text)}
   const memoryRoot = {json.dumps(memory_root_text)}
   const hooksStateRelativePath = {json.dumps(hooks_state_rel)}
 
   const launchCwd = process.env.AGENT_MEMORY_LAUNCH_CWD || ""
-  const opencodeBridgeLog = join(memoryRoot, "memory", "logs", "opencode-hook.err.log")
+  const opencodeBridgeLog = join(memoryRoot, "logs", "opencode-hook.err.log")
   const currentCwd = (fallback = "") => launchCwd || worktree || directory || fallback || "."
   const sessionIdFrom = (...values) => {{
     for (const value of values) {{
@@ -1284,7 +1292,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
 
   const hooksEnabled = () => {{
     try {{
-      const raw = readFileSync(join(memoryRoot, hooksStateRelativePath), "utf8")
+      const raw = readFileSync(join(installRoot, hooksStateRelativePath), "utf8")
       const state = JSON.parse(raw)
       if (state && state.enabled === false) return false
       const runnerState = state?.runners?.opencode
@@ -1297,7 +1305,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
 
   const logAsyncBridgeError = (message, error) => {{
     try {{
-      mkdirSync(join(memoryRoot, "memory", "logs"), {{ recursive: true }})
+      mkdirSync(join(memoryRoot, "logs"), {{ recursive: true }})
       const detail = error instanceof Error ? (error.stack || error.message) : String(error || "")
       appendFileSync(opencodeBridgeLog, `[${{new Date().toISOString()}}] ${{message}}${{detail ? ` :: ${{detail}}` : ""}}\\n`, "utf8")
     }} catch (_logError) {{
@@ -1313,7 +1321,8 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
       encoding: "utf8",
       env: {{
         ...process.env,
-        AGENT_CONTEXT_ENGINE_ROOT: memoryRoot,
+        AGENT_CONTEXT_ENGINE_ROOT: installRoot,
+        AGENT_CONTEXT_ENGINE_STORAGE_ROOT: memoryRoot,
       }},
     }})
     const stdout = (proc.stdout || "").trim()
@@ -1329,7 +1338,8 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
       cwd: currentCwd(payload?.cwd || ""),
       env: {{
         ...process.env,
-        AGENT_CONTEXT_ENGINE_ROOT: memoryRoot,
+        AGENT_CONTEXT_ENGINE_ROOT: installRoot,
+        AGENT_CONTEXT_ENGINE_STORAGE_ROOT: memoryRoot,
       }},
       stdio: ["pipe", "ignore", "ignore"],
       detached: true,
@@ -1496,7 +1506,7 @@ def ensure_opencode_project(
         ),
         encoding="utf-8",
     )
-    paths["plugin_file"].write_text(render_opencode_plugin(memory_root or root), encoding="utf-8")
+    paths["plugin_file"].write_text(render_opencode_plugin(root=root, memory_root=memory_root), encoding="utf-8")
     return paths
 
 
@@ -1567,7 +1577,7 @@ def opencode_status(root: Path = ROOT) -> dict[str, Any]:
         "usage_hint": usage_hint,
         "working_root": str(root.resolve()),
         "terminal_command": _root_prefixed("./scripts/opencode-ace", root=root),
-        "activation_command": _root_prefixed("./scripts/agent-context-engine opencode-enable", root=root),
+        "activation_command": _root_prefixed(f"{_agent_memory_cli_display(root)} opencode-enable", root=root),
         **wrapper_status,
         **hook_status,
         "prepared": bool(wrapper_status["wrapper_path_exists"]) or bool(hook_status["prepared"]),
@@ -1615,7 +1625,7 @@ def antigravity_status(*, root: Path = ROOT) -> dict[str, Any]:
         "usage_hint": usage_hint,
         "working_root": str(root.resolve()),
         "terminal_command": _root_prefixed("./scripts/agy-ace", root=root),
-        "activation_command": _root_prefixed("./scripts/agent-context-engine antigravity-enable", root=root),
+        "activation_command": _root_prefixed(f"{_agent_memory_cli_display(root)} antigravity-enable", root=root),
         "resume_command": "agy --conversation <conversation-id>",
         "conversation_resume_command": "agy --conversation <conversation-id>",
         "legacy_wrapper_command": "./scripts/antigravity-ace",
@@ -1662,7 +1672,7 @@ def gemini_status(*, root: Path = ROOT, probe: bool = False) -> dict[str, Any]:
         "usage_hint": usage_hint,
         "working_root": str(root.resolve()),
         "terminal_command": _root_prefixed("./scripts/gemini-ace", root=root),
-        "activation_command": _root_prefixed("./scripts/agent-context-engine gemini-enable", root=root),
+        "activation_command": _root_prefixed(f"{_agent_memory_cli_display(root)} gemini-enable", root=root),
         "prepared": bool(wrapper_status["wrapper_path_exists"]) or bool(hook_status["prepared"]),
         **wrapper_status,
         **hook_status,
@@ -1759,7 +1769,7 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
             "usage_mode": "project_activation",
             "usage_hint": "Run the activation command once per project from the Agent Context Engine root. Afterwards open that project in Cursor and work there normally.",
             "working_root": str(root.resolve()),
-            "activation_command": _root_prefixed("./scripts/agent-context-engine cursor-enable --target <project-path>", root=root),
+            "activation_command": _root_prefixed(f"{_agent_memory_cli_display(root)} cursor-enable --target <project-path>", root=root),
             "global_command_name": "",
             "global_command_available": False,
             "global_command_path": "",

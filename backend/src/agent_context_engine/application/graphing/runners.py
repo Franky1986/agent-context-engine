@@ -95,11 +95,9 @@ def gemini_graph_command(model: str | None = None) -> list[str]:
 def antigravity_graph_command(model: str | None = None) -> list[str]:
     return [
         "agy",
+        "--print",
         "--model",
         model or ANTIGRAVITY_DREAM_MODEL,
-        "--output-format",
-        "text",
-        "--prompt",
     ]
 
 
