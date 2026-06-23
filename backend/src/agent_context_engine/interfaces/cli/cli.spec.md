@@ -21,6 +21,9 @@ application services.
   memory root, wrapper naming, monitor port selection, and user confirmation.
 - Expose global-only runner preparation flows that operate on the installation
   root while still allowing an external shared memory root.
+- Keep the public management CLI contract explicit: generated guidance and
+  operator-facing commands should prefer `agent-context-engine` from `PATH`,
+  with repo-local script paths treated as compatibility fallbacks.
 
 ## Inputs / Outputs
 - Inputs: command line arguments, environment flags, current working directory.
@@ -41,12 +44,14 @@ application services.
   application paths that audit those effects.
 
 ## Acceptance Criteria
-- `./scripts/agent-context-engine --help` and core commands remain stable.
+- `agent-context-engine --help` and core commands remain stable.
 - No new core logic appears in command modules.
 - JSON output stays parseable where documented.
+- Install discovery and install execution agree on shared-command takeover
+  semantics for `agent-context-engine`, `ace`, and `*-ace` wrapper links.
 - Install discovery and install execution agree on wrapper-link conflict
-  semantics for both direct `scripts/*` targets and installed
-  `docs/skills/.../scripts/*` targets within the same checkout.
+  semantics for direct `scripts/*` targets and active installed script targets
+  within the same checkout.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`

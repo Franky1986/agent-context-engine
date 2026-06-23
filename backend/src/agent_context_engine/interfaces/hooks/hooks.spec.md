@@ -24,6 +24,8 @@ pre-action safety checks, and enqueue or persist events for later processing.
   local inspection can warn while remote fetches still block.
 - Return concrete user guidance for taint-driven blocks, including the
   triggering risk ids and valid direct-chat control lines.
+- Prefer the public `agent-context-engine` command in generated session-start
+  and hook guidance when the active installation owns that global link.
 
 ## Inputs / Outputs
 - Inputs: hook JSON payloads, environment metadata, transcript/session hints.
@@ -61,10 +63,13 @@ pre-action safety checks, and enqueue or persist events for later processing.
 - Cursor classifier runner auth failures fall back to deterministic policy and
   operator guidance instead of creating tainting `classifier_invalid_output`
   cascades.
+- Hook/session command rendering should point at the active installation's
+  public CLI when available, not stale repo-local shortcuts from a superseded
+  installation.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`
-- `./scripts/agent-context-engine doctor`
+- `agent-context-engine doctor`
 
 ## Agent Guardrails
 - Do not persist raw tool output bodies.

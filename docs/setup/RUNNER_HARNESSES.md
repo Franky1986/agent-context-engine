@@ -54,7 +54,10 @@ by default:
 - OpenCode plugin bridge under `.opencode/plugins/` in the central root
 - Agent guidance in `AGENTS.md`
 - startup contract in `session-start-hook-entry.md`
-- local CLI under `scripts/ace` (shortcut to `scripts/agent-context-engine`) or `docs/skills/agent-context-engine/scripts/agent-context-engine`
+- repo-local compatibility CLI under `scripts/agent-context-engine` and
+  `scripts/ace`
+- installed public CLI `agent-context-engine`, relinked to the chosen
+  installation by default
 - default `.venv/` when `install` runs normally; use `--no-bootstrap-runtime` to skip it
 
 Central installation does not automatically activate every client in every other
@@ -67,7 +70,7 @@ Per-project activation remains explicit for:
 - external Claude/Claude Code workspace roots that differ from the central Agent Context Engine root
 
 `antigravity`, `gemini`, and `opencode` are **global-only**: they are started
-through their `*-memory` wrappers from any directory. No project-specific
+through their `*-ace` wrappers from any directory. No project-specific
 `.agents/hooks.json`, `.gemini/settings.json`, or `.opencode/plugins/agent-memory.js`
 files are created anymore.
 
@@ -96,11 +99,18 @@ Rules:
 
 Optional global wrappers can be linked into `~/.local/bin`:
 
+- `agent-context-engine`
+- `ace` (compatibility shortcut)
 - `codex-ace`
 - `claude-ace`
 - `agy-ace`
 - `gemini-ace`
 - `opencode-ace`
+
+The default public installation behavior is to relink these shared commands to
+the chosen installation. If a previous installation already owns them, discovery
+should surface that takeover in the proposed plan before the user approves the
+write step.
 
 `cursor` has no single global wrapper. It is activated per project.
 
@@ -130,8 +140,10 @@ That means:
 - a later explicit project switch inside the chat can move the active workdir
   again without moving the Agent Context Engine root
 
-If another Agent Context Engine installation already exists, do not reuse the same
-global command names blindly. Use:
+If another Agent Context Engine installation already exists, the default shared
+public contract is to move `agent-context-engine`, `ace`, and the shared
+`*-ace` commands to the newly selected installation. Use the following only
+when you explicitly want side-by-side command isolation instead of takeover:
 
 - `--instance-name <name>` during install for isolated commands
 - or `--command-prefix <prefix>` for legacy-compatible prefixes
@@ -189,7 +201,7 @@ templates, wrappers, and monitor assets.
 Use these after the central installation exists:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine cursor-enable --target /path/to/project --memory-root /path/to/agent-context-engine-root
+agent-context-engine cursor-enable --target /path/to/project --memory-root /path/to/agent-context-engine-root
 ```
 
 For `codex`, `claude`, and `cursor`, the workspace hook setup now also writes a
@@ -204,9 +216,9 @@ The following clients are global-only. Enable their central hook bridge once per
 Agent Context Engine root, then use the global wrapper from any directory:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine antigravity-enable
-./docs/skills/agent-context-engine/scripts/agent-context-engine gemini-enable
-./docs/skills/agent-context-engine/scripts/agent-context-engine opencode-enable
+agent-context-engine antigravity-enable
+agent-context-engine gemini-enable
+agent-context-engine opencode-enable
 ```
 
 After enabling the central bridge:
@@ -234,7 +246,8 @@ only for:
 - target root
 - preferred interaction language
 - which harnesses should be used now
-- whether global wrapper links are wanted
+- whether the shared public commands should be taken over here or isolated with
+  instance-specific naming
 - whether this is a second installation
 - whether the actual Codex/Claude/Cursor workspace root differs from the central Agent Context Engine root
 - whether any local projects should be indexed immediately
@@ -253,21 +266,22 @@ Reasonable defaults:
 - prepare Codex, Claude, Antigravity, and Gemini in the central root
 - activate Cursor only when a project path is named
 - enable the central Antigravity, Gemini, and OpenCode bridges in the root
-- avoid global links unless the user asks for shell commands
+- relink the shared `agent-context-engine`, `ace`, and `*-ace` commands to the
+  chosen installation unless the user explicitly wants isolated instance naming
 
 ## Verification
 
 After installation or project activation, verify with:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine doctor
-./docs/skills/agent-context-engine/scripts/agent-context-engine check-installation
-./docs/skills/agent-context-engine/scripts/agent-context-engine monitor --runner codex --replace-existing --no-open
-./docs/skills/agent-context-engine/scripts/agent-context-engine integrations-status
-./docs/skills/agent-context-engine/scripts/agent-context-engine cursor-status --target /path/to/project
-./docs/skills/agent-context-engine/scripts/agent-context-engine gemini-status
-./docs/skills/agent-context-engine/scripts/agent-context-engine antigravity-status
-./docs/skills/agent-context-engine/scripts/agent-context-engine opencode-status
+agent-context-engine doctor
+agent-context-engine check-installation
+agent-context-engine monitor --runner codex --replace-existing --no-open
+agent-context-engine integrations-status
+agent-context-engine cursor-status --target /path/to/project
+agent-context-engine gemini-status
+agent-context-engine antigravity-status
+agent-context-engine opencode-status
 ```
 
 Use `repair-installation --apply` after review when the check reports a missing

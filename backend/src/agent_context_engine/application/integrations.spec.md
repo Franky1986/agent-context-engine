@@ -51,6 +51,8 @@ Each integration item must expose separable status axes:
 - `mini_model`
 - discovered model inventory when available
 - recent integration history and last history entry
+- operator-facing commands that reflect the active installation's public CLI
+  contract
 
 ## Invariants
 
@@ -72,6 +74,9 @@ Each integration item must expose separable status axes:
 11. Global-only runners must prepare their bridge or hook files in the
     installation root that their wrapper actually launches from, not in the
     shared memory root.
+12. Public activation/status commands shown to operators should prefer the
+    installed `agent-context-engine` command when it resolves to the active
+    installation; repo-local script paths are compatibility fallbacks only.
 
 ## Client Families
 

@@ -48,8 +48,8 @@ query, quality checks, repair, and optional sync.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`
-- `./scripts/agent-context-engine graph-status`
-- `./scripts/agent-context-engine graph-quality`
+- `agent-context-engine graph-status`
+- `agent-context-engine graph-quality`
 
 ## Agent Guardrails
 - Do not import HTTP/CLI modules here.

@@ -45,7 +45,7 @@ graph repair, sync, cleanup, and recovery.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`
-- `./scripts/agent-context-engine doctor`
+- `agent-context-engine doctor`
 
 ## Agent Guardrails
 - Do not reintroduce direct launchctl/plist handling here.

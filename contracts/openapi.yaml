@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Agent Context Engine Monitor API
-  version: 0.2.0
+  version: 0.2.1
   description: Incremental contract for the Agent Context Engine React monitor.
 servers:
   - url: http://127.0.0.1:8787

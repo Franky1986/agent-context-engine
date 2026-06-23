@@ -23,6 +23,8 @@ memory artifacts and graph-ready proposals.
   only inferred from a dream summary.
 - Expose stage-level semantic signal classification and review/defer behavior
   as part of the audit trail.
+- Keep runner-family-specific non-interactive command contracts current instead
+  of silently depending on stale legacy CLI flags.
 
 ## Inputs / Outputs
 - Inputs: session/window identifiers, runtime config, runner selection policy.
@@ -42,6 +44,8 @@ memory artifacts and graph-ready proposals.
   required confidence or evidence contract is not met.
 - Semantic evidence that cannot be grounded in the conversation window must not
   be treated as normal durable evidence.
+- Stale runner CLI flags must fail as auditable runner errors rather than being
+  silently retried through undocumented alternate modes.
 
 ## Observability / Audit
 - Stage status must show what was planned, sent, generated, validated, and
@@ -58,10 +62,12 @@ memory artifacts and graph-ready proposals.
   runner emits usage metadata.
 - Semantic persistence must prefer grounded evidence from the actual
   conversation window over paraphrase from dream summaries.
+- Antigravity-backed dream stages use the current non-interactive
+  `agy --print` command contract.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`
-- `./scripts/agent-context-engine doctor`
+- `agent-context-engine doctor`
 
 ## Agent Guardrails
 - Do not reintroduce v1 runtime paths.

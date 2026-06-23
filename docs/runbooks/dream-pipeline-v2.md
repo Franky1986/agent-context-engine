@@ -74,48 +74,48 @@ was processed, what was excluded, and what was persisted.
 Inspect one run:
 
 ```sh
-./scripts/agent-context-engine dream-v2-inspect <dream_run_id>
+agent-context-engine dream-v2-inspect <dream_run_id>
 ```
 
 Inspect with prompt/response content:
 
 ```sh
-./scripts/agent-context-engine dream-v2-inspect <dream_run_id> --include-content
+agent-context-engine dream-v2-inspect <dream_run_id> --include-content
 ```
 
 Evaluate recent runs:
 
 ```sh
-./scripts/agent-context-engine dream-v2-evaluate --limit 20
+agent-context-engine dream-v2-evaluate --limit 20
 ```
 
 Read audit output:
 
 ```sh
-./scripts/agent-context-engine dream-v2-audit <dream_run_id>
-./scripts/agent-context-engine dream-v2-audit <dream_run_id> --section summary
-./scripts/agent-context-engine dream-v2-audit <dream_run_id> --section changes
-./scripts/agent-context-engine dream-v2-audit <dream_run_id> --section review
+agent-context-engine dream-v2-audit <dream_run_id>
+agent-context-engine dream-v2-audit <dream_run_id> --section summary
+agent-context-engine dream-v2-audit <dream_run_id> --section changes
+agent-context-engine dream-v2-audit <dream_run_id> --section review
 ```
 
 List review-required decisions:
 
 ```sh
-./scripts/agent-context-engine dream-v2-review list
+agent-context-engine dream-v2-review list
 ```
 
 Resolve one decision:
 
 ```sh
-./scripts/agent-context-engine dream-v2-review decide <decision_id> approve --reason "<reason>"
-./scripts/agent-context-engine dream-v2-review decide <decision_id> reject --reason "<reason>"
-./scripts/agent-context-engine dream-v2-review decide <decision_id> defer --reason "<reason>"
+agent-context-engine dream-v2-review decide <decision_id> approve --reason "<reason>"
+agent-context-engine dream-v2-review decide <decision_id> reject --reason "<reason>"
+agent-context-engine dream-v2-review decide <decision_id> defer --reason "<reason>"
 ```
 
 Apply reviewed decisions:
 
 ```sh
-./scripts/agent-context-engine dream-v2-apply <dream_run_id>
+agent-context-engine dream-v2-apply <dream_run_id>
 ```
 
 ## Failure Handling
@@ -132,9 +132,9 @@ Use this sequence:
 Example:
 
 ```sh
-./scripts/agent-context-engine dream-v2-inspect <failed_dream_run_id> --include-content
-./scripts/agent-context-engine dream-v2-evaluate --limit 20
-./scripts/agent-context-engine dream-v2-rerun <failed_dream_run_id>
+agent-context-engine dream-v2-inspect <failed_dream_run_id> --include-content
+agent-context-engine dream-v2-evaluate --limit 20
+agent-context-engine dream-v2-rerun <failed_dream_run_id>
 ```
 
 If earlier stages are valid and the original event window still applies, a

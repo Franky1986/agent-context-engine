@@ -38,7 +38,8 @@ Dream, classifier, and graph-related execution where configured.
 - Non-zero exit is passed back with enough metadata for audit.
 - Weak or partially validated runner families must expose confidence gaps
   explicitly, for example:
-  - `antigravity` headless prompt contract pending local runtime validation
+  - `antigravity` headless prompt contract depends on the current native
+    non-interactive CLI flags and should not drift silently
   - `opencode` interactive/default model contract differing from dream model
 
 ## Observability / Audit
@@ -70,6 +71,8 @@ Dream, classifier, and graph-related execution where configured.
 - If a runner returns usage in a family-specific envelope or casing variant,
   the adapter boundary must normalize that explicitly and preserve whether
   usage was actually available.
+- Antigravity non-interactive execution for dream/graph stages is expressed via
+  the current `agy --print` contract instead of legacy prompt flags.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`

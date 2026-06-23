@@ -65,9 +65,11 @@ defaults before writing files:
   CLI, OpenCode, or a subset.
 - Workspace roots: the actual folders opened by Codex GUI, Claude/Claude Code,
   and Cursor when they differ from the central Agent Context Engine root.
-- Global commands: whether to create `codex-ace`, `claude-ace`,
-  `agy-ace`, `gemini-ace`, and/or `opencode-ace` symlinks in
-  `~/.local/bin`.
+- Global commands: whether to keep the shared public command names on this
+  installation. By default the installer relinks `agent-context-engine`,
+  `ace`, `codex-ace`, `claude-ace`, `agy-ace`, `gemini-ace`, and
+  `opencode-ace` to the chosen target unless the user explicitly wants an
+  isolated instance name instead.
 - Instance name: only needed when the user already has another Agent Context Engine
   installation or wants prefixed commands.
 - Project index: optional list of local projects to add to
@@ -81,7 +83,9 @@ Reasonable defaults:
   user's preferred language when stated.
 - Harnesses: prepare Codex, Claude, Antigravity, and Gemini in the central
   root; enable Cursor and OpenCode per project only when requested.
-- Global commands: create them only if the user wants convenient shell commands.
+- Global commands: relink the shared public commands to the chosen
+  installation by default; switch to `--instance-name` or explicit prefixes only
+  when the user wants side-by-side isolated commands.
 - Project index: skip initially if the user has not named projects.
 
 ## Fresh Clone Commands
@@ -133,10 +137,16 @@ Without explicit flags, `install` now keeps the source checkout as the source
 only and suggests the central default install root under
 `~/.agent-context-engine/install`, keeps prompts in the detected user language
 where possible, offers safe public-checkout defaults such as the `-ace`
-wrapper suffix, runtime bootstrap, disabled global PATH links by default, and
-delayed LaunchAgent installation, shows a final install-plan confirmation, and
-starts the local monitor at the end unless `--no-start-monitor` is used before
-writing files in interactive use.
+wrapper suffix, runtime bootstrap, shared global command relinking by default,
+and delayed LaunchAgent installation, shows a final install-plan confirmation,
+and starts the local monitor at the end unless `--no-start-monitor` is used
+before writing files in interactive use.
+
+When discovery detects that `agent-context-engine`, `ace`, or the shared
+`*-ace` wrapper names already point at another installation, the default plan
+should propose moving those links to the newly chosen installation. Agents
+should present that takeover explicitly in the approval summary instead of
+requiring the user to discover `--force` only after a failed first attempt.
 
 For an agent-driven non-interactive setup, prefer an explicit command:
 
@@ -157,7 +167,8 @@ python3 scripts/agent_context_engine.py install \
   --no-interactive
 ```
 
-For a second local installation, avoid replacing existing global commands:
+For a second local installation that must keep existing shared commands
+unchanged, use isolated naming explicitly:
 
 ```sh
 python3 scripts/agent_context_engine.py install \
@@ -180,11 +191,11 @@ After install:
 
 ```sh
 cd /path/to/agent-context-engine-root
-./docs/skills/agent-context-engine/scripts/agent-context-engine doctor
-./docs/skills/agent-context-engine/scripts/agent-context-engine check-installation
-./docs/skills/agent-context-engine/scripts/agent-context-engine launchagent-status
+agent-context-engine doctor
+agent-context-engine check-installation
+agent-context-engine launchagent-status
 # monitor should already be running after install; restart it manually only if needed
-./docs/skills/agent-context-engine/scripts/agent-context-engine monitor --runner codex --port 8788 --replace-existing --no-open
+agent-context-engine monitor --runner codex --port 8788 --replace-existing --no-open
 ```
 
 The hooks start capturing sessions immediately. The first completed agent turn
@@ -195,17 +206,12 @@ extraction, and optional Neo4j sync.
 If a specific project should be activated for a client:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine cursor-enable \
+agent-context-engine cursor-enable \
   --target /path/to/project \
   --memory-root /path/to/agent-context-engine-root
-./docs/skills/agent-context-engine/scripts/agent-context-engine antigravity-enable \
-  --target /path/to/project \
-  --memory-root /path/to/agent-context-engine-root
-./docs/skills/agent-context-engine/scripts/agent-context-engine gemini-enable \
-  --target /path/to/project
-./docs/skills/agent-context-engine/scripts/agent-context-engine opencode-enable \
-  --target /path/to/project \
-  --memory-root /path/to/agent-context-engine-root
+agent-context-engine antigravity-enable
+agent-context-engine gemini-enable
+agent-context-engine opencode-enable
 ```
 
 ## Start Commands
@@ -250,8 +256,8 @@ was already open.
 Minimum verification:
 
 ```sh
-./docs/skills/agent-context-engine/scripts/agent-context-engine doctor
-./docs/skills/agent-context-engine/scripts/agent-context-engine last --limit 3
+agent-context-engine doctor
+agent-context-engine last --limit 3
 ```
 
 Full package verification from the source checkout:
@@ -289,6 +295,6 @@ Before pushing this repository publicly, verify:
 - No private absolute paths, credentials, or personal memories are included.
 - A fresh clone can run `python3 scripts/agent_context_engine.py install --target ...`.
 - The installed target can run
-  `./docs/skills/agent-context-engine/scripts/agent-context-engine doctor`.
+  `agent-context-engine doctor`.
 - `docs/setup/RUNNER_HARNESSES.md` matches the supported install and activation
   commands.

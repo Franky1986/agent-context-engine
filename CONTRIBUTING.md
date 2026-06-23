@@ -27,7 +27,7 @@ python3 scripts/agent_context_engine.py install \
   --no-interactive \
   --force
 
-/tmp/agent-context-engine-target/docs/skills/agent-context-engine/scripts/agent-context-engine doctor
+agent-context-engine doctor
 ```
 
 ## Pull Request Expectations

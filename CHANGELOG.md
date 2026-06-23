@@ -9,6 +9,38 @@ This repository currently has one public baseline commit:
 
 The entries below document the changes added since that initial public release.
 
+## Backend 0.2.1
+
+### Changed
+
+- The public CLI contract now points agents and generated hook guidance to
+  `agent-context-engine` from `PATH` instead of repo-local shortcut paths.
+- Install discovery and install-plan guidance now treat relinking the shared
+  public commands (`agent-context-engine`, `ace`, and `*-ace`) to the chosen
+  installation as the default behavior, with isolated naming reserved for
+  explicit multi-install setups.
+
+### Fixed
+
+- Antigravity dreaming now uses the current non-interactive `agy --print`
+  contract instead of stale prompt flags.
+- Risk classification now recognizes structured `CommandLine` and
+  `AbsolutePath` payloads correctly, so Agent Context Engine CLI calls and
+  local reads are classified against the intended allowlist/read heuristics.
+- Hook/session command rendering now resolves the active installation more
+  deterministically when deciding whether the global `agent-context-engine`
+  command can be used directly.
+
+## Monitor 0.6.1
+
+### Changed
+
+- Monitor-facing version metadata now aligns with the new public CLI and
+  installation contract release.
+- Installation and integration documentation now consistently describe the
+  shared global command takeover model and the global `agent-context-engine`
+  management path.
+
 ## Backend 0.2.0
 
 ### Added

@@ -13,12 +13,13 @@ and repository-level operating constraints.
 ## Agent Context Engine Quick Path
 - Preferred interaction language for future agents: English.
 - When asked about previous sessions, handovers, project context, "what happened last", "continue there", "we already analyzed this", or similar memory requests, use the local Agent Context Engine CLI first.
-- Agent Context Engine command prefix: `./scripts/ace`
-- Traceable retrieval: `./scripts/ace retrieve "<question or search terms>" --limit 10`
-- Quick keyword search: `./scripts/ace search "<search terms>" --limit 5`
-- Load a session handover: `./scripts/ace handover "<session|title|search terms>"`
-- Recent sessions: `./scripts/ace last --limit 10`
-- Status: `./scripts/ace doctor`
+- Agent Context Engine command prefix: `agent-context-engine`
+- Canonical public CLI contract: `agent-context-engine` from `PATH`. Repo-local `./scripts/ace` and `./scripts/agent-context-engine` remain compatibility fallbacks, not the primary hook/session contract.
+- Traceable retrieval: `agent-context-engine retrieve "<question or search terms>" --limit 10`
+- Quick keyword search: `agent-context-engine search "<search terms>" --limit 5`
+- Load a session handover: `agent-context-engine handover "<session|title|search terms>"`
+- Recent sessions: `agent-context-engine last --limit 10`
+- Status: `agent-context-engine doctor`
 - For list/count/today questions about sessions, use `last` first and stop there unless the user explicitly asks for details about a specific session.
 - Do not inspect `~/.cursor/projects/...`, local Cursor transcripts, or terminal metadata for session-history questions while the Agent Context Engine CLI is available.
 - Only after these commands should agents broaden the search with `rg` in the repository or memory tree.
@@ -27,6 +28,7 @@ and repository-level operating constraints.
 
 - Public-facing documentation and bootstrap guidance should default to English unless a file is explicitly local/private.
 - When a code change affects a non-trivial boundary, update the nearest `*.spec.md` file in the same area.
+- Treat spec and documentation updates as part of the same change, not as a follow-up cleanup step. When behavior, command contracts, installation defaults, hook flows, or operator guidance changes, update the nearest `*.spec.md` plus the relevant user-facing docs in the same patch.
 - When a `*.spec.md` file is added or moved, run `python3 scripts/update_docs_index.py --check` and keep `docs/index.md` aligned.
 - Changes to installation, harnesses, monitor behavior, or agent workflow contracts must keep `AGENT_BOOTSTRAP.md`, `docs/setup/RUNNER_HARNESSES.md`, and `session-start-hook-entry.md` accurate.
 
@@ -70,13 +72,13 @@ plain `opencode`, `agy`, and `gemini` commands start without Agent Context Engin
 - `memory/`, SQLite databases, hook configs, local `memory/knowledge/`, IDE files,
   caches, and local environment files must remain gitignored.
 - After repository updates that can affect the monitor or API/UI code, restart
-  the local monitor with `./scripts/ace monitor --runner codex
+  the local monitor with `agent-context-engine monitor --runner codex
   --replace-existing --port 8787 --no-open --language en`. The installer should also leave a fresh installation with the monitor already started unless the user explicitly opted out. Agents should treat
   this restart as part of the update flow instead of leaving an older monitor
   process running against newer code.
 - After repository updates that can affect scheduler defaults, dream runners,
   launchagent behavior, or monitor/runtime status reporting, also reload the
-  local LaunchAgent with `./scripts/ace install-launchagent --load`.
+  local LaunchAgent with `agent-context-engine install-launchagent --load`.
 - After repository updates that can affect Dream-v2 semantic persistence rules,
   Cursor runner parsing, or dream-stage metadata contracts, also verify one
   fresh Cursor dream run before trusting the new runtime behavior. At minimum
@@ -84,7 +86,7 @@ plain `opencode`, `agy`, and `gemini` commands start without Agent Context Engin
   - non-zero token usage when Cursor returns usage
   - grounded semantic evidence
   - no accidental low-signal over-persistence
-- Treat `./scripts/ace launchagent-status --verbose` and the monitor
+- Treat `agent-context-engine launchagent-status --verbose` and the monitor
   runtime card from `/api/status` as the required drift check after such
   updates.
 - The monitor is expected to show both the running monitor process metadata and
@@ -97,8 +99,8 @@ plain `opencode`, `agy`, and `gemini` commands start without Agent Context Engin
 - For security/risk events, inspect with:
 
 ```sh
-./scripts/ace risk list --limit 20
-./scripts/ace risk show <risk_event_id>
+agent-context-engine risk list --limit 20
+agent-context-engine risk show <risk_event_id>
 ```
 
 User-only controls such as `approve ...`, `reset taint`, `firewall add ...`,

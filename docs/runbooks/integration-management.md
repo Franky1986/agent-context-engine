@@ -10,6 +10,11 @@ runner integrations. Use it when the task is about:
 - changing or recommending mini/default models
 - preparing new runner/client integrations
 
+The public management CLI contract is `agent-context-engine` from `PATH`.
+Repo-local `./scripts/agent-context-engine` and `./scripts/ace` remain
+compatibility fallbacks, but integrations, hooks, and generated session-start
+guidance should point at the global command.
+
 For agent-facing execution rules, pair this runbook with:
 
 - `docs/skills/integration-management-agent.md`
@@ -319,7 +324,7 @@ workspace via `--include-directories`. The hook adapter uses
 Global hook bridge setup (run once per Agent Context Engine root):
 
 ```sh
-cd /path/to/agent-context-engine-root && ./scripts/agent-context-engine gemini-enable
+agent-context-engine gemini-enable
 ```
 
 `gemini-enable --target <project-path>` is deprecated and refused. Gemini
@@ -355,7 +360,7 @@ the effective project context.
 Global hook bridge setup (run once per Agent Context Engine root):
 
 ```sh
-cd /path/to/agent-context-engine-root && ./scripts/agent-context-engine antigravity-enable
+agent-context-engine antigravity-enable
 ```
 
 `antigravity-enable --target <project-path>` is deprecated and refused.
@@ -384,7 +389,7 @@ argument via `AGENT_MEMORY_LAUNCH_CWD`.
 Global plugin bridge setup (run once per Agent Context Engine root):
 
 ```sh
-cd /path/to/agent-context-engine-root && ./scripts/agent-context-engine opencode-enable
+agent-context-engine opencode-enable
 ```
 
 `opencode-enable --target <project-path>` is deprecated and refused. OpenCode
@@ -404,7 +409,7 @@ Cursor is not a single global wrapper flow. It is activated per project.
 Project activation:
 
 ```sh
-cd /path/to/agent-context-engine-root && ./scripts/agent-context-engine cursor-enable --target <project-path>
+agent-context-engine cursor-enable --target <project-path>
 ```
 
 After activation:
@@ -448,9 +453,9 @@ Use these commands when installation quality is the issue rather than just
 hook-state toggling:
 
 ```sh
-./scripts/agent-context-engine doctor
-./scripts/agent-context-engine integrations-status
-./scripts/agent-context-engine check-installation
+agent-context-engine doctor
+agent-context-engine integrations-status
+agent-context-engine check-installation
 ```
 
 Use `check-installation` when the issue could involve:

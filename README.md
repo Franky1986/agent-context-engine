@@ -20,8 +20,8 @@ Developed with Codex.
 
 Current public versions:
 
-- Backend / product: `0.2.0`
-- Monitor: `0.6.0`
+- Backend / product: `0.2.1`
+- Monitor: `0.6.1`
 
 See [CHANGELOG.md](CHANGELOG.md) for release history since the initial public release.
 
@@ -50,9 +50,9 @@ After install:
 
 ```sh
 cd /path/to/agent-context-engine-root
-./scripts/agent-context-engine doctor
-./scripts/agent-context-engine check-installation
-./scripts/agent-context-engine launchagent-status
+agent-context-engine doctor
+agent-context-engine check-installation
+agent-context-engine launchagent-status
 ```
 
 ## How It Works
@@ -110,15 +110,16 @@ Dependency files are pinned and split by purpose:
 If no target has been chosen yet, run:
 
 ```sh
-python3 docs/skills/agent-context-engine/scripts/agent_context_engine.py install
+python3 scripts/agent_context_engine.py install
 ```
 
 The installer will explain what Agent Context Engine does, why it improves the workflow,
 keep the source checkout unchanged by default, suggest the central install root
 `~/.agent-context-engine/install` plus the matching runtime storage root
 `~/.agent-context-engine/memory`, and print the exact install command. The
-guided defaults also keep global PATH wrapper links off unless the user asks
-for them, bootstrap the local runtime, and start the monitor after install.
+guided defaults relink the shared public commands
+`agent-context-engine`, `ace`, and the `*-ace` wrappers to the chosen
+installation, bootstrap the local runtime, and start the monitor after install.
 
 If discovery points at the central default target
 `~/.agent-context-engine/install`, that is the default installation plan even
@@ -134,7 +135,7 @@ immediately before writing the install profile, so a stale discovery result can
 still be corrected at install time.
 
 ```sh
-python3 docs/skills/agent-context-engine/scripts/agent_context_engine.py install \
+python3 scripts/agent_context_engine.py install \
   --target /path/to/agent-context-engine-root \
   --project "project-a=/path/to/project-a" \
   --project "project-b=/path/to/project-b" \
@@ -150,7 +151,7 @@ This installs:
 
 ```text
 <target>/AGENTS.md (created or appended with the Agent Context Engine quick path)
-<target>/docs/skills/agent-context-engine/
+<target>/scripts/
 <target>/.codex/hooks.json
 <target>/.codex/hooks/hook_adapter.sh
 <target>/.claude/settings.json
@@ -159,11 +160,11 @@ This installs:
 ```
 
 The `AGENTS.md` block tells future agents to use
-`./scripts/agent-context-engine search`, `handover`, `last`,
+`agent-context-engine search`, `handover`, `last`,
 and `doctor` before doing broad repository searches when the user asks about
 previous sessions or existing analysis.
 
-Keep `./scripts/agent-context-engine` as the canonical
+Keep `agent-context-engine` as the canonical
 agent-facing CLI path in installed projects. Do not duplicate the scripts into
 other project folders; wrapper commands should call this path. Calls through
 this CLI path are allowlisted out of synchronous LLM classification, while still
@@ -173,18 +174,19 @@ and do not pay an extra classifier subprocess.
 With wrapper link flags, it can also create:
 
 ```text
-~/.local/bin/codex-ace -> <target>/docs/skills/agent-context-engine/scripts/codex-ace
-~/.local/bin/claude-ace -> <target>/docs/skills/agent-context-engine/scripts/claude-ace
-~/.local/bin/agy-ace -> <target>/docs/skills/agent-context-engine/scripts/agy-ace
-~/.local/bin/gemini-ace -> <target>/docs/skills/agent-context-engine/scripts/gemini-ace
-~/.local/bin/opencode-ace -> <target>/docs/skills/agent-context-engine/scripts/opencode-ace
+~/.local/bin/agent-context-engine -> <target>/scripts/agent-context-engine
+~/.local/bin/codex-ace -> <target>/scripts/codex-ace
+~/.local/bin/claude-ace -> <target>/scripts/claude-ace
+~/.local/bin/agy-ace -> <target>/scripts/agy-ace
+~/.local/bin/gemini-ace -> <target>/scripts/gemini-ace
+~/.local/bin/opencode-ace -> <target>/scripts/opencode-ace
 ```
 
 For a second independent installation on the same Mac, use an instance name or
 explicit command prefix so existing global commands are not replaced:
 
 ```sh
-python3 docs/skills/agent-context-engine/scripts/agent_context_engine.py install \
+python3 scripts/agent_context_engine.py install \
   --target /path/to/second-agent-context-engine-root \
   --instance-name client-a \
   --link-codex-ace \
@@ -250,9 +252,9 @@ will report that mismatch first and only rewrite it when
 
 ```sh
 cd <target>
-./scripts/agent-context-engine doctor
-./scripts/agent-context-engine check-installation
-./scripts/agent-context-engine doctor --relocation-report
+agent-context-engine doctor
+agent-context-engine check-installation
+agent-context-engine doctor --relocation-report
 codex-ace
 ```
 
@@ -290,23 +292,23 @@ folder sessions.
 Personal memory commands:
 
 ```sh
-./scripts/agent-context-engine personal init
-./scripts/agent-context-engine personal list
-./scripts/agent-context-engine personal list --startup-safe
-./scripts/agent-context-engine personal show engineering/architecture
-./scripts/agent-context-engine personal propose engineering/architecture "- Prefer aggregate boundaries for DDD contexts."
-./scripts/agent-context-engine personal proposals
-./scripts/agent-context-engine personal accept <proposal_id>
-./scripts/agent-context-engine personal audit
+agent-context-engine personal init
+agent-context-engine personal list
+agent-context-engine personal list --startup-safe
+agent-context-engine personal show engineering/architecture
+agent-context-engine personal propose engineering/architecture "- Prefer aggregate boundaries for DDD contexts."
+agent-context-engine personal proposals
+agent-context-engine personal accept <proposal_id>
+agent-context-engine personal audit
 ```
 
 Retrieval with provenance:
 
 ```sh
-./scripts/agent-context-engine retrieve "github analyse projekt" --limit 10
-./scripts/agent-context-engine retrieve "hexagonale architektur ddd" --kind personal_memory --limit 10
-./scripts/agent-context-engine retrieve "secrets personal memory" --include-risky --json
-./scripts/agent-context-engine retrieve "hexagonale architektur" --query-expansion llm --expander-runner codex
+agent-context-engine retrieve "github analyse projekt" --limit 10
+agent-context-engine retrieve "hexagonale architektur ddd" --kind personal_memory --limit 10
+agent-context-engine retrieve "secrets personal memory" --include-risky --json
+agent-context-engine retrieve "hexagonale architektur" --query-expansion llm --expander-runner codex
 ```
 
 Use `retrieve` for agentic work when the answer should be traceable. It fuses
@@ -327,8 +329,8 @@ kept as fallback.
 Session report:
 
 ```sh
-./scripts/agent-context-engine analyze <session_selector> --json
-./scripts/agent-context-engine analyze <session_selector> --html --open
+agent-context-engine analyze <session_selector> --json
+agent-context-engine analyze <session_selector> --html --open
 ```
 
 `analyze` (`analyse`) creates a compact quality-oriented session report with:
@@ -347,8 +349,8 @@ Use `--html` to generate a local browser-ready report file and optionally keep i
 open automatically:
 
 ```sh
-./scripts/agent-context-engine analyze <session_selector> --html
-./scripts/agent-context-engine analyze <session_selector> --html --open
+agent-context-engine analyze <session_selector> --html
+agent-context-engine analyze <session_selector> --html --open
 ```
 
 `--html` stores reports under `memory/analysis_reports/` and prints the path as
@@ -366,16 +368,16 @@ and show score, provenance, risk, and evidence per result.
 Folder lookup:
 
 ```sh
-./scripts/agent-context-engine folder /path/to/project --limit 20
-./scripts/agent-context-engine last --folder /path/to/project --limit 20
+agent-context-engine folder /path/to/project --limit 20
+agent-context-engine last --folder /path/to/project --limit 20
 ```
 
 `folder` also scans `~/.codex/sessions/**/*.jsonl` for matching but not-yet
 indexed Codex transcripts. Import one explicitly with:
 
 ```sh
-./scripts/agent-context-engine sync-codex-transcript ~/.codex/sessions/.../rollout-...jsonl
-./scripts/agent-context-engine summarize --session <session_id>
+agent-context-engine sync-codex-transcript ~/.codex/sessions/.../rollout-...jsonl
+agent-context-engine summarize --session <session_id>
 ```
 
 Optional verification: inside Codex, open `/hooks` to inspect installed and active project hooks. If Codex shows a hook safety review after install or hook changes, review the listed commands and approve them there.
@@ -395,7 +397,7 @@ claude-ace
 Symlink:
 
 ```text
-~/.local/bin/claude-ace -> <target>/docs/skills/agent-context-engine/scripts/claude-ace
+~/.local/bin/claude-ace -> <target>/scripts/claude-ace
 ```
 
 Hook config at `<target>/.claude/settings.json` is loaded automatically by Claude Code when the working directory is `<target>`. No explicit hook approval step is needed; Claude Code reads `settings.json` from the project root.
@@ -406,14 +408,14 @@ Cursor Memory is project-local and opt-in per opened folder:
 
 ```sh
 cd <target>
-./scripts/agent-context-engine cursor-enable
+agent-context-engine cursor-enable
 ```
 
 From the central Agent Context Engine root, enable a different project without
 copying the skill there:
 
 ```sh
-./scripts/agent-context-engine cursor-enable \
+agent-context-engine cursor-enable \
   --target /path/to/project \
   --memory-root /path/to/agent-context-engine-root
 ```
@@ -428,15 +430,15 @@ This creates or merges:
 Disable it for the same folder:
 
 ```sh
-./scripts/agent-context-engine cursor-disable
-./scripts/agent-context-engine cursor-disable --target /path/to/project
+agent-context-engine cursor-disable
+agent-context-engine cursor-disable --target /path/to/project
 ```
 
 Inspect state:
 
 ```sh
-./scripts/agent-context-engine cursor-status
-./scripts/agent-context-engine cursor-status --target /path/to/project
+agent-context-engine cursor-status
+agent-context-engine cursor-status --target /path/to/project
 ```
 
 After enabling or disabling, reload the Cursor window or reopen the project
@@ -451,10 +453,10 @@ metadata. The hook writes those values into `token_usage` and `turn_metrics`.
 Start a read-only local web monitor:
 
 ```sh
-./scripts/agent-context-engine monitor --runner codex --port 8787
-./scripts/agent-context-engine monitor --runner codex --port 8787 --language de
-./scripts/agent-context-engine monitor --runner claude --port 8787
-./scripts/agent-context-engine monitor --runner cursor --port 8787
+agent-context-engine monitor --runner codex --port 8787
+agent-context-engine monitor --runner codex --port 8787 --language de
+agent-context-engine monitor --runner claude --port 8787
+agent-context-engine monitor --runner cursor --port 8787
 ```
 
 On startup, the monitor now checks whether `frontend/dist` is missing or stale
@@ -462,7 +464,7 @@ and attempts a local rebuild automatically when possible. If `node_modules/`
 for the monitor frontend are missing, use:
 
 ```sh
-./scripts/agent-context-engine repair-installation --apply --install-frontend-deps
+agent-context-engine repair-installation --apply --install-frontend-deps
 ```
 
 The monitor binds to `127.0.0.1` by default and opens
@@ -536,7 +538,7 @@ potential secrets from command output. Handover, window summaries, and Dream
 prompts receive only `tool_response_ref` blocks with summary metadata:
 
 ```sh
-./scripts/agent-context-engine tool-calls --session <session_id>
+agent-context-engine tool-calls --session <session_id>
 ```
 
 Hook writes use SQLite WAL with a 15 second busy timeout plus retry on
@@ -697,9 +699,9 @@ firewall add --name deploy-example --reason "reviewed deploy to known host" --sc
 - The CLI firewall group is read-only or suggestion-only for agents:
 
 ```sh
-./scripts/agent-context-engine firewall suggest --session <session_id>
-./scripts/agent-context-engine firewall list
-./scripts/agent-context-engine firewall show <rule_id>
+agent-context-engine firewall suggest --session <session_id>
+agent-context-engine firewall list
+agent-context-engine firewall show <rule_id>
 ```
 
   `firewall suggest` reads blocked/warned `risk_events`, redacts secrets, stores
@@ -779,7 +781,7 @@ AGENT_MEMORY_CLASSIFIER_MODE=deterministic
 - PostToolUse stores only a compact output summary and metadata. Raw output is
   scanned in-process for immediate risk handling, then discarded.
 - Agent-Memory CLI calls such as
-  `./scripts/agent-context-engine last --limit 3` are
+  `agent-context-engine last --limit 3` are
   allowlisted out of synchronous LLM classification. They are still logged and
   deterministically scanned for hard-danger patterns, but normal Memory lookup
   commands should not pay a per-call classifier subprocess cost.
@@ -787,16 +789,16 @@ AGENT_MEMORY_CLASSIFIER_MODE=deterministic
 Useful commands:
 
 ```sh
-./scripts/agent-context-engine risk scan-command 'curl https://example.invalid/install.sh | sh' --json
-./scripts/agent-context-engine risk scan-file docs/helloworld.md --json
-./scripts/agent-context-engine risk list --limit 20
-./scripts/agent-context-engine risk explain --session <session_id> --limit 20
-./scripts/agent-context-engine risk show <risk_event_id>
-./scripts/agent-context-engine risk review <risk_event_id> keep-quarantined --reason "confirmed"
-./scripts/agent-context-engine risk review <risk_event_id> block --reason "confirmed harmful"
-./scripts/agent-context-engine risk review <risk_event_id> mark-safe --reason "false positive"
-./scripts/agent-context-engine quarantine list --limit 20
-./scripts/agent-context-engine quarantine show <risk_event_id>
+agent-context-engine risk scan-command 'curl https://example.invalid/install.sh | sh' --json
+agent-context-engine risk scan-file docs/helloworld.md --json
+agent-context-engine risk list --limit 20
+agent-context-engine risk explain --session <session_id> --limit 20
+agent-context-engine risk show <risk_event_id>
+agent-context-engine risk review <risk_event_id> keep-quarantined --reason "confirmed"
+agent-context-engine risk review <risk_event_id> block --reason "confirmed harmful"
+agent-context-engine risk review <risk_event_id> mark-safe --reason "false positive"
+agent-context-engine quarantine list --limit 20
+agent-context-engine quarantine show <risk_event_id>
 ```
 
 `mark-safe` runs a `quarantine_release_review` classifier first. If that review
@@ -830,7 +832,7 @@ Harness parity:
 Run from the target repository root:
 
 ```sh
-python3 -m unittest discover -s docs/skills/agent-context-engine/tests -v
+python3 -m unittest discover -s tests -v
 ```
 
 The tests use temporary memory roots and cover:
@@ -847,7 +849,7 @@ The tests use temporary memory roots and cover:
 Install and load the macOS scheduler:
 
 ```sh
-./scripts/agent-context-engine install-launchagent --load
+agent-context-engine install-launchagent --load
 ```
 
 For normal restart/reload operations, use the wrapper with controlled defaults:
@@ -875,16 +877,16 @@ For multiple Agent Context Engine instances with the same folder name, choose an
 explicit label and use it consistently for status and uninstall:
 
 ```sh
-./scripts/agent-context-engine install-launchagent --label com.agent-context-engine.client-a --load
-./scripts/agent-context-engine launchagent-status --label com.agent-context-engine.client-a
+agent-context-engine install-launchagent --label com.agent-context-engine.client-a --load
+agent-context-engine launchagent-status --label com.agent-context-engine.client-a
 ```
 
 Inspect or remove it:
 
 ```sh
-./scripts/agent-context-engine launchagent-status --verbose
-./scripts/agent-context-engine scheduler-status --limit 10
-./scripts/agent-context-engine uninstall-launchagent
+agent-context-engine launchagent-status --verbose
+agent-context-engine scheduler-status --limit 10
+agent-context-engine uninstall-launchagent
 ```
 
 Stop hooks also kick a debounced background scheduler by default. The scheduler
@@ -958,9 +960,9 @@ AGENT_MEMORY_CURSOR_DREAM_MODEL=gpt-5.4-mini-medium
 Override per run:
 
 ```sh
-./scripts/agent-context-engine dream --pending --runner codex --runner-model gpt-5.4-mini
-./scripts/agent-context-engine dream --pending --runner cursor --runner-model sonnet-4
-./scripts/agent-context-engine dream --pending --runner deterministic --graph-runner codex --graph-runner-model gpt-5.4-mini
+agent-context-engine dream --pending --runner codex --runner-model gpt-5.4-mini
+agent-context-engine dream --pending --runner cursor --runner-model sonnet-4
+agent-context-engine dream --pending --runner deterministic --graph-runner codex --graph-runner-model gpt-5.4-mini
 ```
 
 `dream_runs.runner_model` records the exact model. If a smaller model fails due
@@ -973,23 +975,23 @@ The graph layer is Markdown/SQLite-first and Neo4j-optional. It writes parseable
 JSON artifacts that can later be imported into Neo4j.
 
 ```sh
-./scripts/agent-context-engine graph-extract <session>
-./scripts/agent-context-engine graph-structure <session>
-./scripts/agent-context-engine graph-structure <session> --runner same-as-session
-./scripts/agent-context-engine graph-status --limit 10
-./scripts/agent-context-engine graph-validate memory/graph/patches/<patch>.json
-./scripts/agent-context-engine graph-query sessions --limit 10
-./scripts/agent-context-engine graph-query entities "Neo4j"
-./scripts/agent-context-engine graph-query entity "agent-memory"
-./scripts/agent-context-engine graph-query related "019e1696"
-./scripts/agent-context-engine graph-schema-context --format json
-./scripts/agent-context-engine graph-candidates memory/graph/patches/<patch>.json
-./scripts/agent-context-engine graph-match-candidates memory/graph/candidates/<candidates>.json
-./scripts/agent-context-engine graph-reconcile memory/graph/candidates/<candidates>.json --matches memory/graph/matches/<matches>.json
-./scripts/agent-context-engine handover "agent-memory"
-./scripts/agent-context-engine use "agent-memory"
-./scripts/agent-context-engine neo4j-import memory/graph/patches/<patch>.json --dry-run
-./scripts/agent-context-engine rebuild-indexes
+agent-context-engine graph-extract <session>
+agent-context-engine graph-structure <session>
+agent-context-engine graph-structure <session> --runner same-as-session
+agent-context-engine graph-status --limit 10
+agent-context-engine graph-validate memory/graph/patches/<patch>.json
+agent-context-engine graph-query sessions --limit 10
+agent-context-engine graph-query entities "Neo4j"
+agent-context-engine graph-query entity "agent-memory"
+agent-context-engine graph-query related "019e1696"
+agent-context-engine graph-schema-context --format json
+agent-context-engine graph-candidates memory/graph/patches/<patch>.json
+agent-context-engine graph-match-candidates memory/graph/candidates/<candidates>.json
+agent-context-engine graph-reconcile memory/graph/candidates/<candidates>.json --matches memory/graph/matches/<matches>.json
+agent-context-engine handover "agent-memory"
+agent-context-engine use "agent-memory"
+agent-context-engine neo4j-import memory/graph/patches/<patch>.json --dry-run
+agent-context-engine rebuild-indexes
 ```
 
 Use `handover` or `use` as the default agentic continuation command. It prints
@@ -1019,10 +1021,10 @@ materialized into SQLite. The command defaults to a dry run and protects patch
 files that are still pending for Neo4j import:
 
 ```sh
-./scripts/agent-context-engine graph-prune
-./scripts/agent-context-engine graph-prune --archive memory/graph-artifacts.tar.gz
-./scripts/agent-context-engine graph-prune --archive memory/graph-artifacts.tar.gz --delete
-./scripts/agent-context-engine graph-prune --delete --include-pending-neo4j
+agent-context-engine graph-prune
+agent-context-engine graph-prune --archive memory/graph-artifacts.tar.gz
+agent-context-engine graph-prune --archive memory/graph-artifacts.tar.gz --delete
+agent-context-engine graph-prune --delete --include-pending-neo4j
 ```
 
 Pruning removes portable JSON audit/reimport files, not the SQLite graph rows
@@ -1068,11 +1070,11 @@ Python Neo4j driver:
 
 ```sh
 export AGENT_MEMORY_NEO4J_PASSWORD='...'
-./scripts/agent-context-engine neo4j-status --uri http://127.0.0.1:7474 --database agenticMemory
-./scripts/agent-context-engine neo4j-install-schema --uri http://127.0.0.1:7474 --database agenticMemory
-./scripts/agent-context-engine neo4j-import memory/graph/patches/<patch>.json --uri http://127.0.0.1:7474 --database agenticMemory
-./scripts/agent-context-engine neo4j-sync-pending --uri http://127.0.0.1:7474 --database agenticMemory
-./scripts/agent-context-engine neo4j-import-status --uri http://127.0.0.1:7474 --database agenticMemory
+agent-context-engine neo4j-status --uri http://127.0.0.1:7474 --database agenticMemory
+agent-context-engine neo4j-install-schema --uri http://127.0.0.1:7474 --database agenticMemory
+agent-context-engine neo4j-import memory/graph/patches/<patch>.json --uri http://127.0.0.1:7474 --database agenticMemory
+agent-context-engine neo4j-sync-pending --uri http://127.0.0.1:7474 --database agenticMemory
+agent-context-engine neo4j-import-status --uri http://127.0.0.1:7474 --database agenticMemory
 ```
 
 Do not store Neo4j passwords in repository files.
@@ -1088,7 +1090,7 @@ AGENT_MEMORY_NEO4J_PASSWORD=...
 ```
 
 ```sh
-./scripts/agent-context-engine install-launchagent --load
+agent-context-engine install-launchagent --load
 ```
 
 `dream` and `scheduler-run` automatically try Neo4j sync after writing a graph

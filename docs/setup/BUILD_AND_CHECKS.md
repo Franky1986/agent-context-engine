@@ -7,7 +7,7 @@ Use these checks before publishing substantial changes.
 ```sh
 ./scripts/check --skip-runtime-db
 python3 -m unittest discover -s tests -v
-./scripts/agent-context-engine doctor
+agent-context-engine doctor
 ./scripts/audit
 ```
 
@@ -26,9 +26,9 @@ Run additional focused checks for the areas you touched:
 Consider these runtime checks when relevant:
 
 ```sh
-./scripts/agent-context-engine retrieve-runs --limit 10
-./scripts/agent-context-engine graph-status --limit 10
-./scripts/agent-context-engine risk list --limit 20
+agent-context-engine retrieve-runs --limit 10
+agent-context-engine graph-status --limit 10
+agent-context-engine risk list --limit 20
 ```
 
 ## Runtime Hygiene
