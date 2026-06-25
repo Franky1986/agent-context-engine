@@ -194,6 +194,7 @@ def run_doctor_checks(
     platform_evidence = str(platform_profile.get("evidence") or "inferred")
     platform_notes = str(platform_profile.get("notes") or "").strip()
     selected_platform_profile = platform_profile_from_payload(platform_profile)
+    platform_family = str(selected_platform_profile.family.value if getattr(selected_platform_profile, "family", None) is not None else "")
     runtime_selection = runtime_selection_summary(selected_platform_profile)
     runtime_capabilities = current_runtime_capabilities_payload()
     platform_label = "ok" if platform_support_level == "supported" else "warn"
@@ -288,19 +289,21 @@ def run_doctor_checks(
             + f"evidence={((runtime_selection.get('scheduler_installer') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
         )
 
+    hook_script_suffix = ".cmd" if platform_family == "windows" else ".sh"
     checks = [
-        (ROOT / ".codex" / "hooks.json", "Codex hooks config", True),
-        (ROOT / ".codex" / "hooks" / "hook_adapter.sh", "Codex hook adapter", True),
-        (ROOT / ".claude" / "settings.json", "Claude Code hooks config", True),
-        (ROOT / ".claude" / "hooks" / "hook_adapter.sh", "Claude Code hook adapter", True),
-        (ROOT / ".agents" / "hooks.json", "Antigravity CLI hooks config", False),
-        (ROOT / ".agents" / "hooks" / "hook_adapter.sh", "Antigravity CLI hook adapter", False),
-        (ROOT / ".gemini" / "settings.json", "Gemini CLI hooks config", False),
-        (ROOT / ".gemini" / "hooks" / "hook_adapter.sh", "Gemini CLI hook adapter", False),
-        (SKILL_ROOT / "scripts" / "agent_context_engine.py", "agent memory CLI", True),
-        (REPOS_INDEX, "repo index", True),
+        ([ROOT / ".codex" / "hooks.json"], "Codex hooks config", True),
+        ([ROOT / ".codex" / "hooks" / f"hook_adapter{hook_script_suffix}", ROOT / ".codex" / "hooks" / "hook_adapter.sh", ROOT / ".codex" / "hooks" / "hook_adapter.cmd"], "Codex hook adapter", True),
+        ([ROOT / ".claude" / "settings.json"], "Claude Code hooks config", True),
+        ([ROOT / ".claude" / "hooks" / f"hook_adapter{hook_script_suffix}", ROOT / ".claude" / "hooks" / "hook_adapter.sh", ROOT / ".claude" / "hooks" / "hook_adapter.cmd"], "Claude Code hook adapter", True),
+        ([ROOT / ".agents" / "hooks.json"], "Antigravity CLI hooks config", False),
+        ([ROOT / ".agents" / "hooks" / f"hook_adapter{hook_script_suffix}", ROOT / ".agents" / "hooks" / "hook_adapter.sh", ROOT / ".agents" / "hooks" / "hook_adapter.cmd"], "Antigravity CLI hook adapter", False),
+        ([ROOT / ".gemini" / "settings.json"], "Gemini CLI hooks config", False),
+        ([ROOT / ".gemini" / "hooks" / f"hook_adapter{hook_script_suffix}", ROOT / ".gemini" / "hooks" / "hook_adapter.sh", ROOT / ".gemini" / "hooks" / "hook_adapter.cmd"], "Gemini CLI hook adapter", False),
+        ([SKILL_ROOT / "scripts" / "agent_context_engine.py"], "agent memory CLI", True),
+        ([REPOS_INDEX], "repo index", True),
     ]
-    for path, label, required in checks:
+    for candidates, label, required in checks:
+        path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
         ok = path.exists()
         intentionally_disabled = (
             not ok

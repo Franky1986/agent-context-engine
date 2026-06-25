@@ -6,6 +6,13 @@ This document defines a deterministic test order for Agent Context Engine and
 tracks which parts have already been verified in recent installation,
 integration, runner, and dreaming passes.
 
+Platform note:
+
+- macOS remains the supported active runtime target
+- Windows is an experimental native runtime path and still requires one real
+  Windows-machine validation pass before any support-level increase
+- Linux and WSL remain scaffolded-only in the current validation model
+
 ## Relevant References
 
 - [AGENTS.md](/Users/frankrichter/projects/agent-context-engine/AGENTS.md)
@@ -45,6 +52,11 @@ wrapper, LaunchAgent, and storage-root regression tests explicitly with:
 
 The separated check reports `install-integration-suite` independently so a
 slow install path cannot be mistaken for a generic unit-suite hang.
+
+For the Windows experimental slice, keep two layers separate:
+
+1. contract/generated-artifact validation on the current development host
+2. one explicit real Windows install/activation/runtime pass
 
 ## Recommended Test Environment
 
@@ -86,6 +98,8 @@ Pass criteria:
 - no inconsistent root, memory, or port values
 - no replaced installation still appears active
 - `session-start-hook-entry.md` uses `agent-context-engine`
+- on Windows, generated `.cmd` launchers point at the expected local CLI and
+  hook companions
 
 ## Phase B: CLI And Retrieval Basics
 

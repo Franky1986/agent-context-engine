@@ -28,10 +28,15 @@ def resolve_wrapper_script_path(
     legacy_wrappers = legacy_wrapper_names()
     if wrapper_name not in supported_wrappers and wrapper_name not in legacy_wrappers:
         raise ValueError(f"unsupported wrapper: {wrapper_name}")
-    direct = root / "scripts" / wrapper_name
-    if direct.exists():
-        return direct
-    installed = root / "docs" / "skills" / "agent-context-engine" / "scripts" / wrapper_name
-    if installed.exists():
-        return installed
+    candidates = [
+        root / "scripts" / f"{wrapper_name}.cmd",
+        root / "scripts" / wrapper_name,
+        root / "scripts" / f"{wrapper_name}.ps1",
+        root / "docs" / "skills" / "agent-context-engine" / "scripts" / f"{wrapper_name}.cmd",
+        root / "docs" / "skills" / "agent-context-engine" / "scripts" / wrapper_name,
+        root / "docs" / "skills" / "agent-context-engine" / "scripts" / f"{wrapper_name}.ps1",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
     return root / "docs" / "skills" / "agent-memory" / "scripts" / wrapper_name

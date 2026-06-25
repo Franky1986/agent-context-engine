@@ -137,6 +137,10 @@ def safe_instance_id(value: str) -> str:
 
 
 def agent_memory_cli_for_root(root: Path = ROOT) -> str:
+    if (root / "scripts" / "agent-context-engine.cmd").exists():
+        return "./scripts/agent-context-engine.cmd"
+    if (root / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine.cmd").exists():
+        return "./docs/skills/agent-context-engine/scripts/agent-context-engine.cmd"
     if (root / "scripts" / "ace").exists():
         return "./scripts/ace"
     if (root / "scripts" / "agent-context-engine").exists():
@@ -145,6 +149,10 @@ def agent_memory_cli_for_root(root: Path = ROOT) -> str:
 
 
 def preferred_agent_memory_cli_for_root(root: Path = ROOT) -> str:
+    if (root / "scripts" / "agent-context-engine.cmd").exists():
+        return "./scripts/agent-context-engine.cmd"
+    if (root / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine.cmd").exists():
+        return "./docs/skills/agent-context-engine/scripts/agent-context-engine.cmd"
     cli_target = (root / "scripts" / "agent-context-engine").resolve()
     bare = shutil.which("agent-context-engine")
     if bare:

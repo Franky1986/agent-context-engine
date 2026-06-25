@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ...application.hook_rendering.specs import CursorProjectHookWrapperSpec, ShellHookAdapterSpec
+from ...ports.rendering import HookAdapterRendererPort
+from .path_quoting import powershell_single_quote
+
+
+def _render_powershell_hook_script(*, client: str, root: str, script: str, support_level: str, evidence: str, spec_version: str) -> str:
+    return (
+        "# agent-context-engine windows hook renderer v1\n"
+        "# renderer=powershell\n"
+        f"# support={support_level}\n"
+        f"# evidence={evidence}\n"
+        f"# client={client}\n"
+        f"# ROOT={root}\n"
+        f"# SCRIPT={script}\n"
+        f"# spec_version={spec_version}\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$ROOT = {powershell_single_quote(root)}\n"
+        f"$SCRIPT = {powershell_single_quote(script)}\n"
+        f"$CLIENT = {powershell_single_quote(client)}\n"
+        "$env:AGENT_CONTEXT_ENGINE_ROOT = $ROOT\n"
+        "$pythonCommand = if (Get-Command py -ErrorAction SilentlyContinue) {\n"
+        "  @('py', '-3')\n"
+        "} elseif (Get-Command python -ErrorAction SilentlyContinue) {\n"
+        "  @('python')\n"
+        "} else {\n"
+        "  throw 'python is required to execute Agent Context Engine hooks on Windows.'\n"
+        "}\n"
+        "$pythonExe = $pythonCommand[0]\n"
+        "$pythonArgs = @()\n"
+        "if ($pythonCommand.Count -gt 1) {\n"
+        "  $pythonArgs += $pythonCommand[1..($pythonCommand.Count - 1)]\n"
+        "}\n"
+        "$pythonArgs += @($SCRIPT, 'log-hook', '--client', $CLIENT)\n"
+        "$inputPayload = [Console]::In.ReadToEnd()\n"
+        "if ($inputPayload.Length -gt 0) {\n"
+        "  $inputPayload | & $pythonExe @pythonArgs\n"
+        "} else {\n"
+        "  & $pythonExe @pythonArgs\n"
+        "}\n"
+        "if ($LASTEXITCODE -ne $null) {\n"
+        "  exit $LASTEXITCODE\n"
+        "}\n"
+        "exit 0\n"
+    )
+
+
+def _render_cursor_powershell_hook_script(*, root: str, script: str, support_level: str, evidence: str, spec_version: str) -> str:
+    return (
+        "# agent-context-engine windows cursor hook renderer v1\n"
+        "# renderer=powershell\n"
+        f"# support={support_level}\n"
+        f"# evidence={evidence}\n"
+        "# client=cursor\n"
+        f"# ROOT={root}\n"
+        f"# SCRIPT={script}\n"
+        f"# spec_version={spec_version}\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "if ($env:AGENT_MEMORY_DREAM -eq '1') {\n"
+        "  Write-Output '{}'\n"
+        "  exit 0\n"
+        "}\n"
+        f"$ROOT = {powershell_single_quote(root)}\n"
+        f"$SCRIPT = {powershell_single_quote(script)}\n"
+        "$LOG = Join-Path $ROOT 'memory/logs/cursor-hook.err.log'\n"
+        "$HOOKS_STATE = Join-Path $ROOT 'memory/local/hooks-state.json'\n"
+        "$env:AGENT_CONTEXT_ENGINE_ROOT = $ROOT\n"
+        "if (-not $env:AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC) {\n"
+        "  $env:AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC = '1'\n"
+        "}\n"
+        "$pythonCommand = if (Get-Command py -ErrorAction SilentlyContinue) {\n"
+        "  @('py', '-3')\n"
+        "} elseif (Get-Command python -ErrorAction SilentlyContinue) {\n"
+        "  @('python')\n"
+        "} else {\n"
+        "  throw 'python is required to execute Agent Context Engine hooks on Windows.'\n"
+        "}\n"
+        "$pythonExe = $pythonCommand[0]\n"
+        "$pythonArgs = @()\n"
+        "if ($pythonCommand.Count -gt 1) {\n"
+        "  $pythonArgs += $pythonCommand[1..($pythonCommand.Count - 1)]\n"
+        "}\n"
+        "$pythonArgs += @($SCRIPT, 'log-hook', '--client', 'cursor')\n"
+        "[System.IO.Directory]::CreateDirectory((Split-Path -Parent $LOG)) | Out-Null\n"
+        "$inputPayload = [Console]::In.ReadToEnd()\n"
+        "$tmp = [System.IO.Path]::GetTempFileName()\n"
+        "try {\n"
+        "  [System.IO.File]::WriteAllText($tmp, $inputPayload)\n"
+        "  $code = 0\n"
+        "  if ($inputPayload.Length -gt 0) {\n"
+        "    $inputPayload | & $pythonExe @pythonArgs 2>> $LOG\n"
+        "    $code = $LASTEXITCODE\n"
+        "  } else {\n"
+        "    & $pythonExe @pythonArgs 2>> $LOG\n"
+        "    $code = $LASTEXITCODE\n"
+        "  }\n"
+        "  if (($code -ne 0) -and ($code -ne 2)) {\n"
+        "    Add-Content -Path $LOG -Value ('[' + [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ') + '] cursor hook log failed code=' + $code)\n"
+        "  }\n"
+        "  $event = ''\n"
+        "  try {\n"
+        "    $payload = if ($inputPayload.Length -gt 0) { $inputPayload | ConvertFrom-Json -ErrorAction Stop } else { $null }\n"
+        "    if ($null -ne $payload) {\n"
+        "      foreach ($key in @('hook_event_name', 'event_name', 'hookName', 'hook_name', 'event', 'type')) {\n"
+        "        $property = $payload.PSObject.Properties[$key]\n"
+        "        if ($null -ne $property -and $property.Value) {\n"
+        "          $event = [string]$property.Value\n"
+        "          break\n"
+        "        }\n"
+        "      }\n"
+        "    }\n"
+        "  } catch {\n"
+        "  }\n"
+        "  $hooksDisabled = $false\n"
+        "  if (Test-Path $HOOKS_STATE) {\n"
+        "    try {\n"
+        "      $state = Get-Content -Raw -Path $HOOKS_STATE | ConvertFrom-Json -ErrorAction Stop\n"
+        "      if ($state.enabled -eq $false) {\n"
+        "        $hooksDisabled = $true\n"
+        "      }\n"
+        "      $runnerState = $null\n"
+        "      if ($null -ne $state.PSObject.Properties['runners']) {\n"
+        "        $runnerState = $state.runners.cursor\n"
+        "      }\n"
+        "      if (($runnerState -is [bool] -and $runnerState -eq $false) -or (($runnerState -isnot [bool]) -and $null -ne $runnerState -and $runnerState.enabled -eq $false)) {\n"
+        "        $hooksDisabled = $true\n"
+        "      }\n"
+        "    } catch {\n"
+        "    }\n"
+        "  }\n"
+        "  if ($hooksDisabled) {\n"
+        "    switch ($event) {\n"
+        "      'beforeSubmitPrompt' { Write-Output '{\"continue\":true}' }\n"
+        "      'beforeShellExecution' { Write-Output '{\"permission\":\"allow\"}' }\n"
+        "      'beforeMCPExecution' { Write-Output '{\"permission\":\"allow\"}' }\n"
+        "      'beforeReadFile' { Write-Output '{\"permission\":\"allow\"}' }\n"
+        "      default { Write-Output '{}' }\n"
+        "    }\n"
+        "    exit 0\n"
+        "  }\n"
+        "  switch ($event) {\n"
+        "    'beforeSubmitPrompt' {\n"
+        "      if ($code -eq 2) {\n"
+        "        Write-Output '{\"continue\":false,\"message\":\"Agent Context Engine blocked this prompt by policy.\"}'\n"
+        "      } else {\n"
+        "        Write-Output '{\"continue\":true}'\n"
+        "      }\n"
+        "    }\n"
+        "    'beforeShellExecution' {\n"
+        "      if ($code -eq 2) {\n"
+        "        Write-Output '{\"permission\":\"deny\",\"message\":\"Agent Context Engine blocked this tool use by policy.\"}'\n"
+        "      } else {\n"
+        "        Write-Output '{\"permission\":\"allow\"}'\n"
+        "      }\n"
+        "    }\n"
+        "    'beforeMCPExecution' {\n"
+        "      if ($code -eq 2) {\n"
+        "        Write-Output '{\"permission\":\"deny\",\"message\":\"Agent Context Engine blocked this tool use by policy.\"}'\n"
+        "      } else {\n"
+        "        Write-Output '{\"permission\":\"allow\"}'\n"
+        "      }\n"
+        "    }\n"
+        "    'beforeReadFile' {\n"
+        "      if ($code -eq 2) {\n"
+        "        Write-Output '{\"permission\":\"deny\",\"message\":\"Agent Context Engine blocked this tool use by policy.\"}'\n"
+        "      } else {\n"
+        "        Write-Output '{\"permission\":\"allow\"}'\n"
+        "      }\n"
+        "    }\n"
+        "    default { Write-Output '{}' }\n"
+        "  }\n"
+        "} finally {\n"
+        "  Remove-Item -Path $tmp -ErrorAction SilentlyContinue\n"
+        "}\n"
+    )
+
+
+@dataclass(frozen=True)
+class PowerShellHookAdapterRenderer(HookAdapterRendererPort):
+    renderer_name: str = "powershell"
+    support_level: str = "experimental"
+    evidence: str = "static_contract_test"
+
+    def render_shell_hook_adapter(self, spec: ShellHookAdapterSpec) -> str:
+        return _render_powershell_hook_script(
+            client=spec.client,
+            root=str(spec.agent_context_engine_root.resolve()),
+            script=str(spec.agent_memory_script),
+            support_level=spec.support_level,
+            evidence=spec.evidence,
+            spec_version=spec.spec_version,
+        )
+
+    def render_cursor_project_hook_wrapper(self, spec: CursorProjectHookWrapperSpec) -> str:
+        return _render_cursor_powershell_hook_script(
+            root=str(spec.agent_context_engine_root.resolve()),
+            script=str(spec.agent_memory_script),
+            support_level=spec.support_level,
+            evidence=spec.evidence,
+            spec_version=spec.spec_version,
+        )

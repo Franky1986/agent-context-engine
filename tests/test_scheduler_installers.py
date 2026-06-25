@@ -21,10 +21,10 @@ class SchedulerInstallerSelectionTests(unittest.TestCase):
         self.assertEqual(installer.adapter_name, "launchagent")
         self.assertEqual(installer.support_level, "supported")
 
-    def test_windows_profile_remains_scaffolded(self) -> None:
+    def test_windows_profile_is_experimental(self) -> None:
         installer = resolve_platform_scheduler_installer(platform_profile_for_family(PlatformFamily.WINDOWS))
         self.assertEqual(installer.adapter_name, "windows_task_scheduler")
-        self.assertEqual(installer.support_level, "scaffolded")
+        self.assertEqual(installer.support_level, "experimental")
 
     def test_linux_profile_remains_scaffolded(self) -> None:
         installer = resolve_platform_scheduler_installer(platform_profile_for_family(PlatformFamily.LINUX))

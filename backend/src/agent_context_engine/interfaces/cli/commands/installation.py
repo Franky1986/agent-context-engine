@@ -271,12 +271,20 @@ MANAGED_INSTALL_PATHS = (
     "docs/skills/agent-context-engine",
     ".codex/hooks.json",
     ".codex/hooks/hook_adapter.sh",
+    ".codex/hooks/hook_adapter.cmd",
+    ".codex/hooks/hook_adapter.ps1",
     ".claude/settings.json",
     ".claude/hooks/hook_adapter.sh",
+    ".claude/hooks/hook_adapter.cmd",
+    ".claude/hooks/hook_adapter.ps1",
     ".agents/hooks.json",
     ".agents/hooks/hook_adapter.sh",
+    ".agents/hooks/hook_adapter.cmd",
+    ".agents/hooks/hook_adapter.ps1",
     ".gemini/settings.json",
     ".gemini/hooks/hook_adapter.sh",
+    ".gemini/hooks/hook_adapter.cmd",
+    ".gemini/hooks/hook_adapter.ps1",
     "session-start-hook-entry.md",
 )
 
@@ -2521,12 +2529,21 @@ def agent_memory_script_for_root(memory_root: Path) -> str:
 
 
 def agent_memory_cli_for_root(memory_root: Path) -> str:
+    if (memory_root / "scripts" / "agent-context-engine.cmd").exists():
+        return "./scripts/agent-context-engine.cmd"
+    if (memory_root / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine.cmd").exists():
+        return "./docs/skills/agent-context-engine/scripts/agent-context-engine.cmd"
     if (memory_root / "scripts" / "agent-context-engine").exists():
         return "./scripts/agent-context-engine"
     return "./docs/skills/agent-context-engine/scripts/agent-context-engine"
 
 
 def agent_memory_cli_path_for_root(memory_root: Path) -> Path:
+    if (memory_root / "scripts" / "agent-context-engine.cmd").exists():
+        return memory_root / "scripts" / "agent-context-engine.cmd"
+    nested_cmd = memory_root / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine.cmd"
+    if nested_cmd.exists():
+        return nested_cmd
     if (memory_root / "scripts" / "agent-context-engine").exists():
         return memory_root / "scripts" / "agent-context-engine"
     nested = memory_root / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine"
@@ -2548,21 +2565,34 @@ def agent_memory_command_prefix_for_target(target: Path, memory_root: Path) -> s
     cli_path = preferred_agent_memory_cli_for_root(memory_root)
     if target.resolve() == memory_root.resolve():
         return cli_path
+    if os.name == "nt":
+        return f'cd /d "{memory_root.resolve()}" && {cli_path}'
     return f"cd {_quote_platform_path(memory_root.resolve())} && {cli_path}"
 
 
 def cursor_hook_wrapper(memory_root: Path) -> str:
-    from ....application.hook_rendering import build_cursor_project_hook_wrapper_spec, render_cursor_project_hook_wrapper
+    from ....application.hook_rendering import build_cursor_project_hook_wrapper_spec
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_hook_adapter_renderer
 
-    return render_cursor_project_hook_wrapper(build_cursor_project_hook_wrapper_spec(agent_context_engine_root=memory_root))
+    return select_hook_adapter_renderer(current_platform_profile()).render_cursor_project_hook_wrapper(
+        build_cursor_project_hook_wrapper_spec(
+            agent_context_engine_root=memory_root,
+            agent_memory_script=str((memory_root / agent_memory_script_for_root(memory_root)).resolve()),
+        )
+    )
 
 def antigravity_hook_wrapper(memory_root: Path) -> str:
-    script_rel = agent_memory_script_for_root(memory_root)
-    template = (SKILL_ROOT / "templates" / "antigravity-hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
-    return (
-        template
-        .replace("__AGENT_MEMORY_SCRIPT__", script_rel)
-        .replace("__AGENT_CONTEXT_ENGINE_ROOT__", str(memory_root.resolve()))
+    from ....application.hook_rendering import build_shell_hook_adapter_spec
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_hook_adapter_renderer
+
+    return select_hook_adapter_renderer(current_platform_profile()).render_shell_hook_adapter(
+        build_shell_hook_adapter_spec(
+            "antigravity",
+            agent_context_engine_root=memory_root,
+            agent_memory_script=str((memory_root / agent_memory_script_for_root(memory_root)).resolve()),
+        )
     )
 
 
@@ -2570,6 +2600,88 @@ def managed_install_conflicts(target: Path) -> list[Path]:
     if _looks_like_agent_memory_checkout(target) and not installation_profile_path(target).exists():
         return []
     return [target / relative for relative in MANAGED_INSTALL_PATHS if (target / relative).exists()]
+
+
+def _replace_hook_commands(value: object, command: str) -> object:
+    if isinstance(value, dict):
+        replaced: dict[str, object] = {}
+        for key, item in value.items():
+            if key == "command" and isinstance(item, str):
+                existing = item.strip()
+                if not existing:
+                    replaced[key] = command
+                else:
+                    head, separator, tail = existing.partition(" ")
+                    replaced[key] = f"{command}{separator}{tail}" if separator else command
+            else:
+                replaced[key] = _replace_hook_commands(item, command)
+        return replaced
+    if isinstance(value, list):
+        return [_replace_hook_commands(item, command) for item in value]
+    return value
+
+
+def _write_json(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _render_shell_hook_config(template_path: Path, *, command: str) -> dict[str, object]:
+    return _replace_hook_commands(json.loads(template_path.read_text(encoding="utf-8")), command)
+
+
+def _render_antigravity_hook_config(*, hook_script: Path) -> dict[str, object]:
+    template = (SKILL_ROOT / "templates" / "antigravity-hooks" / "hooks.json").read_text(encoding="utf-8")
+    return json.loads(template.replace("__ANTIGRAVITY_HOOK_SCRIPT__", str(hook_script.resolve())))
+
+
+def _write_platform_script(script_path: Path, script_text: str) -> list[Path]:
+    if script_path.suffix == ".cmd":
+        from ....application.platform import current_platform_profile
+        from ....application.platform.runtime_selection import select_command_publisher
+
+        companion_path = script_path.with_suffix(".ps1")
+        companion_path.write_text(script_text, encoding="utf-8")
+        actual_path = select_command_publisher(current_platform_profile()).create_symlink(script_path.with_suffix(""), companion_path, force=True)
+        _mark_platform_executable(companion_path)
+        _mark_platform_executable(actual_path)
+        return [companion_path, actual_path]
+    script_path.write_text(script_text, encoding="utf-8")
+    _mark_platform_executable(script_path)
+    return [script_path]
+
+
+def _materialize_windows_cli_and_wrappers(*, script_root: Path, installation_root: Path) -> list[Path]:
+    if os.name != "nt":
+        return []
+    from ....application.hook_rendering import build_wrapper_render_spec, supported_wrapper_names
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_command_publisher, select_wrapper_renderer
+
+    publisher = select_command_publisher(current_platform_profile())
+    renderer = select_wrapper_renderer(current_platform_profile())
+    script_root.mkdir(parents=True, exist_ok=True)
+    python_script = (installation_root / agent_memory_script_for_root(installation_root)).resolve()
+    written: list[Path] = []
+    for command_name in ("agent-context-engine", "ace"):
+        written.append(publisher.create_symlink(script_root / command_name, python_script, force=True))
+    for wrapper_name in sorted(supported_wrapper_names()):
+        ps1_path = script_root / f"{wrapper_name}.ps1"
+        ps1_path.write_text(
+            renderer.render_wrapper(
+                build_wrapper_render_spec(
+                    wrapper_name,
+                    installation_root=installation_root,
+                    support_level="experimental",
+                    evidence="static_contract_test",
+                )
+            ),
+            encoding="utf-8",
+        )
+        written.append(ps1_path)
+        _mark_platform_executable(ps1_path)
+        written.append(publisher.create_symlink(script_root / wrapper_name, ps1_path, force=True))
+    return written
 
 
 def print_install_conflicts(target: Path, conflicts: list[Path]) -> int:
@@ -2626,8 +2738,9 @@ def cmd_cursor_enable(args: argparse.Namespace) -> int:
     entrypoints = ensure_harness_entrypoints(target)
     script_path = target / ".cursor" / "hooks" / "hook_adapter.sh"
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(cursor_hook_wrapper(installation_root), encoding="utf-8")
-    _mark_platform_executable(script_path)
+    if os.name == "nt":
+        script_path = script_path.with_suffix(".cmd")
+    _write_platform_script(script_path, cursor_hook_wrapper(installation_root))
     result, target_item = _run_integration_hook_action(
         client="cursor",
         action="enable",
@@ -2681,8 +2794,7 @@ def cmd_antigravity_enable(args: argparse.Namespace) -> int:
     paths = ensure_antigravity_project(target, memory_root=installation_root)
     script_path = paths["script_path"]
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(antigravity_hook_wrapper(installation_root), encoding="utf-8")
-    _mark_platform_executable(script_path)
+    _write_platform_script(script_path, antigravity_hook_wrapper(installation_root))
     result, target_item = _run_integration_hook_action(client="antigravity", action="enable", target=target, memory_root=installation_root)
     print(f"enabled global Antigravity Agent Context Engine hooks: {paths['config_path']}")
     print(f"hook wrapper: {script_path}")
@@ -3188,37 +3300,17 @@ def create_command_link(
     from ....application.platform.runtime_selection import select_command_publisher
 
     link = link_dir / link_name
-    if link.exists() or link.is_symlink():
-        try:
-            existing = link.resolve(strict=False)
-        except OSError:
-            existing = None
-        if existing == target.resolve():
-            record_link_registry_entry(
-                logical_name=link_name,
-                link_kind=link_kind,
-                path=link,
-                target=target,
-                status="linked",
-                installation_root=installation_root,
-                command_name=link_name,
-            )
-            return link
-        if not force:
-            raise FileExistsError(f"link exists, use --force or a different --command-prefix: {link}")
-        if link.is_dir() and not link.is_symlink():
-            raise FileExistsError(f"cannot replace directory link target: {link}")
-    select_command_publisher(current_platform_profile()).create_symlink(link, target, force=force)
+    actual_link = select_command_publisher(current_platform_profile()).create_symlink(link, target, force=force)
     record_link_registry_entry(
         logical_name=link_name,
         link_kind=link_kind,
-        path=link,
+        path=actual_link,
         target=target,
         status="linked",
         installation_root=installation_root,
         command_name=link_name,
     )
-    return link
+    return actual_link
 
 
 def remove_command_link(link_dir: Path, link_name: str, *, installation_root: Path | None = None) -> Path:
@@ -3226,17 +3318,17 @@ def remove_command_link(link_dir: Path, link_name: str, *, installation_root: Pa
     from ....application.platform.runtime_selection import select_command_publisher
 
     link = link_dir / link_name
-    select_command_publisher(current_platform_profile()).remove_symlink(link)
+    actual_link = select_command_publisher(current_platform_profile()).remove_symlink(link)
     record_link_registry_entry(
         logical_name=link_name,
         link_kind="global_wrapper",
-        path=link,
+        path=actual_link,
         target=None,
         status="removed",
         installation_root=installation_root,
         command_name=link_name,
     )
-    return link
+    return actual_link
 
 
 def global_wrapper_command_name(wrapper_name: str, args: argparse.Namespace) -> str:
@@ -3507,61 +3599,62 @@ def cmd_install(args: argparse.Namespace) -> int:
     codex_templates = SKILL_ROOT / "templates" / "codex-hooks"
     script_abs = str((target / script_rel).resolve())
     root_abs = str(target.resolve())
-    from ....application.hook_rendering import build_shell_hook_adapter_spec, render_shell_hook_adapter_script
-    (target / ".codex" / "hooks").mkdir(parents=True, exist_ok=True)
-    (target / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
-    (target / ".agents" / "hooks").mkdir(parents=True, exist_ok=True)
-    (target / ".gemini" / "hooks").mkdir(parents=True, exist_ok=True)
-    copy_text(codex_templates / "hooks.json", target / ".codex" / "hooks.json")
-    (target / ".codex" / "hooks" / "hook_adapter.sh").write_text(
-        render_shell_hook_adapter_script(
+    from ....application.hook_rendering import build_shell_hook_adapter_spec
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_hook_adapter_renderer
+    hook_renderer = select_hook_adapter_renderer(current_platform_profile())
+    codex_script_path = target / ".codex" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
+    claude_script_path = target / ".claude" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
+    antigravity_script_path = target / ".agents" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
+    gemini_script_path = target / ".gemini" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
+    for path in [codex_script_path, claude_script_path, antigravity_script_path, gemini_script_path]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(target / ".codex" / "hooks.json", _render_shell_hook_config(codex_templates / "hooks.json", command=f"./.codex/hooks/{codex_script_path.name}"))
+    _write_platform_script(
+        codex_script_path,
+        hook_renderer.render_shell_hook_adapter(
             build_shell_hook_adapter_spec(
                 "codex",
                 agent_context_engine_root=target,
                 agent_memory_script=script_abs,
             )
         ),
-        encoding="utf-8",
     )
     claude_templates = SKILL_ROOT / "templates" / "claude-hooks"
-    copy_text(claude_templates / "settings.json", target / ".claude" / "settings.json")
-    (target / ".claude" / "hooks" / "hook_adapter.sh").write_text(
-        render_shell_hook_adapter_script(
+    _write_json(target / ".claude" / "settings.json", _render_shell_hook_config(claude_templates / "settings.json", command=f"./.claude/hooks/{claude_script_path.name}"))
+    _write_platform_script(
+        claude_script_path,
+        hook_renderer.render_shell_hook_adapter(
             build_shell_hook_adapter_spec(
                 "claude",
                 agent_context_engine_root=target,
                 agent_memory_script=script_abs,
             )
         ),
-        encoding="utf-8",
     )
     antigravity_templates = SKILL_ROOT / "templates" / "antigravity-hooks"
-    copy_text(
-        antigravity_templates / "hooks.json",
-        target / ".agents" / "hooks.json",
-        {"__ANTIGRAVITY_HOOK_SCRIPT__": str((target / ".agents" / "hooks" / "hook_adapter.sh").resolve())},
-    )
-    (target / ".agents" / "hooks" / "hook_adapter.sh").write_text(
-        render_shell_hook_adapter_script(
+    _write_json(target / ".agents" / "hooks.json", _render_antigravity_hook_config(hook_script=antigravity_script_path))
+    _write_platform_script(
+        antigravity_script_path,
+        hook_renderer.render_shell_hook_adapter(
             build_shell_hook_adapter_spec(
                 "antigravity",
                 agent_context_engine_root=target,
-                agent_memory_script=script_rel,
+                agent_memory_script=script_abs,
             )
         ),
-        encoding="utf-8",
     )
     gemini_templates = SKILL_ROOT / "templates" / "gemini-hooks"
-    copy_text(gemini_templates / "settings.json", target / ".gemini" / "settings.json")
-    (target / ".gemini" / "hooks" / "hook_adapter.sh").write_text(
-        render_shell_hook_adapter_script(
+    _write_json(target / ".gemini" / "settings.json", _render_shell_hook_config(gemini_templates / "settings.json", command=f"./.gemini/hooks/{gemini_script_path.name}"))
+    _write_platform_script(
+        gemini_script_path,
+        hook_renderer.render_shell_hook_adapter(
             build_shell_hook_adapter_spec(
                 "gemini",
                 agent_context_engine_root=target,
                 agent_memory_script=script_abs,
             )
         ),
-        encoding="utf-8",
     )
     write_workspace_binding("codex", root=target, memory_root=target, written_by="install")
     write_workspace_binding("claude", root=target, memory_root=target, written_by="install")
@@ -3574,6 +3667,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         memory_root=runtime_memory_root,
     )
     _run_integration_hook_action(client="opencode", action="enable", target=target, memory_root=runtime_memory_root)
+    _materialize_windows_cli_and_wrappers(script_root=cli_path.parent, installation_root=target)
     user_cli_link: Path | None = None
     if not isolated_install:
         try:
@@ -3583,18 +3677,30 @@ def cmd_install(args: argparse.Namespace) -> int:
             return 1
     for path in [
         installed_skill / "scripts" / "agent-context-engine",
+        installed_skill / "scripts" / "agent-context-engine.cmd",
         installed_skill / "scripts" / "codex-ace",
+        installed_skill / "scripts" / "codex-ace.cmd",
         installed_skill / "scripts" / "claude-ace",
+        installed_skill / "scripts" / "claude-ace.cmd",
         installed_skill / "scripts" / "agy-ace",
+        installed_skill / "scripts" / "agy-ace.cmd",
         installed_skill / "scripts" / "antigravity-ace",
+        installed_skill / "scripts" / "antigravity-ace.cmd",
         installed_skill / "scripts" / "gemini-ace",
+        installed_skill / "scripts" / "gemini-ace.cmd",
         installed_skill / "scripts" / "opencode-ace",
-        target / ".codex" / "hooks" / "hook_adapter.sh",
-        target / ".claude" / "hooks" / "hook_adapter.sh",
-        target / ".agents" / "hooks" / "hook_adapter.sh",
-        target / ".gemini" / "hooks" / "hook_adapter.sh",
+        installed_skill / "scripts" / "opencode-ace.cmd",
+        codex_script_path,
+        claude_script_path,
+        antigravity_script_path,
+        gemini_script_path,
+        codex_script_path.with_suffix(".ps1"),
+        claude_script_path.with_suffix(".ps1"),
+        antigravity_script_path.with_suffix(".ps1"),
+        gemini_script_path.with_suffix(".ps1"),
     ]:
-        _mark_platform_executable(path)
+        if path.exists():
+            _mark_platform_executable(path)
     skip_runtime_bootstrap = os.environ.get("AGENT_MEMORY_TEST_SKIP_RUNTIME_BOOTSTRAP", "") in {"1", "true", "True", "yes"}
     if getattr(args, "bootstrap_runtime", False) and not skip_runtime_bootstrap:
         try:

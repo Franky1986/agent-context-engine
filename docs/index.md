@@ -106,6 +106,7 @@ python3 scripts/update_docs_index.py --check
 ### Other
 - [Spec: Runner Adapter Boundary](../backend/src/agent_context_engine/adapters/runners/runners.spec.md) - `backend/src/agent_context_engine/adapters/runners/runners.spec.md`
 - [Spec: SQLite Adapter Boundary](../backend/src/agent_context_engine/adapters/sqlite/sqlite.spec.md) - `backend/src/agent_context_engine/adapters/sqlite/sqlite.spec.md`
+- [Windows Adapter Boundary](../backend/src/agent_context_engine/adapters/windows/windows.spec.md) - `backend/src/agent_context_engine/adapters/windows/windows.spec.md`
 - [Spec: Agent Flow Application Boundary](../backend/src/agent_context_engine/application/agent_flow/agent_flow.spec.md) - `backend/src/agent_context_engine/application/agent_flow/agent_flow.spec.md`
 - [Spec: Dreaming Application Boundary](../backend/src/agent_context_engine/application/dreaming/dreaming.spec.md) - `backend/src/agent_context_engine/application/dreaming/dreaming.spec.md`
 - [Spec: Normalization Learning](../backend/src/agent_context_engine/application/dreaming/normalization-learning.spec.md) - `backend/src/agent_context_engine/application/dreaming/normalization-learning.spec.md`

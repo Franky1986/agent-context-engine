@@ -21,7 +21,9 @@ workflows. The current public slice includes:
   mutation,
 - isolated installs with target-local runtime storage,
 - verified Cursor project activation with a pinned Claude background runner,
-- verified retrieval over fresh isolated-session summaries and semantic memory.
+- verified retrieval over fresh isolated-session summaries and semantic memory,
+- explicit Windows experimental runtime adapters for command publication,
+  PowerShell wrappers/hooks, Task Scheduler wiring, and diagnostics.
 
 Versioned release snapshot:
 
@@ -39,13 +41,17 @@ The current install flow now supports:
 - automatic post-install verification through `doctor` and
   `check-installation`,
 - isolated wrapper naming and local SQLite/runtime storage for side-by-side
-  installs.
+  installs,
+- Windows-native `.cmd` publication and PowerShell hook/wrapper generation for
+  experimental installs.
 
 ## Integration State
 
 - `codex`, `claude`, and `cursor` distinguish GUI-hook readiness from headless
   CLI readiness.
 - `antigravity`, `gemini`, and `opencode` are global-only bridge flows.
+- Windows now uses native `.cmd` publication plus PowerShell-based hooks and
+  wrappers while remaining explicitly below `supported`.
 - missing or stale workspace bindings are surfaced in diagnostics and the
   monitor instead of being treated as silently valid.
 - Cursor activation now persists configured background runner and project launch
@@ -73,6 +79,16 @@ confirmed:
   `preferred_dream_runner=claude`,
 - no stale running dream remained after scheduler recovery.
 
+Recent validation for the Windows experimental slice confirmed:
+
+- Windows platform profile now reports `support=experimental`,
+- runtime selection surfaces Windows-specific publisher, wrapper, hook,
+  scheduler, quoting, process-launch, workspace-binding, and system-open
+  adapters,
+- focused Windows contract tests and fresh-install smoke checks are green on
+  the development host,
+- real Windows runtime validation and CI remain intentionally pending.
+
 ## Known Follow-Up Areas
 
 - install-wide diagnostics still list external Cursor projects only when they
@@ -85,4 +101,6 @@ confirmed:
 - broader English cleanup across historical internal progress notes,
 - further polish for multi-version installation ergonomics,
 - deeper storage migration tooling for future breaking schema changes,
-- continued public curation of older internal design history.
+- continued public curation of older internal design history,
+- one real Windows machine validation pass before any support-level increase
+  beyond `experimental`.

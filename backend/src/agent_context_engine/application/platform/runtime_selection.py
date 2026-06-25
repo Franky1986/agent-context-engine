@@ -4,26 +4,35 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..platform import CapabilityStatus, PlatformFamily, PlatformProfile
-from ...adapters.executable_permissions import ChmodExecutablePermissionAdapter, WindowsExecutablePermissionAdapter
+from ...adapters.executable_permissions import ChmodExecutablePermissionAdapter
 from ...adapters.platform_detection import SystemPlatformDetector
-from ...adapters.command_publishers import CmdShimPublisher
 from ...adapters.global_command_publication import SymlinkGlobalCommandPublisher
-from ...adapters.hook_adapter_rendering import BashHookAdapterRenderer, PowerShellHookAdapterRenderer
+from ...adapters.hook_adapter_rendering import BashHookAdapterRenderer
 from ...adapters.instruction_rendering import MarkdownInstructionRenderer
-from ...adapters.path_quoting import PosixShellPathQuotingAdapter, WindowsPathQuotingAdapter
-from ...adapters.process_launch import SubprocessLaunchAdapter, WindowsProcessLaunchAdapter
+from ...adapters.path_quoting import PosixShellPathQuotingAdapter
+from ...adapters.process_launch import SubprocessLaunchAdapter
 from ...adapters.scheduler_installers import (
     CronSchedulerInstaller,
     MacOSLaunchAgentSchedulerInstaller,
     SystemdUserSchedulerInstaller,
     UnsupportedSchedulerInstaller,
-    WindowsTaskSchedulerInstaller,
     WslSchedulerInstaller,
 )
 from ...adapters.system_open import DefaultSystemOpenAdapter
-from ...adapters.workspace_binding import FileWorkspaceBindingAdapter, WindowsWorkspaceBindingAdapter
-from ...adapters.wrapper_renderers import BashWrapperRenderer, PowerShellWrapperRenderer
+from ...adapters.workspace_binding import FileWorkspaceBindingAdapter
+from ...adapters.wrapper_renderers import BashWrapperRenderer
 from ...adapters.launchagent import launch_agent_path, launchctl_domain
+from ...adapters.windows import (
+    PowerShellHookAdapterRenderer,
+    PowerShellWrapperRenderer,
+    WindowsCmdShimPublisher,
+    WindowsExecutablePermissionAdapter,
+    WindowsPathQuotingAdapter,
+    WindowsProcessLaunchAdapter,
+    WindowsSystemOpenAdapter,
+    WindowsTaskSchedulerInstaller,
+    WindowsWorkspaceBindingAdapter,
+)
 
 
 class _ScaffoldedMarkdownInstructionRenderer(MarkdownInstructionRenderer):
@@ -34,6 +43,11 @@ class _ScaffoldedMarkdownInstructionRenderer(MarkdownInstructionRenderer):
 class _UnsupportedMarkdownInstructionRenderer(MarkdownInstructionRenderer):
     support_level = "unsupported"
     evidence = "inferred"
+
+
+class _ExperimentalMarkdownInstructionRenderer(MarkdownInstructionRenderer):
+    support_level = "experimental"
+    evidence = "static_contract_test"
 
 
 class _ScaffoldedBashHookAdapterRenderer:
@@ -192,7 +206,7 @@ def select_command_publisher(profile: PlatformProfile):
             failure_message="Command publication is unsupported for this platform profile.",
         )
     if profile.family == PlatformFamily.WINDOWS:
-        return CmdShimPublisher()
+        return WindowsCmdShimPublisher()
     if _is_scaffolded_profile(profile):
         return _DisabledGlobalCommandPublisher(
             adapter_name="scaffolded_publication",
@@ -212,7 +226,7 @@ def select_scheduler_installer(profile: PlatformProfile):
     if profile.family == PlatformFamily.WSL:
         return WslSchedulerInstaller(profile_id=profile.profile_id)
     if profile.family == PlatformFamily.WINDOWS:
-        return WindowsTaskSchedulerInstaller(profile_id=profile.profile_id)
+        return WindowsTaskSchedulerInstaller()
     if profile.family == PlatformFamily.POSIX_GENERIC:
         return CronSchedulerInstaller(profile_id=profile.profile_id)
     return UnsupportedSchedulerInstaller(
@@ -233,6 +247,8 @@ def launchagent_service_domain() -> str:
 def select_instruction_renderer(profile: PlatformProfile):
     if _is_unsupported_profile(profile):
         return _UnsupportedMarkdownInstructionRenderer()
+    if profile.support_level.value == "experimental":
+        return _ExperimentalMarkdownInstructionRenderer()
     if _is_scaffolded_profile(profile):
         return _ScaffoldedMarkdownInstructionRenderer()
     return MarkdownInstructionRenderer()
@@ -256,11 +272,7 @@ def select_system_open_adapter(profile: PlatformProfile):
             evidence="inferred",
         )
     if profile.family == PlatformFamily.WINDOWS:
-        return _DisabledSystemOpenAdapter(
-            adapter_name="windows_system_open",
-            support_level="scaffolded",
-            evidence="public_docs",
-        )
+        return WindowsSystemOpenAdapter()
     if _is_scaffolded_profile(profile):
         return _DisabledSystemOpenAdapter(
             adapter_name="scaffolded_system_open",

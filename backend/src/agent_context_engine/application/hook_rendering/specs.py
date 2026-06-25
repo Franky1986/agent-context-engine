@@ -53,6 +53,7 @@ class CursorProjectHookWrapperSpec:
     agent_context_engine_root: Path
     support_level: str
     evidence: str
+    agent_memory_script: str = ""
     spec_version: str = HOOK_RENDER_SPEC_VERSION
 
 
@@ -92,6 +93,7 @@ def build_shell_hook_adapter_spec(
 def build_cursor_project_hook_wrapper_spec(
     *,
     agent_context_engine_root: Path,
+    agent_memory_script: str = "",
     support_level: str = "supported",
     evidence: str = "tested",
 ) -> CursorProjectHookWrapperSpec:
@@ -99,6 +101,7 @@ def build_cursor_project_hook_wrapper_spec(
         template_path=_CURSOR_TEMPLATE_PATH,
         root_line=_CURSOR_ROOT_LINE,
         agent_context_engine_root=agent_context_engine_root.resolve(),
+        agent_memory_script=str(agent_memory_script),
         support_level=support_level,
         evidence=evidence,
     )

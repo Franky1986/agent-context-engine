@@ -9659,7 +9659,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(macos.capability("scheduler_backend").implementation, "launchagent")
             self.assertEqual(macos.capability("global_command_publication").implementation, "symlink")
 
-            for family in (PlatformFamily.LINUX, PlatformFamily.WSL, PlatformFamily.WINDOWS, PlatformFamily.POSIX_GENERIC):
+            for family in (PlatformFamily.LINUX, PlatformFamily.WSL, PlatformFamily.POSIX_GENERIC):
                 with self.subTest(family=family.value):
                     profile = platform_profile_for_family(family)
                     assert_scaffolded_platform_profile_contract(
@@ -9672,6 +9672,14 @@ The session reconciled stale queue state and resumed pending dreams.
                     self.assertEqual(profile.capability("agent_guidance_rendering").status, CapabilityStatus.SUPPORTED)
                     self.assertEqual(profile.capability("path_quoting_strategy").status, CapabilityStatus.SCAFFOLDED)
                     self.assertEqual(profile.capability("symlink_shim_strategy").status, CapabilityStatus.SCAFFOLDED)
+
+            windows = platform_profile_for_family(PlatformFamily.WINDOWS)
+            self.assertEqual(windows.support_level, SupportLevel.EXPERIMENTAL)
+            self.assertEqual(windows.capability("scheduler_backend").status, CapabilityStatus.SUPPORTED)
+            self.assertEqual(windows.capability("global_command_publication").status, CapabilityStatus.SUPPORTED)
+            self.assertEqual(windows.capability("agent_guidance_rendering").status, CapabilityStatus.SUPPORTED)
+            self.assertEqual(windows.capability("path_quoting_strategy").status, CapabilityStatus.SUPPORTED)
+            self.assertEqual(windows.capability("symlink_shim_strategy").status, CapabilityStatus.SUPPORTED)
 
             unknown = platform_profile_for_family("not-a-platform")
             assert_unsupported_platform_profile_contract(
@@ -9909,11 +9917,11 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn('ROOT="' + str(root.resolve()) + '"', rendered)
             self.assertIn('SCRIPT="/tmp/fake-agent-context-engine.py"', rendered)
 
-    def test_scaffolded_hook_renderer_contract_reports_support_and_evidence(self) -> None:
+    def test_windows_hook_renderer_contract_reports_support_and_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             load_agent_memory(root)
-            from agent_context_engine.adapters.hook_adapter_rendering import PowerShellHookAdapterRenderer
+            from agent_context_engine.adapters.windows.hook_rendering import PowerShellHookAdapterRenderer
             from agent_context_engine.application.hook_rendering import (
                 build_cursor_project_hook_wrapper_spec,
                 build_shell_hook_adapter_spec,
@@ -9924,71 +9932,58 @@ The session reconciled stale queue state and resumed pending dreams.
                 "codex",
                 agent_context_engine_root=root,
                 agent_memory_script="C:/agent-context-engine.py",
-                support_level="scaffolded",
-                evidence="public_docs",
+                support_level="experimental",
+                evidence="static_contract_test",
             )
             cursor_spec = build_cursor_project_hook_wrapper_spec(
                 agent_context_engine_root=root,
-                support_level="scaffolded",
-                evidence="public_docs",
+                agent_memory_script="C:/agent-context-engine.py",
+                support_level="experimental",
+                evidence="static_contract_test",
             )
 
-            assert_scaffolded_renderer_contract(
-                self,
-                renderer.render_shell_hook_adapter(shell_spec),
-                renderer.render_shell_hook_adapter(shell_spec),
-                renderer_name="powershell",
-                support_level="scaffolded",
-                evidence="public_docs",
-                expected_lines=(
-                    "# scaffolded hook renderer only",
-                    "# client=codex",
-                    f"# root={root.resolve()}",
-                    "# script=C:/agent-context-engine.py",
-                ),
-            )
-            assert_scaffolded_renderer_contract(
-                self,
-                renderer.render_cursor_project_hook_wrapper(cursor_spec),
-                renderer.render_cursor_project_hook_wrapper(cursor_spec),
-                renderer_name="powershell",
-                support_level="scaffolded",
-                evidence="public_docs",
-                expected_lines=(
-                    "# scaffolded cursor hook wrapper only",
-                    f"# root={root.resolve()}",
-                ),
-            )
+            rendered_shell = renderer.render_shell_hook_adapter(shell_spec)
+            rendered_cursor = renderer.render_cursor_project_hook_wrapper(cursor_spec)
 
-    def test_scaffolded_wrapper_renderer_contract_reports_support_and_evidence(self) -> None:
+            self.assertEqual(rendered_shell, renderer.render_shell_hook_adapter(shell_spec))
+            self.assertIn("# renderer=powershell", rendered_shell)
+            self.assertIn("# support=experimental", rendered_shell)
+            self.assertIn("# evidence=static_contract_test", rendered_shell)
+            self.assertIn("# client=codex", rendered_shell)
+            self.assertIn(f"# ROOT={root.resolve()}", rendered_shell)
+            self.assertIn("# SCRIPT=C:/agent-context-engine.py", rendered_shell)
+            self.assertIn("log-hook", rendered_shell)
+            self.assertIn("py", rendered_shell)
+
+            self.assertEqual(rendered_cursor, renderer.render_cursor_project_hook_wrapper(cursor_spec))
+            self.assertIn("# client=cursor", rendered_cursor)
+            self.assertIn("# support=experimental", rendered_cursor)
+            self.assertIn("# SCRIPT=C:/agent-context-engine.py", rendered_cursor)
+
+    def test_windows_wrapper_renderer_contract_reports_support_and_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             load_agent_memory(root)
-            from agent_context_engine.adapters.wrapper_renderers import PowerShellWrapperRenderer
+            from agent_context_engine.adapters.windows.wrapper_rendering import PowerShellWrapperRenderer
             from agent_context_engine.application.hook_rendering import build_wrapper_render_spec
 
             renderer = PowerShellWrapperRenderer()
             spec = build_wrapper_render_spec(
                 "codex-ace",
                 installation_root=root,
-                support_level="scaffolded",
-                evidence="public_docs",
+                support_level="experimental",
+                evidence="static_contract_test",
             )
 
-            assert_scaffolded_renderer_contract(
-                self,
-                renderer.render_wrapper(spec),
-                renderer.render_wrapper(spec),
-                renderer_name="powershell",
-                support_level="scaffolded",
-                evidence="public_docs",
-                expected_lines=(
-                    "# scaffolded wrapper renderer only",
-                    "# profile=windows",
-                    "# wrapper=codex-ace",
-                    "# backing_client_command=codex",
-                ),
-            )
+            rendered = renderer.render_wrapper(spec)
+            self.assertEqual(rendered, renderer.render_wrapper(spec))
+            self.assertIn("# renderer=powershell", rendered)
+            self.assertIn("# support=experimental", rendered)
+            self.assertIn("# evidence=static_contract_test", rendered)
+            self.assertIn("# wrapper=codex-ace", rendered)
+            self.assertIn("# backing_client_command=codex", rendered)
+            self.assertIn("AGENT_CONTEXT_ENGINE_ROOT", rendered)
+            self.assertIn("AGENT_MEMORY_LAUNCH_CWD", rendered)
 
     def test_render_spec_builders_fail_explicitly_for_unsupported_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10019,7 +10014,24 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertTrue(hasattr(publisher, "create_symlink"))
             self.assertTrue(hasattr(publisher, "remove_symlink"))
 
-    def test_platform_runtime_selection_keeps_windows_publication_scaffolded(self) -> None:
+    def test_windows_cmd_shim_publisher_writes_owned_cmd_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.adapters.windows.command_publication import WindowsCmdShimPublisher
+
+            target = root / "agent_context_engine.py"
+            target.write_text("print('ok')\n", encoding="utf-8")
+            publisher = WindowsCmdShimPublisher()
+            link = publisher.create_symlink(root / "bin" / "agent-context-engine", target, force=True)
+            content = link.read_text(encoding="utf-8")
+
+            self.assertEqual(link.name, "agent-context-engine.cmd")
+            self.assertIn("agent-context-engine command shim v1", content)
+            self.assertIn('py -3 "', content)
+            self.assertIn(str(target.resolve()), content)
+
+    def test_platform_runtime_selection_exposes_windows_experimental_stack(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             load_agent_memory(root)
@@ -10039,11 +10051,13 @@ The session reconciled stale queue state and resumed pending dreams.
             path_quoting = select_path_quoting_adapter(windows_profile)
             renderer = select_wrapper_renderer(windows_profile)
 
-            self.assertEqual(type(publisher).__name__, "CmdShimPublisher")
+            self.assertEqual(type(publisher).__name__, "WindowsCmdShimPublisher")
             self.assertEqual(type(executable_permissions).__name__, "WindowsExecutablePermissionAdapter")
             self.assertEqual(getattr(hook_renderer, "renderer_name", ""), "powershell")
             self.assertEqual(type(path_quoting).__name__, "WindowsPathQuotingAdapter")
             self.assertEqual(getattr(renderer, "renderer_name", ""), "powershell")
+            self.assertEqual(getattr(hook_renderer, "support_level", ""), "experimental")
+            self.assertEqual(getattr(renderer, "support_level", ""), "experimental")
 
     def test_platform_runtime_selection_keeps_linux_runtime_non_active(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10087,7 +10101,7 @@ The session reconciled stale queue state and resumed pending dreams.
             with self.assertRaises(NotImplementedError):
                 publisher.create_symlink(root / "bin" / "ace", root / "target", force=False)
 
-    def test_runtime_selection_summary_surfaces_windows_scaffolded_stack(self) -> None:
+    def test_runtime_selection_summary_surfaces_windows_experimental_stack(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             load_agent_memory(root)
@@ -10099,13 +10113,13 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIsInstance(summary.get("capability_matrix"), dict)
             self.assertEqual((summary.get("hook_renderer") or {}).get("name"), "powershell")
             self.assertEqual((summary.get("wrapper_renderer") or {}).get("name"), "powershell")
-            self.assertEqual((summary.get("command_publisher") or {}).get("name"), "CmdShimPublisher")
+            self.assertEqual((summary.get("command_publisher") or {}).get("name"), "WindowsCmdShimPublisher")
             self.assertEqual((summary.get("executable_permission_adapter") or {}).get("name"), "WindowsExecutablePermissionAdapter")
             self.assertEqual((summary.get("path_quoting_adapter") or {}).get("name"), "WindowsPathQuotingAdapter")
-            self.assertEqual((summary.get("instruction_renderer") or {}).get("support_level"), "scaffolded")
-            self.assertEqual((summary.get("system_open_adapter") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("instruction_renderer") or {}).get("support_level"), "experimental")
+            self.assertEqual((summary.get("system_open_adapter") or {}).get("support_level"), "experimental")
             self.assertEqual((summary.get("system_open_adapter") or {}).get("adapter_name"), "windows_system_open")
-            self.assertEqual((summary.get("scheduler_installer") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("scheduler_installer") or {}).get("support_level"), "experimental")
 
     def test_runtime_selection_summary_surfaces_linux_scaffolded_non_active_stack(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10146,7 +10160,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual((summary.get("executable_permission_adapter") or {}).get("name"), "ChmodExecutablePermissionAdapter")
             self.assertEqual((summary.get("path_quoting_adapter") or {}).get("name"), "PosixShellPathQuotingAdapter")
 
-    def test_runtime_selection_summary_surfaces_windows_process_launch_scaffolded(self) -> None:
+    def test_runtime_selection_summary_surfaces_windows_process_launch_experimental(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             load_agent_memory(root)
@@ -10156,13 +10170,13 @@ The session reconciled stale queue state and resumed pending dreams.
             summary = runtime_selection_summary(platform_profile_for_family(PlatformFamily.WINDOWS))
 
             self.assertEqual((summary.get("process_launch_adapter") or {}).get("name"), "WindowsProcessLaunchAdapter")
-            self.assertEqual((summary.get("process_launch_adapter") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("process_launch_adapter") or {}).get("support_level"), "experimental")
             self.assertEqual((summary.get("workspace_binding_adapter") or {}).get("name"), "WindowsWorkspaceBindingAdapter")
-            self.assertEqual((summary.get("workspace_binding_adapter") or {}).get("support_level"), "scaffolded")
-            self.assertEqual((summary.get("executable_permission_adapter") or {}).get("support_level"), "scaffolded")
-            self.assertEqual((summary.get("path_quoting_adapter") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("workspace_binding_adapter") or {}).get("support_level"), "experimental")
+            self.assertEqual((summary.get("executable_permission_adapter") or {}).get("support_level"), "experimental")
+            self.assertEqual((summary.get("path_quoting_adapter") or {}).get("support_level"), "experimental")
 
-    def test_doctor_reports_scaffolded_platform_runtime_selection(self) -> None:
+    def test_doctor_reports_experimental_platform_runtime_selection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             load_agent_memory(root)
@@ -10181,12 +10195,12 @@ The session reconciled stale queue state and resumed pending dreams.
             )
             output = "\n".join(lines)
 
-            self.assertIn("warn  platform profile: windows support=scaffolded evidence=public_docs", output)
+            self.assertIn("warn  platform profile: windows support=experimental evidence=public_docs", output)
             self.assertIn("ok  runtime capabilities:", output)
-            self.assertIn("warn  hook renderer: powershell support=scaffolded evidence=public_docs", output)
-            self.assertIn("warn  wrapper renderer: powershell support=scaffolded evidence=public_docs", output)
-            self.assertIn("warn  command publisher: CmdShimPublisher support=scaffolded evidence=public_docs", output)
-            self.assertIn("warn  scheduler installer: windows_task_scheduler support=scaffolded evidence=public_docs", output)
+            self.assertIn("warn  hook renderer: powershell support=experimental evidence=static_contract_test", output)
+            self.assertIn("warn  wrapper renderer: powershell support=experimental evidence=static_contract_test", output)
+            self.assertIn("warn  command publisher: WindowsCmdShimPublisher support=experimental evidence=static_contract_test", output)
+            self.assertIn("ok  scheduler installer: windows_task_scheduler support=experimental evidence=public_docs", output)
 
     def test_log_hook_skips_when_workspace_binding_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

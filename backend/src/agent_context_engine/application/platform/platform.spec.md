@@ -13,7 +13,7 @@ assumptions.
 - Support-level and evidence-level metadata.
 - Runtime capability descriptors.
 - Runtime capability matrix materialization for the current host token.
-- Scaffolded and unsupported platform profiles for future adapters.
+- Scaffolded, experimental, and unsupported platform profiles for future adapters.
 - Runtime selection for renderer, publisher, executable-permission, and
   path-quoting strategies.
 
@@ -21,7 +21,7 @@ assumptions.
 
 - Concrete LaunchAgent, systemd, cron, Windows Task Scheduler, shell, or symlink
   implementation details.
-- Real runtime validation of non-macOS platforms.
+- Production support claims for non-macOS platforms without runtime evidence.
 - Automatic enablement of scaffolded platform adapters.
 
 ## Responsibilities
@@ -58,8 +58,10 @@ assumptions.
 ## Acceptance Criteria
 
 - macOS resolves to the current production profile.
-- Linux, WSL, Windows, and generic POSIX can be represented without enabling
-  runtime mutation.
+- Linux, WSL, Windows, and generic POSIX can be represented without falling
+  through to macOS behavior.
+- Windows may expose an explicit `experimental` runtime path through dedicated
+  adapters without being marked `supported`.
 - Future adapters can attach to these profiles through ports instead of changing
   application policy code.
 - Shell-path quoting and executable-permission behavior are selected through
@@ -77,3 +79,4 @@ assumptions.
 - Do not mark a platform as `supported` without real runtime evidence.
 - Do not let scaffolded profiles run scheduler or command-publication mutation
   paths by default.
+- Do not mark Windows as `supported` until real Windows runtime evidence exists.

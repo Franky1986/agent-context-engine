@@ -11,6 +11,7 @@
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-D22128">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-active%20runtime%20target-000000?logo=apple&logoColor=white">
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-experimental%20runtime%20path-0078D4?logo=windows&logoColor=white">
 </p>
 
 # Agent Context Engine
@@ -32,6 +33,12 @@ Current public versions:
 
 - Backend / product: `0.2.7`
 - Monitor: `0.6.5`
+
+Platform support posture:
+
+- macOS: supported active runtime target
+- Windows: experimental native runtime path with `.cmd` and PowerShell adapters
+- Linux / WSL / generic POSIX: scaffolded only
 
 See [CHANGELOG.md](CHANGELOG.md) for release history since the initial public release.
 
@@ -164,9 +171,9 @@ This installs:
 <target>/AGENTS.md (created or appended with the Agent Context Engine quick path)
 <target>/scripts/
 <target>/.codex/hooks.json
-<target>/.codex/hooks/hook_adapter.sh
+<target>/.codex/hooks/hook_adapter.sh or hook_adapter.cmd
 <target>/.claude/settings.json
-<target>/.claude/hooks/hook_adapter.sh
+<target>/.claude/hooks/hook_adapter.sh or hook_adapter.cmd
 <target>/docs/knowledge/repos.md
 ```
 
@@ -192,6 +199,9 @@ With wrapper link flags, it can also create:
 ~/.local/bin/gemini-ace -> <target>/scripts/gemini-ace
 ~/.local/bin/opencode-ace -> <target>/scripts/opencode-ace
 ```
+
+On Windows these public commands are emitted as generated `.cmd` shims rather
+than symlinks.
 
 For a second independent installation on the same Mac, use the deterministic
 isolated mode so existing global commands are not replaced:

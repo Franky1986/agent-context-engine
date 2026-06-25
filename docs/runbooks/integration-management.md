@@ -93,6 +93,11 @@ Examples:
 - shell hook adapters under `.codex/`, `.claude/`, `.cursor/`, `.agents/`, `.gemini/`
 - Opencode plugin bridge artifacts
 
+Windows note:
+
+- prepared Windows installations use `.cmd` launchers plus PowerShell
+  companion scripts where the macOS/Linux path would use `.sh`
+
 Prepared does **not** imply that the wrapper is globally invokable or that the
 hooks are currently enabled.
 
@@ -123,6 +128,7 @@ Interpretation:
   - use:
     - `cd <agent-context-engine-root> && ./scripts/<wrapper>`
     - or the absolute script path
+  - on Windows this usually resolves to the generated `.cmd` wrapper
 - `blocked_by_hooks`:
   - the wrapper command may exist, but the local hook/config state prevents the
     intended managed flow
@@ -161,6 +167,8 @@ Rules:
 - for `codex`, `claude`, and `cursor`, a missing or broken workspace binding
   file makes the effective hook state inactive even when the local hook config
   still exists
+- on Windows, the hook command should point at the generated `.cmd` launcher,
+  not a POSIX `.sh` adapter
 
 ### 5. Workspace Binding
 

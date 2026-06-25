@@ -37,6 +37,16 @@ memory/
 !.codex/
 !.claude/
 !.cursor/
+.agents/hooks.json
+.agents/hooks/
+.claude/settings.json
+.claude/agent-memory-binding.json
+.claude/hooks/
+.codex/hooks.json
+.codex/agent-memory-binding.json
+.codex/hooks/
+.cursor/rules/
+.opencode/plugins/
 docs/knowledge/
 
 # Local environment and credentials

@@ -20,6 +20,13 @@ Agent Context Engine currently supports these interactive clients and wrappers:
 - `gemini` via `gemini-ace` by default
 - `opencode` via `opencode-ace` by default
 
+Platform note:
+
+- macOS remains the active supported runtime target
+- Windows now has an explicit experimental runtime path with native `.cmd` and
+  PowerShell wrappers/hooks
+- Linux and WSL remain scaffolded
+
 Naming note:
 
 - The Agent Context Engine client key is `antigravity`.
@@ -61,6 +68,8 @@ by default:
 - startup contract in `session-start-hook-entry.md`
 - repo-local compatibility CLI under `scripts/agent-context-engine` and
   `scripts/ace`
+- on Windows, the same installation also materializes `.cmd` companions for
+  the public CLI and managed wrappers
 - installed public CLI `agent-context-engine`, relinked to the chosen
   installation by default
 - default `.venv/` when `install` runs normally; use `--no-bootstrap-runtime` to skip it
@@ -115,6 +124,8 @@ Optional global wrappers can be linked into `~/.local/bin`:
 - `agy-ace`
 - `gemini-ace`
 - `opencode-ace`
+
+On Windows, publication uses generated `.cmd` shims instead of symlinks.
 
 The default public installation behavior is to relink these shared commands to
 the chosen installation. If a previous installation already owns them, discovery

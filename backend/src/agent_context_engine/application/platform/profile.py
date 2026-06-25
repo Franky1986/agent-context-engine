@@ -289,6 +289,105 @@ def _scaffolded_profile(family: PlatformFamily, profile_id: str, notes: str) -> 
     )
 
 
+def _windows_experimental_profile() -> PlatformProfile:
+    return PlatformProfile(
+        family=PlatformFamily.WINDOWS,
+        profile_id="windows",
+        support_level=SupportLevel.EXPERIMENTAL,
+        evidence=EvidenceLevel.PUBLIC_DOCS,
+        capabilities=(
+            _capability(
+                "scheduler_backend",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.PUBLIC_DOCS,
+                implementation="windows_task_scheduler",
+                notes="Task Scheduler install/update/query contract is implemented, but still awaits real Windows runtime evidence.",
+            ),
+            _capability(
+                "global_command_publication",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.STATIC_CONTRACT_TEST,
+                implementation="cmd_shim",
+                notes="User-facing command publication uses .cmd shims instead of symlinks.",
+            ),
+            _capability(
+                "wrapper_rendering",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.STATIC_CONTRACT_TEST,
+                implementation="powershell",
+            ),
+            _capability(
+                "hook_adapter_runtime",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.STATIC_CONTRACT_TEST,
+                implementation="powershell",
+            ),
+            _capability(
+                "agent_guidance_rendering",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.STATIC_CONTRACT_TEST,
+                implementation="markdown",
+                notes="Guidance remains markdown-based while platform commands point at Windows adapters.",
+            ),
+            _capability(
+                "shell_rendering_family",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.STATIC_CONTRACT_TEST,
+                implementation="powershell",
+            ),
+            _capability(
+                "browser_file_open",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.PUBLIC_DOCS,
+                implementation="system_open",
+            ),
+            _capability(
+                "process_launch_behavior",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.PUBLIC_DOCS,
+                implementation="windows_process",
+            ),
+            _capability(
+                "workspace_binding_behavior",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.PUBLIC_DOCS,
+                implementation="windows_file_binding",
+            ),
+            _capability(
+                "executable_permission_strategy",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.PUBLIC_DOCS,
+                implementation="windows_noop",
+            ),
+            _capability(
+                "symlink_shim_strategy",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.STATIC_CONTRACT_TEST,
+                implementation="cmd_shim",
+            ),
+            _capability(
+                "path_quoting_strategy",
+                status=CapabilityStatus.SUPPORTED,
+                support_level=SupportLevel.EXPERIMENTAL,
+                evidence=EvidenceLevel.STATIC_CONTRACT_TEST,
+                implementation="windows_powershell",
+            ),
+        ),
+        notes="Windows experimental profile with native cmd/PowerShell adapters and no supported claim yet.",
+    )
+
+
 def _unknown_profile() -> PlatformProfile:
     return PlatformProfile(
         family=PlatformFamily.UNKNOWN,
@@ -388,7 +487,7 @@ def platform_profile_for_family(family: PlatformFamily | str) -> PlatformProfile
     if normalized == PlatformFamily.WSL:
         return _scaffolded_profile(PlatformFamily.WSL, "wsl", "WSL profile scaffold; native and Linux boundary behavior must be validated.")
     if normalized == PlatformFamily.WINDOWS:
-        return _scaffolded_profile(PlatformFamily.WINDOWS, "windows", "Windows native profile scaffold; runtime adapters are not enabled yet.")
+        return _windows_experimental_profile()
     if normalized == PlatformFamily.POSIX_GENERIC:
         return _scaffolded_profile(PlatformFamily.POSIX_GENERIC, "posix_generic", "Generic POSIX scaffold for future adapter work.")
     return _unknown_profile()

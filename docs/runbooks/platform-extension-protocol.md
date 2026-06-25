@@ -24,7 +24,8 @@ Use this protocol when a change introduces or modifies behavior for:
 
 ## Core Rules
 
-1. New platforms start as `scaffolded` unless there is real runtime evidence.
+1. New platforms start as `scaffolded` unless there is real runtime evidence or
+   an explicitly documented `experimental` adapter path.
 2. Support claims above `scaffolded` require matching `evidence` metadata.
 3. Platform identity alone must not enable destructive runtime mutation.
 4. Diagnostics must state unsupported, degraded, scaffolded, or supported
@@ -86,6 +87,8 @@ Required areas depend on the capability being changed:
 - executable permission adapters
 - path quoting adapters
 - system-open adapters
+- dedicated platform adapter packages such as `adapters/windows/` when the
+  runtime shape diverges materially from the active production platform
 
 Required work:
 
@@ -179,7 +182,7 @@ Use when:
 Requirements:
 
 - explicit runtime gate or opt-in
-- smoke evidence or equivalent targeted runtime proof
+- static contract coverage for generated artifacts
 - documented caveats
 
 ### `smoke_validated`

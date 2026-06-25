@@ -38,6 +38,10 @@ def _mark_platform_executable(path: Path) -> None:
 
 
 def _root_prefixed(command: str, *, root: Path = ROOT) -> str:
+    from .platform import current_platform_profile, PlatformFamily
+
+    if current_platform_profile().family == PlatformFamily.WINDOWS:
+        return f'cd /d "{root.resolve()}" && {command}'
     return f"cd {_quote_platform_path(root.resolve())} && {command}"
 
 
@@ -192,7 +196,10 @@ def _cursor_hook_wrapper(memory_root: Path) -> str:
     from .platform.runtime_selection import select_hook_adapter_renderer
 
     return select_hook_adapter_renderer(current_platform_profile()).render_cursor_project_hook_wrapper(
-        build_cursor_project_hook_wrapper_spec(agent_context_engine_root=memory_root)
+        build_cursor_project_hook_wrapper_spec(
+            agent_context_engine_root=memory_root,
+            agent_memory_script=str(_agent_memory_script_absolute_path(memory_root)),
+        )
     )
 
 def _global_wrapper_status(command_name: str) -> dict[str, Any]:
@@ -299,7 +306,12 @@ def _global_wrapper_activation(command_name: str, *, root: Path = ROOT) -> dict[
 
 def _wrapper_paths(wrapper_command: str, *, root: Path = ROOT) -> dict[str, Any]:
     command = wrapper_command.strip()
-    script_path = root / command[2:] if command.startswith("./") else root / command
+    if command.startswith("./scripts/"):
+        from .wrapper_publication import resolve_wrapper_script_path
+
+        script_path = resolve_wrapper_script_path(root, Path(command).name)
+    else:
+        script_path = root / command[2:] if command.startswith("./") else root / command
     return {
         "wrapper_command": command,
         "wrapper_path": str(script_path),
@@ -444,9 +456,9 @@ def shell_hook_adapter_status(client: str, *, root: Path = ROOT, memory_root: Pa
     detected_script = ""
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith("ROOT="):
+        if stripped.startswith("ROOT=") or stripped.startswith("# ROOT="):
             detected_root = stripped.split("=", 1)[1].strip().strip('"').strip("'")
-        if stripped.startswith("SCRIPT="):
+        if stripped.startswith("SCRIPT=") or stripped.startswith("# SCRIPT="):
             detected_script = stripped.split("=", 1)[1].strip().strip('"').strip("'")
     status = "ok"
     if not managed:
@@ -468,6 +480,25 @@ def shell_hook_adapter_status(client: str, *, root: Path = ROOT, memory_root: Pa
 
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _replace_hook_commands(value: Any, command: str) -> Any:
+    if isinstance(value, dict):
+        replaced: dict[str, Any] = {}
+        for key, item in value.items():
+            if key == "command" and isinstance(item, str):
+                existing = item.strip()
+                if not existing:
+                    replaced[key] = command
+                else:
+                    head, separator, tail = existing.partition(" ")
+                    replaced[key] = f"{command}{separator}{tail}" if separator else command
+            else:
+                replaced[key] = _replace_hook_commands(item, command)
+        return replaced
+    if isinstance(value, list):
+        return [_replace_hook_commands(item, command) for item in value]
+    return value
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -673,6 +704,7 @@ def integration_projects_status(client: str, *, memory_root: Path = ROOT, curren
 
 
 def _hook_spec(client: str, *, root: Path = ROOT) -> dict[str, Any]:
+    script_name = "hook_adapter.cmd" if (root / ".codex" / "hooks" / "hook_adapter.cmd").exists() or os.name == "nt" else "hook_adapter.sh"
     if client == "codex":
         return {
             "config_path": root / ".codex" / "hooks.json",
@@ -681,37 +713,38 @@ def _hook_spec(client: str, *, root: Path = ROOT) -> dict[str, Any]:
                 root / ".codex" / "hooks_disabled.json",
                 root / ".codex" / "hooks_not_use_at_the_moment.json",
             ],
-            "script_path": root / ".codex" / "hooks" / "hook_adapter.sh",
+            "script_path": root / ".codex" / "hooks" / script_name,
             "template_config": SKILL_ROOT / "templates" / "codex-hooks" / "hooks.json",
             "template_script": SKILL_ROOT / "templates" / "codex-hooks" / "hook_adapter.sh",
-            "command": "./.codex/hooks/hook_adapter.sh",
+            "command": f"./.codex/hooks/{script_name}",
         }
     if client == "claude":
         return {
             "config_path": root / ".claude" / "settings.json",
             "disabled_paths": [root / ".claude" / "settings_deactivated.json"],
-            "script_path": root / ".claude" / "hooks" / "hook_adapter.sh",
+            "script_path": root / ".claude" / "hooks" / script_name,
             "template_config": SKILL_ROOT / "templates" / "claude-hooks" / "settings.json",
             "template_script": SKILL_ROOT / "templates" / "claude-hooks" / "hook_adapter.sh",
-            "command": "./.claude/hooks/hook_adapter.sh",
+            "command": f"./.claude/hooks/{script_name}",
         }
     if client == "gemini":
         return {
             "config_path": root / ".gemini" / "settings.json",
             "disabled_paths": [root / ".gemini" / "settings_deactivated.json"],
-            "script_path": root / ".gemini" / "hooks" / "hook_adapter.sh",
+            "script_path": root / ".gemini" / "hooks" / script_name,
             "template_config": SKILL_ROOT / "templates" / "gemini-hooks" / "settings.json",
             "template_script": SKILL_ROOT / "templates" / "gemini-hooks" / "hook_adapter.sh",
-            "command": "./.gemini/hooks/hook_adapter.sh",
+            "command": f"./.gemini/hooks/{script_name}",
         }
     raise ValueError(f"unsupported shell-hook client: {client}")
 
 
 def antigravity_project_paths(root: Path = ROOT) -> dict[str, Path]:
+    script_name = "hook_adapter.cmd" if (root / ".agents" / "hooks" / "hook_adapter.cmd").exists() or os.name == "nt" else "hook_adapter.sh"
     return {
         "config_path": root / ".agents" / "hooks.json",
         "disabled_path": root / ".agents" / "hooks_deactivated.json",
-        "script_path": root / ".agents" / "hooks" / "hook_adapter.sh",
+        "script_path": root / ".agents" / "hooks" / script_name,
         "state_dir": root / ".agents" / "hooks" / ".agent-memory-state",
     }
 
@@ -755,6 +788,10 @@ def _template_hook_commands(client: str, *, root: Path = ROOT) -> dict[str, set[
                         continue
                     command = str(hook.get("command") or "").strip()
                     if command:
+                        replacement = str(_hook_spec(client, root=root)["command"] or "").strip()
+                        if replacement:
+                            head, separator, tail = command.partition(" ")
+                            command = f"{replacement}{separator}{tail}" if separator else replacement
                         event_commands.add(command)
         if event_commands:
             commands[str(event)] = event_commands
@@ -797,12 +834,20 @@ def _prepare_shell_hook_client(client: str, *, root: Path = ROOT, memory_root: P
         config_path.parent.mkdir(parents=True, exist_ok=True)
         disabled_path.replace(config_path)
     if not config_path.exists():
-        _write_json(config_path, _read_json(spec["template_config"]))
+        _write_json(config_path, _replace_hook_commands(_read_json(spec["template_config"]), str(spec["command"])))
     script_memory_root = memory_root or root
     script_text = _render_shell_hook_script(client, memory_root=script_memory_root)
     script_path: Path = spec["script_path"]
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(script_text, encoding="utf-8")
+    if script_path.suffix == ".cmd":
+        from ..adapters.windows import render_cmd_powershell_launcher
+
+        companion_path = script_path.with_suffix(".ps1")
+        companion_path.write_text(script_text, encoding="utf-8")
+        script_path.write_text(render_cmd_powershell_launcher(companion_path.name), encoding="utf-8")
+        _mark_platform_executable(companion_path)
+    else:
+        script_path.write_text(script_text, encoding="utf-8")
     _mark_platform_executable(script_path)
     write_workspace_binding(client, root=root, memory_root=script_memory_root, written_by="hook-prepare")
 
@@ -811,7 +856,7 @@ def _merge_shell_hook_client(client: str, *, root: Path = ROOT, memory_root: Pat
     spec = _hook_spec(client, root=root)
     _prepare_shell_hook_client(client, root=root, memory_root=memory_root)
     current = _read_json(spec["config_path"])
-    template = _read_json(spec["template_config"])
+    template = _replace_hook_commands(_read_json(spec["template_config"]), str(spec["command"]))
     hooks = current.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         hooks = {}
@@ -896,7 +941,7 @@ def _antigravity_template(*, root: Path = ROOT) -> dict[str, Any]:
     template = json.loads(
         template_path.read_text(encoding="utf-8").replace(
             "__ANTIGRAVITY_HOOK_SCRIPT__",
-            str((root / ".agents" / "hooks" / "hook_adapter.sh").resolve()),
+            str(antigravity_project_paths(root)["script_path"].resolve()),
         )
     )
     if not isinstance(template, dict):
@@ -977,12 +1022,20 @@ def _prepare_antigravity_hook_client(*, root: Path = ROOT, memory_root: Path | N
         build_shell_hook_adapter_spec(
             "antigravity",
             agent_context_engine_root=memory_root,
-            agent_memory_script=_agent_memory_script_for_root(memory_root),
+            agent_memory_script=str(_agent_memory_script_absolute_path(memory_root)),
         )
     )
     script_path = paths["script_path"]
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(script_text, encoding="utf-8")
+    if script_path.suffix == ".cmd":
+        from ..adapters.windows import render_cmd_powershell_launcher
+
+        companion_path = script_path.with_suffix(".ps1")
+        companion_path.write_text(script_text, encoding="utf-8")
+        script_path.write_text(render_cmd_powershell_launcher(companion_path.name), encoding="utf-8")
+        _mark_platform_executable(companion_path)
+    else:
+        script_path.write_text(script_text, encoding="utf-8")
     _mark_platform_executable(script_path)
 
 
@@ -1124,7 +1177,15 @@ def _enable_cursor_project_hooks(*, root: Path = ROOT, memory_root: Path = ROOT,
         disabled_path.replace(active_path)
     enable_cursor_hooks(root)
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(_cursor_hook_wrapper(memory_root), encoding="utf-8")
+    if script_path.suffix == ".cmd":
+        from ..adapters.windows import render_cmd_powershell_launcher
+
+        companion_path = script_path.with_suffix(".ps1")
+        companion_path.write_text(_cursor_hook_wrapper(memory_root), encoding="utf-8")
+        script_path.write_text(render_cmd_powershell_launcher(companion_path.name), encoding="utf-8")
+        _mark_platform_executable(companion_path)
+    else:
+        script_path.write_text(_cursor_hook_wrapper(memory_root), encoding="utf-8")
     _mark_platform_executable(script_path)
     write_workspace_binding(
         "cursor",

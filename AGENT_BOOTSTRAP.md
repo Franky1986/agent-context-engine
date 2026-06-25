@@ -6,6 +6,12 @@ Use it when the user asks an agent to clone, install, initialize, or try Agent
 Context Engine for a local project. The goal is to move from a fresh GitHub checkout to
 a working local installation without guessing hidden project conventions.
 
+Current platform posture:
+
+- macOS is the active supported runtime target
+- Windows is an experimental native runtime path
+- Linux and WSL remain scaffolded
+
 ## Agent Contract
 
 When a user says something like "clone agent-context-engine and initialize it", the
@@ -192,6 +198,10 @@ python3 scripts/agent_context_engine.py install \
 That keeps shared `agent-context-engine`, `ace`, and unprefixed `*-ace`
 commands untouched, defaults runtime storage to `<target>/memory`, and
 produces instance-prefixed global commands.
+
+On Windows, installation should explain the generated `.cmd` launchers for the
+public CLI, managed wrappers, and hook adapters. Do not describe the Windows
+path as symlink-based by default.
 
 After install:
 

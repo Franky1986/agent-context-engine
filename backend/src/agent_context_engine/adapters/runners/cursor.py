@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 from pathlib import Path
@@ -20,7 +21,9 @@ CURSOR_EVENTS = [
     "beforeReadFile",
     "stop",
 ]
-CURSOR_COMMAND = "./.cursor/hooks/hook_adapter.sh"
+def _cursor_command_name(root: Path = ROOT) -> str:
+    command_name = "hook_adapter.cmd" if os.name == "nt" or (root / ".cursor" / "hooks" / "hook_adapter.cmd").exists() else "hook_adapter.sh"
+    return f"./.cursor/hooks/{command_name}"
 
 
 def normalize_cursor_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -84,15 +87,16 @@ def normalize_cursor_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def cursor_paths(root: Path = ROOT) -> tuple[Path, Path]:
-    return root / ".cursor" / "hooks.json", root / ".cursor" / "hooks" / "hook_adapter.sh"
+    command_name = "hook_adapter.cmd" if os.name == "nt" or (root / ".cursor" / "hooks" / "hook_adapter.cmd").exists() else "hook_adapter.sh"
+    return root / ".cursor" / "hooks.json", root / ".cursor" / "hooks" / command_name
 
 
 def cursor_hook_entry() -> dict[str, str]:
-    return {"command": CURSOR_COMMAND}
+    return {"command": _cursor_command_name()}
 
 
 def is_agent_memory_cursor_hook(entry: Any) -> bool:
-    return isinstance(entry, dict) and str(entry.get("command") or "") == CURSOR_COMMAND
+    return isinstance(entry, dict) and str(entry.get("command") or "") in {"./.cursor/hooks/hook_adapter.sh", "./.cursor/hooks/hook_adapter.cmd"}
 
 
 def load_cursor_hooks(path: Path) -> dict[str, Any]:
