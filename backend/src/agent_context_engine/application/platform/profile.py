@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from enum import Enum
 
-from ...adapters.platform_detection import SystemPlatformDetector, SystemRuntimeCapabilities
 from ...ports.platform import PlatformDetectorPort, RuntimeCapabilitiesPort
 
 
@@ -395,7 +395,7 @@ def platform_profile_for_family(family: PlatformFamily | str) -> PlatformProfile
 
 
 def current_platform_profile(detector: PlatformDetectorPort | None = None) -> PlatformProfile:
-    platform_token = (detector or SystemPlatformDetector()).detect_platform_token()
+    platform_token = (detector or _StdlibPlatformDetector()).detect_platform_token()
     if platform_token == "darwin":
         return platform_profile_for_family(PlatformFamily.MACOS)
     if str(platform_token).startswith("linux"):
@@ -408,8 +408,9 @@ def current_platform_profile(detector: PlatformDetectorPort | None = None) -> Pl
 def current_platform_profile_from_capabilities(
     capabilities: RuntimeCapabilitiesPort | None = None,
 ) -> PlatformProfile:
-    platform_token = (capabilities or SystemRuntimeCapabilities()).current_platform_token()
-    return current_platform_profile(SystemPlatformDetector() if capabilities is None else _TokenPlatformDetector(platform_token))
+    runtime_capabilities = capabilities or _StdlibRuntimeCapabilities()
+    platform_token = runtime_capabilities.current_platform_token()
+    return current_platform_profile(_TokenPlatformDetector(platform_token))
 
 
 def legacy_platform_profile(value: str) -> PlatformProfile:
@@ -502,7 +503,7 @@ def current_platform_profile_payload() -> dict[str, object]:
 def current_runtime_capabilities_payload(
     capabilities: RuntimeCapabilitiesPort | None = None,
 ) -> dict[str, object]:
-    runtime_capabilities = capabilities or SystemRuntimeCapabilities()
+    runtime_capabilities = capabilities or _StdlibRuntimeCapabilities()
     profile = current_platform_profile_from_capabilities(runtime_capabilities)
     return {
         "platform_token": runtime_capabilities.current_platform_token(),
@@ -523,3 +524,16 @@ class _TokenPlatformDetector(PlatformDetectorPort):
 
     def detect_platform_token(self) -> str:
         return self._token
+
+
+class _StdlibPlatformDetector(PlatformDetectorPort):
+    def detect_platform_token(self) -> str:
+        return sys.platform
+
+
+class _StdlibRuntimeCapabilities(RuntimeCapabilitiesPort):
+    def __init__(self, detector: PlatformDetectorPort | None = None) -> None:
+        self._detector = detector or _StdlibPlatformDetector()
+
+    def current_platform_token(self) -> str:
+        return self._detector.detect_platform_token()

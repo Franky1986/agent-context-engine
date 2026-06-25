@@ -400,7 +400,7 @@ def session_target_workdirs(conn: sqlite3.Connection, *, session_id: str | None,
         select scope_path
         from firewall_session_scopes
         where session_id = ?
-        order by updated_at desc
+        order by updated_at desc, created_at desc, scope_path desc
         limit ?
         """,
         (session, max(1, min(int(limit), 50))),
@@ -756,6 +756,20 @@ def apply_direct_user_firewall_commands(
     for line in direct_user_firewall_disable_lines(prompt):
         if _is_session_firewall_disable_line(line):
             minutes = _parse_session_firewall_disable_line(line)
+            active_session_overrides = [
+                row
+                for row in firewall_overrides(conn, include_expired=False, limit=200)
+                if str(row.get("scope_type") or "") == "session"
+                and str(row.get("session_id") or "") == session_id
+                and bool(row.get("enabled"))
+            ]
+            for existing in active_session_overrides:
+                revoke_firewall_override(
+                    conn,
+                    str(existing["override_id"]),
+                    actor="user_chat_direct",
+                    reason="replaced by direct user chat session firewall disable",
+                )
             row = create_firewall_override(
                 conn,
                 scope_type="session",
@@ -913,7 +927,7 @@ def list_firewall_rules(
                (select max(a.created_at) from firewall_rule_audit a where a.rule_id = r.rule_id and a.action = 'matched') as last_matched_at
         from firewall_rules r
         {where}
-        order by updated_at desc
+        order by updated_at desc, created_at desc, version desc, rule_id desc
         limit ?
         """,
         (*params, max(1, min(int(limit), 250))),
@@ -972,12 +986,13 @@ def active_llm_firewall_contexts(
           and rule_kind = 'llm_context'
           and classifier_context is not null
           and (expires_at is null or datetime(expires_at) > datetime(?))
-        order by updated_at desc
+        order by updated_at desc, created_at desc, version desc, rule_id desc
         limit 50
         """,
         (now,),
     )
     result: list[dict[str, Any]] = []
+    seen_context_hashes: set[str] = set()
     for row in rows:
         scope = str(row["scope_type"] or "global")
         if scope == "session" and row["session_id"] and row["session_id"] != session_id:
@@ -987,6 +1002,11 @@ def active_llm_firewall_contexts(
         workdir_candidates = [item for item in [workdir, *(target_workdirs or [])] if item]
         if scope == "workdir" and row["workdir_prefix"] and not _path_matches([row["workdir_prefix"]], workdir_candidates):
             continue
+        context_hash = str(row["context_hash"] or "")
+        if context_hash and context_hash in seen_context_hashes:
+            continue
+        if context_hash:
+            seen_context_hashes.add(context_hash)
         context = {
             "rule_id": row["rule_id"],
             "family_id": row["family_id"],

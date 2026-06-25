@@ -1,0 +1,15 @@
+{
+  "questions": [
+    {
+      "id": "dynamic-person-place",
+      "query": "Which person and place entities were mentioned dynamically?",
+      "expected_entity_types": [
+        "PersonName",
+        "PlaceName"
+      ],
+      "expected_relation_types": [
+        "MENTIONED_IN_PLACE"
+      ]
+    }
+  ]
+}

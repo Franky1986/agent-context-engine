@@ -1211,6 +1211,13 @@ def _run_command(command: list[str], *, cwd: Path | None = None, timeout: int = 
     )
 
 
+def _skip_external_model_probes() -> bool:
+    return os.environ.get("AGENT_MEMORY_TEST_SKIP_MODEL_PROBES", "") in {"1", "true", "True", "yes"} or os.environ.get(
+        "AGENT_MEMORY_TEST_SKIP_POST_INSTALL_CHECKS",
+        "",
+    ) in {"1", "true", "True", "yes"}
+
+
 def parse_ollama_models(text: str) -> list[dict[str, str]]:
     models: list[dict[str, str]] = []
     for line in text.splitlines():
@@ -1229,6 +1236,8 @@ def parse_ollama_models(text: str) -> list[dict[str, str]]:
 
 
 def discover_ollama_models(*, timeout: int = 10) -> dict[str, Any]:
+    if _skip_external_model_probes():
+        return {"ok": False, "provider": "ollama", "reason": "test_skip", "models": []}
     executable = shutil.which("ollama")
     if not executable:
         return {"ok": False, "provider": "ollama", "reason": "missing_executable", "models": []}
@@ -1265,6 +1274,8 @@ def parse_opencode_models(text: str) -> list[dict[str, str]]:
 
 
 def discover_opencode_models(provider: str | None = None, *, timeout: int = 15) -> dict[str, Any]:
+    if _skip_external_model_probes():
+        return {"ok": False, "client": "opencode", "reason": "test_skip", "models": []}
     executable = shutil.which("opencode")
     if not executable:
         return {"ok": False, "client": "opencode", "reason": "missing_executable", "models": []}

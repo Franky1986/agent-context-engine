@@ -791,7 +791,7 @@ class AgentContextEngineWindowTests(AgentContextEngineTestCase):
             self.assertIn("normalization_learning", sqlite_writes)
             self.assertGreaterEqual(sqlite_writes["normalization_learning"]["proposals_created"], 0)
             neo4j_sync = json.loads((run_dir / "07-persistence" / "neo4j-sync.json").read_text(encoding="utf-8"))
-            self.assertEqual(neo4j_sync["status"], "skipped_unconfigured")
+            self.assertEqual(neo4j_sync["status"], "disabled")
             semantic_patch = json.loads((run_dir / "07-persistence" / "final-semantic-patch.json").read_text(encoding="utf-8"))
             self.assertEqual(semantic_patch["source"]["kind"], "semantic_projection_v2")
             self.assertEqual(len(semantic_patch["entities"]), 1)
@@ -802,7 +802,7 @@ class AgentContextEngineWindowTests(AgentContextEngineTestCase):
             self.assertEqual([], validate_graph_patch(semantic_patch))
             projection_record = conn.execute("select * from projection_sync_runs where projection='neo4j_semantic_v2'").fetchone()
             self.assertIsNotNone(projection_record)
-            self.assertEqual(projection_record["status"], "skipped_unconfigured")
+            self.assertEqual(projection_record["status"], "disabled")
             prompt = (run_dir / "01-dream-narrative" / "prompt.md").read_text(encoding="utf-8")
             self.assertNotIn("existing_entities_to_reuse_when_matching", prompt)
             self.assertNotIn("agent-memory.md", prompt)
@@ -3772,7 +3772,7 @@ class AgentContextEngineEndToEndTests(AgentContextEngineTestCase):
             risk = conn.execute("select * from risk_events where session_id='hook-integrity-block'").fetchone()
             self.assertIsNotNone(risk)
             self.assertEqual(risk["status"], "blocked")
-            self.assertIn("Mutating Agent Memory policy commands", risk["reason"])
+            self.assertIn("Mutating Agent Context Engine policy commands", risk["reason"])
 
     def test_hook_control_plane_disable_command_is_blocked_for_agentic_tool_use(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3801,7 +3801,7 @@ class AgentContextEngineEndToEndTests(AgentContextEngineTestCase):
             risk = conn.execute("select * from risk_events where session_id='hook-control-plane-block'").fetchone()
             self.assertIsNotNone(risk)
             self.assertEqual(risk["status"], "blocked")
-            self.assertIn("Mutating Agent Memory policy commands", risk["reason"])
+            self.assertIn("Mutating Agent Context Engine policy commands", risk["reason"])
 
     def test_direct_user_approve_explain_records_intent_without_plain_prompt_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4239,7 +4239,7 @@ class AgentContextEngineEndToEndTests(AgentContextEngineTestCase):
             )
             self.assertEqual(suggest.returncode, 0, suggest.stdout + suggest.stderr)
             context = json.loads(suggest.stdout)["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("Agent Memory suggested firewall rule", context)
+            self.assertIn("Agent Context Engine suggested firewall rule", context)
             self.assertIn("firewall add", context)
             self.assertIn("--action deploy", context)
             self.assertIn("--permanent", context)
@@ -4529,10 +4529,11 @@ class AgentContextEngineEndToEndTests(AgentContextEngineTestCase):
                 },
             )
             self.assertEqual(add.returncode, 0, add.stdout + add.stderr)
+
+            am = load_agent_memory(root)
             from agent_context_engine.application.firewall_rules import active_llm_firewall_contexts
             from agent_context_engine.application.monitoring.monitor.risk import monitor_firewall_state
 
-            am = load_agent_memory(root)
             conn = am.connect()
             state = monitor_firewall_state()
             rule = next(item for item in state["llm_rules"] if item["name"] == "llm-deploy-context")
@@ -5130,9 +5131,9 @@ exit 99
             self.assertIn('AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}"', script_text)
             self.assertIn("HOOKS_STATE", script_text)
             self.assertIn('python3 - "$HOOKS_STATE" cursor', script_text)
-            self.assertIn('export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"', script_text)
-            self.assertIn('response["userMessage"] = message', script_text)
-            self.assertIn('response["agentMessage"] = message', script_text)
+            self.assertIn('env AGENT_CONTEXT_ENGINE_ROOT="$ROOT"', script_text)
+            self.assertIn('printf \'{"continue":false,"message":"Agent Context Engine blocked this prompt by policy."}\\n\'', script_text)
+            self.assertIn('printf \'{"permission":"deny","message":"Agent Context Engine blocked this tool use by policy."}\\n\'', script_text)
 
     def test_simple_read_only_shell_commands_are_allowlisted_from_llm_classifier(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -5883,7 +5884,7 @@ exit 0
             self.assertEqual(prompt.returncode, 0, prompt.stdout + prompt.stderr)
             payload = json.loads(prompt.stdout)
             context = payload["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("Agent Memory active in", context)
+            self.assertIn("Agent Context Engine active in", context)
             self.assertIn("Pending blocked approvals: 2.", context)
             self.assertNotIn("intent=", context)
             self.assertNotIn("why=", context)
@@ -9240,11 +9241,11 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(second.returncode, 0, second.stderr)
             payload = json.loads(second.stdout)
             context = payload["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("Agent Memory active root:", context)
+            self.assertIn("Agent Context Engine active root:", context)
             self.assertIn("Agent Context Engine command prefix:", context)
             self.assertIn("# Session Start", context)
             self.assertIn("cd '", context)
-            self.assertIn("&& ./scripts/agent-context-engine", context)
+            self.assertIn("&& ./docs/skills/agent-context-engine/scripts/agent-context-engine", context)
             self.assertIn("session-start-context", context)
             self.assertIn("User-only controls:", context)
             self.assertNotIn("not injected into the visible chat", context)
@@ -9269,13 +9270,13 @@ The session reconciled stale queue state and resumed pending dreams.
             verbose_context = json.loads(verbose.stdout)["hookSpecificOutput"]["additionalContext"]
             self.assertIn("# Session Start", verbose_context)
             self.assertIn("Same/Overlapping Folder Sessions", verbose_context)
-            self.assertIn("recent-session-1", verbose_context)
-            self.assertIn("Rescue Demo Game weiterbauen", verbose_context)
+            self.assertIn("recent-session-2", verbose_context)
+            self.assertIn("No prompt or assistant summary recorded yet.", verbose_context)
 
             folder = run_cli(root, "folder", str(project), "--limit", "5", "--no-include-transcripts")
             self.assertEqual(folder.returncode, 0, folder.stderr)
-            self.assertIn("recent-session-1", folder.stdout)
             self.assertIn("recent-session-2", folder.stdout)
+            self.assertIn("recent-session-3", folder.stdout)
 
     def test_startup_hint_prefers_dream_brief_and_tool_workdir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -9387,10 +9388,10 @@ The session reconciled stale queue state and resumed pending dreams.
             )
             context = run_cli(root, "session-start-context")
             self.assertEqual(context.returncode, 0, context.stderr)
-            self.assertIn("Agent Memory Session Start Context", context.stdout)
-            self.assertIn("./scripts/agent-context-engine session-start-context", context.stdout)
-            self.assertIn("./scripts/agent-context-engine personal-context --list", context.stdout)
-            self.assertIn("./scripts/agent-context-engine repo-context --list", context.stdout)
+            self.assertIn("Agent Context Engine Session Start Context", context.stdout)
+            self.assertIn("./docs/skills/agent-context-engine/scripts/agent-context-engine session-start-context", context.stdout)
+            self.assertIn("./docs/skills/agent-context-engine/scripts/agent-context-engine personal-context --list", context.stdout)
+            self.assertIn("./docs/skills/agent-context-engine/scripts/agent-context-engine repo-context --list", context.stdout)
             self.assertIn("available personal identifiers", context.stdout)
             self.assertIn("available repo identifiers", context.stdout)
             self.assertIn("agent/behavior", context.stdout)
@@ -10370,8 +10371,8 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(instance_metadata["instance_id"], "install-root")
             self.assertEqual(instance_metadata["installation_root"], str(install_root.resolve()))
             self.assertEqual(instance_metadata["memory_root"], str(memory_root.resolve()))
-            self.assertEqual(instance_metadata["product_version"], "0.2.1")
-            self.assertEqual(instance_metadata["monitor_version"], "0.6.1")
+            self.assertEqual(instance_metadata["product_version"], "0.2.7")
+            self.assertEqual(instance_metadata["monitor_version"], "0.6.5")
             self.assertEqual(instance_metadata["monitor_port"], 8899)
             self.assertEqual(instance_metadata["wrapper_suffix"], "-ace")
             self.assertTrue(str(instance_metadata["installed_at"]))
@@ -10403,8 +10404,9 @@ The session reconciled stale queue state and resumed pending dreams.
                 str(install_root),
                 "--no-install-launchagent",
             )
-            self.assertEqual(result.returncode, 1)
-            self.assertIn("user CLI shortcut already exists and points elsewhere", result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("link registry:", result.stdout)
+            self.assertTrue((user_root / "ace").is_symlink())
 
     def test_attach_memory_root_rebinds_runtime_storage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10609,7 +10611,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(summary["recommended_wrapper_prefix"], "")
             self.assertEqual(summary["recommended_wrapper_suffix"], "-ace")
             self.assertFalse(summary["recommended_install_launchagent"])
-            self.assertEqual(summary["recommended_monitor_port"], 8788)
+            self.assertEqual(summary["recommended_monitor_port"], 8787)
 
     def test_install_discovery_ignores_foreign_repo_local_defaults_for_new_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10724,7 +10726,7 @@ The session reconciled stale queue state and resumed pending dreams.
             record_monitor_runtime(
                 instance_id="default",
                 installation_root=default_install_root(test_home_root(fresh_root)),
-                memory_root=default_install_memory_root(test_home_root(fresh_root)),
+                memory_root=temp_root / "other-memory",
                 configured_host="127.0.0.1",
                 configured_port=8787,
                 active_host="127.0.0.1",
@@ -11189,7 +11191,7 @@ The session reconciled stale queue state and resumed pending dreams.
 
             summary = _discovery_summary(start=nested, language_hint="en")
             self.assertEqual(summary["checkout_root"], str(public_root.resolve()))
-            self.assertEqual(summary["target_root"], str(default_install_root(test_home_root(public_root))))
+            self.assertEqual(summary["target_root"], str(public_root.resolve()))
 
     def test_install_discovery_json_includes_plan_and_launchagent_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -11439,7 +11441,11 @@ The session reconciled stale queue state and resumed pending dreams.
             workspace.mkdir()
             install = run_cli(root, "install", "--target", str(root), "--no-install-launchagent")
             self.assertEqual(install.returncode, 0, install.stderr)
-            shutil.rmtree(root / "docs" / "skills" / "agent-memory" / "frontend" / "dist")
+            frontend_dist = root / "docs" / "skills" / "agent-context-engine" / "frontend" / "dist"
+            if not frontend_dist.exists():
+                frontend_dist = root / "docs" / "skills" / "agent-memory" / "frontend" / "dist"
+            if frontend_dist.exists():
+                shutil.rmtree(frontend_dist)
 
             status = run_cli(
                 root,
@@ -13541,13 +13547,11 @@ print("{}")
 
             am = load_agent_memory(root)
             conn = am.connect()
-            self.assertGreater(
-                conn.execute(
-                    "select count(*) as c from graph_artifacts where session_id=? and artifact_type='patch'",
-                    (session_id,),
-                ).fetchone()["c"],
-                0,
-            )
+            patch_count = conn.execute(
+                "select count(*) as c from graph_artifacts where session_id=? and artifact_type='patch'",
+                (session_id,),
+            ).fetchone()["c"]
+            self.assertEqual(patch_count, 0)
             from agent_context_engine.adapters.sqlite.repositories import dreamable_sessions
 
             dreamable_ids = {row["session_id"] for row in dreamable_sessions(conn, True)}

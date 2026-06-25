@@ -1,0 +1,24 @@
+{
+  "questions": [
+    {
+      "id": "rescue-latest",
+      "query": "What is the latest Rescue Demo Game status?"
+    },
+    {
+      "id": "d3-analysis",
+      "query": "What happened in the D3 analysis work?"
+    },
+    {
+      "id": "taskboard-workflow",
+      "query": "How should the taskboard workflow be continued?"
+    },
+    {
+      "id": "session-id-019e16b0",
+      "query": "Find context for session 019e16b0."
+    },
+    {
+      "id": "risk-filtering",
+      "query": "How does retrieval filter risky memory?"
+    }
+  ]
+}

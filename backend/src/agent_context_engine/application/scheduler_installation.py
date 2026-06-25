@@ -6,38 +6,15 @@ import plistlib
 import subprocess
 from pathlib import Path
 
-from ..adapters.launchagent import launch_agent_path, launchctl_domain
-from ..adapters.scheduler_installers import (
-    CronSchedulerInstaller,
-    MacOSLaunchAgentSchedulerInstaller,
-    SystemdUserSchedulerInstaller,
-    UnsupportedSchedulerInstaller,
-    WindowsTaskSchedulerInstaller,
-    WslSchedulerInstaller,
-)
 from ..ports.scheduler_installation import SchedulerInstallerPort
-from .platform import CapabilityStatus, PlatformFamily, PlatformProfile, current_platform_profile
+from .platform import PlatformProfile, current_platform_profile
+from .platform.runtime_selection import launchagent_plist_path, launchagent_service_domain, select_scheduler_installer
 from .instance_profile import active_monitor_runtime_entries, installation_profile_path, load_installation_profile, load_link_registry, normalize_launchagent_profile
 
 
 def resolve_platform_scheduler_installer(profile: PlatformProfile | None = None) -> SchedulerInstallerPort:
     profile = profile or current_platform_profile()
-    capability = profile.capability("scheduler_backend")
-    if capability is not None and capability.status == CapabilityStatus.SUPPORTED and capability.implementation == "launchagent":
-        return MacOSLaunchAgentSchedulerInstaller()
-    if profile.family == PlatformFamily.LINUX:
-        return SystemdUserSchedulerInstaller(profile_id=profile.profile_id)
-    if profile.family == PlatformFamily.WSL:
-        return WslSchedulerInstaller(profile_id=profile.profile_id)
-    if profile.family == PlatformFamily.WINDOWS:
-        return WindowsTaskSchedulerInstaller(profile_id=profile.profile_id)
-    if profile.family == PlatformFamily.POSIX_GENERIC:
-        return CronSchedulerInstaller(profile_id=profile.profile_id)
-    return UnsupportedSchedulerInstaller(
-        profile_id=profile.profile_id,
-        support_level=profile.support_level.value,
-        evidence=profile.evidence.value,
-    )
+    return select_scheduler_installer(profile)
 
 
 def install_platform_scheduler(args: argparse.Namespace) -> int:
@@ -112,11 +89,11 @@ def stop_superseded_platform_schedulers(*, target: Path, memory_root: Path) -> l
             continue
         launchagent = normalize_launchagent_profile(dict(profile_payload.get("launchagent") or {}))
         label = str(launchagent.get("label") or f"com.agent-context-engine.{other_root.name}").strip()
-        plist_path = str(launchagent.get("path") or launch_agent_path(label)).strip()
+        plist_path = str(launchagent.get("path") or launchagent_plist_path(label)).strip()
         if not label or not plist_path:
             continue
         proc = subprocess.run(
-            ["launchctl", "bootout", launchctl_domain(), plist_path],
+            ["launchctl", "bootout", launchagent_service_domain(), plist_path],
             text=True,
             capture_output=True,
             check=False,
@@ -157,7 +134,7 @@ def stop_superseded_platform_schedulers(*, target: Path, memory_root: Path) -> l
         if not same_memory_root:
             continue
         proc = subprocess.run(
-            ["launchctl", "bootout", launchctl_domain(), str(plist_path)],
+            ["launchctl", "bootout", launchagent_service_domain(), str(plist_path)],
             text=True,
             capture_output=True,
             check=False,

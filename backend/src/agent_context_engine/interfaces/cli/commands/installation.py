@@ -490,6 +490,7 @@ def _known_monitor_ports(
     user_config: dict[str, object],
 ) -> set[tuple[str, int]]:
     reserved: set[tuple[str, int]] = set()
+    normalized_target_root = str(target_root.resolve())
     normalized_target_memory_root = str(target_memory_root.resolve()) if target_memory_root is not None else ""
     candidate_roots: list[Path] = []
     seen: set[Path] = set()
@@ -526,7 +527,9 @@ def _known_monitor_ports(
         host = str(entry.get("active_host") or entry.get("configured_host") or DEFAULT_MONITOR_HOST).strip() or DEFAULT_MONITOR_HOST
         entry_memory_root = str(entry.get("memory_root") or "").strip()
         entry_installation_root = str(entry.get("installation_root") or "").strip()
-        if normalized_target_memory_root and entry_installation_root != str(target_root.resolve()) and entry_memory_root == normalized_target_memory_root:
+        if entry_installation_root == normalized_target_root:
+            continue
+        if normalized_target_memory_root and entry_memory_root == normalized_target_memory_root:
             continue
         try:
             port = max(1, min(int(entry.get("active_port") or entry.get("configured_port") or 0), 65535))
@@ -777,12 +780,6 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
     if role == "public_checkout":
         if not recommended_wrapper_suffix:
             recommended_wrapper_suffix = _public_wrapper_suffix_for_checkout(checkout_root)
-        if recommended_port == monitor_port:
-            recommended_port = _next_monitor_port(
-                monitor_port + 1,
-                host=monitor_host,
-                reserved_ports=reserved_monitor_ports,
-            )
         launchagent_recommended = False
     current_installation_exists = installation_profile_path(target_root).exists()
     if current_installation_exists:

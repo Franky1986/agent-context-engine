@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..platform import PlatformFamily, PlatformProfile
+from ..platform import CapabilityStatus, PlatformFamily, PlatformProfile
 from ...adapters.executable_permissions import ChmodExecutablePermissionAdapter, WindowsExecutablePermissionAdapter
 from ...adapters.platform_detection import SystemPlatformDetector
 from ...adapters.command_publishers import CmdShimPublisher
@@ -12,9 +12,18 @@ from ...adapters.hook_adapter_rendering import BashHookAdapterRenderer, PowerShe
 from ...adapters.instruction_rendering import MarkdownInstructionRenderer
 from ...adapters.path_quoting import PosixShellPathQuotingAdapter, WindowsPathQuotingAdapter
 from ...adapters.process_launch import SubprocessLaunchAdapter, WindowsProcessLaunchAdapter
+from ...adapters.scheduler_installers import (
+    CronSchedulerInstaller,
+    MacOSLaunchAgentSchedulerInstaller,
+    SystemdUserSchedulerInstaller,
+    UnsupportedSchedulerInstaller,
+    WindowsTaskSchedulerInstaller,
+    WslSchedulerInstaller,
+)
 from ...adapters.system_open import DefaultSystemOpenAdapter
 from ...adapters.workspace_binding import FileWorkspaceBindingAdapter, WindowsWorkspaceBindingAdapter
 from ...adapters.wrapper_renderers import BashWrapperRenderer, PowerShellWrapperRenderer
+from ...adapters.launchagent import launch_agent_path, launchctl_domain
 
 
 class _ScaffoldedMarkdownInstructionRenderer(MarkdownInstructionRenderer):
@@ -192,6 +201,33 @@ def select_command_publisher(profile: PlatformProfile):
             failure_message="Command publication is scaffolded only and not active for this platform profile.",
         )
     return SymlinkGlobalCommandPublisher()
+
+
+def select_scheduler_installer(profile: PlatformProfile):
+    capability = profile.capability("scheduler_backend")
+    if capability is not None and capability.status == CapabilityStatus.SUPPORTED and capability.implementation == "launchagent":
+        return MacOSLaunchAgentSchedulerInstaller()
+    if profile.family == PlatformFamily.LINUX:
+        return SystemdUserSchedulerInstaller(profile_id=profile.profile_id)
+    if profile.family == PlatformFamily.WSL:
+        return WslSchedulerInstaller(profile_id=profile.profile_id)
+    if profile.family == PlatformFamily.WINDOWS:
+        return WindowsTaskSchedulerInstaller(profile_id=profile.profile_id)
+    if profile.family == PlatformFamily.POSIX_GENERIC:
+        return CronSchedulerInstaller(profile_id=profile.profile_id)
+    return UnsupportedSchedulerInstaller(
+        profile_id=profile.profile_id,
+        support_level=profile.support_level.value,
+        evidence=profile.evidence.value,
+    )
+
+
+def launchagent_plist_path(label: str) -> Path:
+    return launch_agent_path(label)
+
+
+def launchagent_service_domain() -> str:
+    return launchctl_domain()
 
 
 def select_instruction_renderer(profile: PlatformProfile):

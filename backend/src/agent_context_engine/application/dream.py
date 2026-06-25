@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Sequence, Tuple
@@ -11,14 +12,20 @@ from ..infrastructure.config import ROOT, json_dumps, safe_slug, utc_now
 from .dreaming.runners import model_for_runner, runner_auth_status, runner_available, runner_for_session
 
 
+def _dream_v2_mock_enabled() -> bool:
+    return os.environ.get("AGENT_MEMORY_DREAM_V2_MOCK") == "1"
+
+
 def _runner_requested_implicitly(requested_runner: str | None, *, map_deterministic_to_session: bool) -> bool:
     runner = (requested_runner or "").strip()
     if not runner or runner == "same-as-session":
         return True
-    return map_deterministic_to_session and runner in {"deterministic", "none"}
+    return False
 
 
 def _runner_auth_ready(conn: sqlite3.Connection | None, runner: str) -> bool:
+    if _dream_v2_mock_enabled():
+        return True
     if runner not in {"cursor", "codex", "claude"}:
         return True
     auth_ready, _detail = runner_auth_status(runner)
@@ -121,7 +128,7 @@ def resolve_dream_runner(
     if not allow_standalone_deterministic and runner in {"deterministic", "none"}:
         raise RuntimeError("Dream Pipeline 2.0 requires an LLM runner; deterministic dream runner is not allowed")
 
-    if not runner_available(runner):
+    if not _dream_v2_mock_enabled() and not runner_available(runner):
         raise RuntimeError(f"missing runner: {runner}")
 
     return runner, model_for_runner(runner, model_request)

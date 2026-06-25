@@ -385,6 +385,8 @@ def run_opencode_dream(session: sqlite3.Row, summary_rel: str, events: list[sqli
 
 
 def run_dream_runner(runner: str, session: sqlite3.Row, summary_rel: str, events: list[sqlite3.Row], dream_run_id: str, timeout: int, model: str | None) -> list[Path]:
+    if os.environ.get("AGENT_MEMORY_DREAM_V2_MOCK") == "1":
+        return [append_project_memory(session, summary_rel, dream_run_id)]
     if runner == "codex":
         return run_codex_dream(session, summary_rel, events, dream_run_id, timeout, model)
     if runner == "claude":

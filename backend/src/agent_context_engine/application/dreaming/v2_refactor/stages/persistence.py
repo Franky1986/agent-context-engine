@@ -88,6 +88,8 @@ def run_persistence_stage(
                 "password_env": "AGENT_MEMORY_NEO4J_PASSWORD",
             },
         )()
+    if stage_runtime.mock_enabled():
+        setattr(args, "sync_neo4j", False)
 
     sqlite_writes_path = stage_runtime.write_json(run_dir / stage_dir / "sqlite-writes.json", persistence)
     neo4j_sync, semantic_patch_path = sync_semantic_projection(
@@ -108,7 +110,7 @@ def run_persistence_stage(
 
     graph_facts_path = None
     graph_patch_path = None
-    if not dry_run:
+    if not dry_run and not stage_runtime.mock_enabled():
         dream_row = repo.fetch_dream_run(context.dream_run_id)
         if dream_row is not None:
             graph_facts_path, graph_patch_path, conn = build_graph_dream_artifacts(
