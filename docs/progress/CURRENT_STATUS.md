@@ -18,7 +18,10 @@ workflows. The current public slice includes:
 - origin client + dream runner visibility in session list rows,
 - storage-root decoupling through `memory_root`,
 - guided installation discovery with explicit user confirmation before
-  mutation.
+  mutation,
+- isolated installs with target-local runtime storage,
+- verified Cursor project activation with a pinned Claude background runner,
+- verified retrieval over fresh isolated-session summaries and semantic memory.
 
 Versioned release snapshot:
 
@@ -34,7 +37,9 @@ The current install flow now supports:
 - detection of existing installations and storage candidates,
 - public-checkout guardrails against cross-checkout mutation,
 - automatic post-install verification through `doctor` and
-  `check-installation`.
+  `check-installation`,
+- isolated wrapper naming and local SQLite/runtime storage for side-by-side
+  installs.
 
 ## Integration State
 
@@ -45,11 +50,38 @@ The current install flow now supports:
   monitor instead of being treated as silently valid.
 - Cursor activation now persists configured background runner and project launch
   context for hook capture and dream routing.
+- external Cursor project activation now also registers the target in the
+  install-wide workspace-root profile, so `doctor` and `check-installation`
+  reflect the same project set as `cursor-status --target ...`.
+- end-to-end Cursor dreaming has been revalidated with `claude` as the pinned
+  background runner in an isolated installation.
 - Session list rows now show both origin client and dream runner, plus effective
   workdir (`last_workdir`) for session-level provenance.
 
+## Validation Snapshot
+
+Recent direct validation on isolated installation `agent-context-engine-refactor-2`
+confirmed:
+
+- install root and memory root stay local to the checkout,
+- `search` and `retrieve` return the expected fresh session/dream content,
+- `/Users/frankrichter/projects/test` activates correctly through
+  `cursor-enable --target ... --installation-root ... --background-runner claude`,
+- the activation is now visible both in target-local `cursor-status --target ...`
+  and in install-wide diagnostics via persisted `workspace_roots.cursor`,
+- Cursor sessions in that project were summarized and dreamed with
+  `preferred_dream_runner=claude`,
+- no stale running dream remained after scheduler recovery.
+
 ## Known Follow-Up Areas
 
+- install-wide diagnostics still list external Cursor projects only when they
+  are recorded in `workspace_roots`; target-local `cursor-status --target ...`
+  is currently the authoritative check for externally activated projects,
+- `pending dreams` intentionally tracks uncovered event ranges, so it can stay
+  non-zero until those ranges are actually dreamed even after older dream runs
+  already succeeded; session rows now revert immediately to pending when queued
+  follow-up work appears,
 - broader English cleanup across historical internal progress notes,
 - further polish for multi-version installation ergonomics,
 - deeper storage migration tooling for future breaking schema changes,

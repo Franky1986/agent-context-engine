@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import plistlib
 import re
 import signal
 import socket
@@ -16,7 +15,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import quote
 
-from ....infrastructure.config import DEFAULT_STORAGE_SCHEMA_VERSION, ROOT, ROOT_ENV_VAR, SKILL_ROOT, safe_slug, sh_quote
+from ....infrastructure.config import DEFAULT_STORAGE_SCHEMA_VERSION, ROOT, ROOT_ENV_VAR, SKILL_ROOT, safe_slug
 from ....application.installation import (
     ensure_monitor_frontend_build,
     ensure_runtime_venv,
@@ -34,6 +33,7 @@ from ....application.instance_profile import (
     _utc_timestamp,
     active_monitor_runtime_entries,
     default_instance_install_root,
+    default_launchagent_profile,
     default_user_storage_root,
     ensure_storage_profile,
     instance_metadata_path_for_root,
@@ -41,6 +41,7 @@ from ....application.instance_profile import (
     load_installation_profile,
     load_link_registry,
     mark_monitor_runtime_entries_stopped,
+    normalize_launchagent_profile,
     preferred_agent_memory_cli_for_root,
     load_user_config,
     load_storage_profile,
@@ -55,7 +56,7 @@ from ....application.instance_profile import (
     user_cli_link_path,
     user_config_path,
 )
-from ....adapters.launchagent import DEFAULT_ENV_FILE, DEFAULT_LABEL, launch_agent_path, launchagent_runtime_status, launchctl_domain
+from ....adapters.launchagent import DEFAULT_ENV_FILE, DEFAULT_LABEL, launchagent_runtime_status
 from ....application.integrations import (
     antigravity_status,
     append_integration_history,
@@ -83,7 +84,24 @@ def copy_text(src: Path, dest: Path, replacements: dict[str, str] | None = None)
     dest.write_text(text, encoding="utf-8")
 
 
+def _quote_platform_path(value: str | Path) -> str:
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_path_quoting_adapter
+
+    return select_path_quoting_adapter(current_platform_profile()).quote(str(value))
+
+
+def _mark_platform_executable(path: Path) -> None:
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_executable_permission_adapter
+
+    select_executable_permission_adapter(current_platform_profile()).ensure_executable(path)
+
+
 def ensure_user_cli_link(target: Path, *, force: bool) -> Path:
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_command_publisher
+
     link_path = user_cli_link_path()
     cli_target = (target / agent_memory_cli_for_root(target).replace("./", "")).resolve()
     link_path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,8 +125,7 @@ def ensure_user_cli_link(target: Path, *, force: bool) -> Path:
             raise FileExistsError(f"user CLI shortcut already exists and points elsewhere: {link_path} -> {existing or '<unresolved>'}")
         if link_path.is_dir() and not link_path.is_symlink():
             raise FileExistsError(f"user CLI shortcut path is an existing directory: {link_path}")
-        link_path.unlink()
-    link_path.symlink_to(cli_target)
+    select_command_publisher(current_platform_profile()).create_symlink(link_path, cli_target, force=force)
     record_link_registry_entry(
         logical_name=link_path.name,
         link_kind="user_cli_shortcut",
@@ -675,21 +692,20 @@ def _launchagent_identity_for_target(
     target_root: Path,
     recommended_memory_root: str,
 ) -> tuple[str, str, str]:
+    fallback_memory_root = Path(recommended_memory_root).expanduser().resolve() if recommended_memory_root else (target_root / "memory").resolve()
+    default_profile = _default_launchagent_profile_for_target(
+        checkout_role=checkout_role,
+        target_root=target_root,
+        memory_root=fallback_memory_root,
+    )
     if installation_profile_path(target_root).exists():
-        launchagent = dict(load_installation_profile(target_root).get("launchagent") or {})
+        launchagent = normalize_launchagent_profile(dict(load_installation_profile(target_root).get("launchagent") or {}))
         label = str(launchagent.get("label") or "").strip()
         path = str(launchagent.get("path") or "").strip()
         env_file = str(launchagent.get("env_file") or "").strip()
         if label and path and env_file:
             return label, env_file, path
-    label = (
-        f"{DEFAULT_LABEL.rsplit('.', 1)[0]}.{safe_slug(target_root.name)}"
-        if checkout_role in {"public_checkout", "fresh_installation_candidate", "unknown_checkout"}
-        else DEFAULT_LABEL
-    )
-    fallback_memory_root = Path(recommended_memory_root).expanduser().resolve() if recommended_memory_root else (target_root / "memory").resolve()
-    env_file = _default_launchagent_env_file_for_storage(fallback_memory_root)
-    return label, env_file, str(launch_agent_path(label))
+    return default_profile["label"], default_profile["env_file"], default_profile["path"]
 
 
 def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_root_hint: str | None = None, language_hint: str | None = None) -> dict[str, object]:
@@ -1072,16 +1088,25 @@ def _guided_install_plan(summary: dict[str, object], args: argparse.Namespace) -
     wrapper_suffix = str(getattr(args, "wrapper_suffix", None) or summary.get("recommended_wrapper_suffix") or "").strip()
     monitor_host = str(getattr(args, "monitor_host", None) or summary.get("recommended_monitor_host") or DEFAULT_MONITOR_HOST).strip() or DEFAULT_MONITOR_HOST
     launchagent_identity = dict(summary.get("launchagent_identity") or {})
+    default_launchagent = _default_launchagent_profile_for_target(
+        checkout_role=str(summary.get("checkout_role") or "unknown_checkout"),
+        target_root=target_root,
+        memory_root=Path(memory_root_text).expanduser().resolve() if memory_root_text else _default_storage_root_for_install(target_root, args),
+    )
     launchagent_label = str(
         getattr(args, "launchagent_label", None)
         or launchagent_identity.get("label")
-        or _default_launchagent_label_for_target(target_root)
+        or default_launchagent["label"]
     ).strip()
-    launchagent_path = str(getattr(args, "launchagent_path", None) or launchagent_identity.get("plist_path") or str(launch_agent_path(launchagent_label))).strip()
+    launchagent_path = str(
+        getattr(args, "launchagent_path", None)
+        or launchagent_identity.get("plist_path")
+        or _expected_launchagent_plist_path(launchagent_label)
+    ).strip()
     launchagent_env_file = str(
         getattr(args, "launchagent_env_file", None)
         or launchagent_identity.get("env_file")
-        or _default_launchagent_env_file_for_storage(Path(memory_root_text).expanduser().resolve() if memory_root_text else _default_storage_root_for_install(target_root, args))
+        or default_launchagent["env_file"]
     ).strip()
     install_launchagent = bool(getattr(args, "install_launchagent", summary.get("recommended_install_launchagent", True)))
     replace_existing_global_links = False if isolated else bool(
@@ -1332,7 +1357,7 @@ def _recommended_install_command(summary: dict[str, object]) -> str:
         _command_script_for_root(checkout_root),
         "install",
         "--target",
-        sh_quote(str(summary["target_root"])),
+        _quote_platform_path(str(summary["target_root"])),
         "--language",
         str(summary["reply_language"]),
         "--monitor-port",
@@ -1342,7 +1367,7 @@ def _recommended_install_command(summary: dict[str, object]) -> str:
         command.append("--isolated")
     memory_root = str(summary.get("recommended_memory_root") or "").strip()
     if memory_root:
-        command.extend(["--memory-root", sh_quote(memory_root)])
+        command.extend(["--memory-root", _quote_platform_path(memory_root)])
     prefix = str(summary.get("recommended_wrapper_prefix") or "").strip()
     suffix = str(summary.get("recommended_wrapper_suffix") or "").strip()
     if prefix:
@@ -1414,7 +1439,27 @@ def _wrapper_start_hints(target: Path, args: argparse.Namespace) -> list[str]:
 
 
 def _default_launchagent_label_for_target(target: Path) -> str:
-    return f"{DEFAULT_LABEL.rsplit('.', 1)[0]}.{safe_slug(target.name)}"
+    return _default_launchagent_profile_for_target(
+        checkout_role="unknown_checkout",
+        target_root=target,
+        memory_root=(target / "memory").resolve(),
+    )["label"]
+
+
+def _default_launchagent_profile_for_target(
+    *,
+    checkout_role: str,
+    target_root: Path,
+    memory_root: Path,
+) -> dict[str, str]:
+    label = (
+        f"{DEFAULT_LABEL.rsplit('.', 1)[0]}.{safe_slug(target_root.name)}"
+        if checkout_role in {"public_checkout", "fresh_installation_candidate", "unknown_checkout"}
+        else DEFAULT_LABEL
+    )
+    profile = default_launchagent_profile(label=label)
+    profile["env_file"] = _default_launchagent_env_file_for_storage(memory_root)
+    return profile
 
 
 def _monitor_start_command(target: Path, *, runner: str, host: str, port: int, language: str) -> list[str]:
@@ -1476,117 +1521,9 @@ def _stop_superseded_monitors_for_memory_root(*, target: Path, memory_root: Path
 
 
 def _stop_superseded_launchagents_for_memory_root(*, target: Path, memory_root: Path) -> list[str]:
-    if shutil.which("launchctl") is None:
-        return []
-    normalized_target = str(target.resolve())
-    normalized_memory_root = str(memory_root.resolve())
-    candidate_roots: set[str] = set()
-    candidate_plists: list[tuple[Path, str, str, str]] = []
-    for entry in active_monitor_runtime_entries():
-        if isinstance(entry, dict):
-            root_text = str(entry.get("installation_root") or "").strip()
-            if root_text:
-                candidate_roots.add(root_text)
-    for entry in dict(load_link_registry().get("entries") or {}).values():
-        if isinstance(entry, dict):
-            root_text = str(entry.get("installation_root") or "").strip()
-            if root_text:
-                candidate_roots.add(root_text)
-    launchagents_dir = Path.home() / "Library" / "LaunchAgents"
-    if launchagents_dir.exists():
-        for plist_path in sorted(launchagents_dir.glob("com.agent-context-engine*.plist")):
-            try:
-                with plist_path.open("rb") as handle:
-                    plist = plistlib.load(handle)
-            except Exception:
-                continue
-            if not isinstance(plist, dict):
-                continue
-            label = str(plist.get("Label") or plist_path.stem).strip()
-            working_directory = str(plist.get("WorkingDirectory") or "").strip()
-            env = plist.get("EnvironmentVariables")
-            env_map = env if isinstance(env, dict) else {}
-            env_file_text = str(env_map.get("AGENT_MEMORY_ENV_FILE") or "").strip()
-            if working_directory:
-                candidate_roots.add(working_directory)
-            candidate_plists.append((plist_path, label, working_directory, env_file_text))
-    actions: list[str] = []
-    stopped_plists: set[str] = set()
-    for root_text in sorted(candidate_roots):
-        if not root_text or root_text == normalized_target:
-            continue
-        other_root = Path(root_text).expanduser().resolve()
-        if not installation_profile_path(other_root).exists():
-            continue
-        try:
-            profile = load_installation_profile(other_root)
-        except Exception:
-            continue
-        storage = dict(profile.get("storage") or {})
-        if str(storage.get("memory_root") or "").strip() != normalized_memory_root:
-            continue
-        launchagent = dict(profile.get("launchagent") or {})
-        label = str(launchagent.get("label") or _default_launchagent_label_for_target(other_root)).strip()
-        plist_path = str(launchagent.get("path") or launch_agent_path(label)).strip()
-        if not label or not plist_path:
-            continue
-        proc = subprocess.run(
-            ["launchctl", "bootout", launchctl_domain(), plist_path],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if proc.returncode == 0:
-            stopped_plists.add(str(Path(plist_path).expanduser().resolve()))
-            actions.append(f"unloaded superseded LaunchAgent {label} root={other_root}")
-            continue
-        detail = (proc.stderr or proc.stdout or "").strip().lower()
-        if "could not find service" in detail or "no such process" in detail or "not loaded" in detail:
-            stopped_plists.add(str(Path(plist_path).expanduser().resolve()))
-            actions.append(f"superseded LaunchAgent already inactive {label} root={other_root}")
-    for plist_path, label, working_directory, env_file_text in candidate_plists:
-        resolved_plist = str(plist_path.expanduser().resolve())
-        if resolved_plist in stopped_plists:
-            continue
-        if working_directory and str(Path(working_directory).expanduser().resolve()) == normalized_target:
-            continue
-        same_memory_root = False
-        if env_file_text:
-            env_file_path = Path(env_file_text).expanduser()
-            try:
-                resolved_env_file = env_file_path.resolve()
-            except OSError:
-                resolved_env_file = env_file_path
-            env_file_parent = str(resolved_env_file.parent.resolve()) if resolved_env_file.parent.exists() else str(resolved_env_file.parent)
-            same_memory_root = (
-                env_file_parent == normalized_memory_root
-                or env_file_parent.startswith(normalized_memory_root + os.sep)
-            )
-        if not same_memory_root and working_directory:
-            other_root = Path(working_directory).expanduser().resolve()
-            if installation_profile_path(other_root).exists():
-                try:
-                    profile = load_installation_profile(other_root)
-                except Exception:
-                    profile = {}
-                storage = dict(profile.get("storage") or {})
-                same_memory_root = str(storage.get("memory_root") or "").strip() == normalized_memory_root
-        if not same_memory_root:
-            continue
-        proc = subprocess.run(
-            ["launchctl", "bootout", launchctl_domain(), str(plist_path)],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        display_root = working_directory or "<unknown>"
-        if proc.returncode == 0:
-            actions.append(f"unloaded superseded LaunchAgent {label} root={display_root}")
-            continue
-        detail = (proc.stderr or proc.stdout or "").strip().lower()
-        if "could not find service" in detail or "no such process" in detail or "not loaded" in detail:
-            actions.append(f"superseded LaunchAgent already inactive {label} root={display_root}")
-    return actions
+    from ....application.scheduler_installation import stop_superseded_platform_schedulers
+
+    return stop_superseded_platform_schedulers(target=target, memory_root=memory_root)
 
 
 def _autostart_monitor_after_install(
@@ -1651,7 +1588,10 @@ def cmd_install_discovery(args: argparse.Namespace) -> int:
     print(_render_install_discovery(summary))
     print("")
     if getattr(args, "plan_json", None):
-        apply_plan_command = f"{_command_script_for_root(Path(str(summary['checkout_root'])))} install --plan-json {sh_quote(str(Path(str(args.plan_json)).expanduser().resolve()))}"
+        apply_plan_command = (
+            f"{_command_script_for_root(Path(str(summary['checkout_root'])))} install --plan-json "
+            f"{_quote_platform_path(Path(str(args.plan_json)).expanduser().resolve())}"
+        )
         print(_ui_text(summary["reply_language"], en="recommended command from plan:", de="empfohlener Befehl aus Plan:"))
         print(apply_plan_command)
     else:
@@ -1661,20 +1601,12 @@ def cmd_install_discovery(args: argparse.Namespace) -> int:
 
 
 def agents_memory_block(language: str, *, command_prefix: str = "./scripts/agent-context-engine") -> str:
-    label = LANGUAGE_LABELS.get(language, "English")
-    return f"""## Agent Context Engine Quick Path
-- Preferred interaction language for future agents: {label}.
-- When asked about previous sessions, handovers, project context, "what happened last", "continue there", "we already analyzed this", or similar memory requests, use the local Agent Context Engine CLI first.
-- Agent Context Engine command prefix: `{command_prefix}`
-- Traceable retrieval: `{command_prefix} retrieve "<question or search terms>" --limit 10`
-- Quick keyword search: `{command_prefix} search "<search terms>" --limit 5`
-- Load a session handover: `{command_prefix} handover "<session|title|search terms>"`
-- Recent sessions: `{command_prefix} last --limit 10`
-- Status: `{command_prefix} doctor`
-- For list/count/today questions about sessions, use `last` first and stop there unless the user explicitly asks for details about a specific session.
-- Do not inspect `~/.cursor/projects/...`, local Cursor transcripts, or terminal metadata for session-history questions while the Agent Context Engine CLI is available.
-- Only after these commands should agents broaden the search with `rg` in the repository or memory tree.
-"""
+    from ....application.agent_flow import build_agent_flow_contract
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_instruction_renderer
+
+    contract = build_agent_flow_contract(preferred_language=language, command_prefix=command_prefix)
+    return select_instruction_renderer(current_platform_profile()).render_agents_quick_path(contract)
 
 
 HOOK_SESSION_ENTRY_NOTE = """## Hook Session Entry
@@ -1737,52 +1669,35 @@ def session_start_hook_entry_path(target: Path) -> Path:
 
 
 def render_session_start_hook_entry(target: Path, *, command_prefix: str, language: str, memory_root: Path | None = None) -> str:
+    from ....application.agent_flow import build_agent_flow_contract
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_instruction_renderer
+
     resolved_memory_root = (memory_root or target).resolve()
     monitor_runner = str(
         load_installation_profile(resolved_memory_root).get("workflows", {}).get("monitor_runner") or WORKFLOW_RUNNER_DEFAULTS["monitor_runner"]
     ).strip()
-    return f"""# Session Start
+    contract = build_agent_flow_contract(
+        preferred_language=language,
+        command_prefix=command_prefix,
+        repo_context_path="./docs/knowledge/repos.md",
+        monitor_runner=monitor_runner,
+    )
+    return select_instruction_renderer(current_platform_profile()).render_session_start_hook_entry(contract)
 
-Agent Context Engine command prefix: `{command_prefix}`
 
-- For session list/count/today questions, use `last --limit 10` first and answer from that result. Do not open session, summary, or dream files unless the user explicitly asks for details.
-- For session list/count/today questions, use `last` first and stop there unless the user explicitly asks for deeper detail.
-- Do not inspect `~/.cursor/projects/...`, local Cursor transcripts, or terminal metadata for session-history questions while the Agent Context Engine CLI is available.
-- If the user mentions a local repo/project/folder by name, or asks for side information about another project, resolve it via one of these — do not browse the filesystem:
-  - `cat ./docs/knowledge/repos.md` — full repos context (fastest, no CLI needed)
-  - `repo-context --list` — overview of known repos
-  - `repo-context <identifier>` — targeted context for a specific repo
-- Load personal context only on demand, e.g. for "my preferences", "as usual", writing style, language, or personal standards.
+def render_claude_entrypoint() -> str:
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_instruction_renderer
 
-Start here for previous work:
-- `{command_prefix} last --limit 10`
-- `{command_prefix} use "<session|title|search terms>"`
-- `{command_prefix} handover "<session|title|search terms>"`
-- `{command_prefix} retrieve "<question or search terms>" --limit 10`
-- `{command_prefix} search "<search terms>" --limit 5`
+    return select_instruction_renderer(current_platform_profile()).render_claude_entrypoint()
 
-Load extra context when needed:
-- `{command_prefix} session-start-context`
-- `{command_prefix} personal-context --list`
-- `{command_prefix} personal-context <identifier>`
-- `{command_prefix} repo-context --list`
-- `{command_prefix} repo-context <identifier>`
-- `{command_prefix} retrieval-runs --limit 10`
-- `{command_prefix} retrieval-run <retrieval_run_id>`
 
-User-only controls:
-- `approve ...`
-- `reset taint`
-- `firewall add ...`
-- `firewall disable session`
-- `firewall enable session`
-- `hooks-disable [--runner <runner>]`
-- `hooks-enable [--runner <runner>]`
-- `hooks-status`
+def render_cursor_every_chat_rule() -> str:
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_instruction_renderer
 
-Monitor:
-- `{command_prefix} monitor --runner {monitor_runner} --replace-existing`
-"""
+    return select_instruction_renderer(current_platform_profile()).render_cursor_every_chat_rule()
 
 
 def ensure_session_start_hook_entry(target: Path, *, command_prefix: str, language: str, memory_root: Path | None = None) -> Path:
@@ -1826,13 +1741,15 @@ def ensure_agents_memory_block(target: Path, *, language: str, command_prefix: s
 def ensure_harness_entrypoints(target: Path) -> list[Path]:
     written: list[Path] = []
     claude_path = target / "CLAUDE.md"
+    claude_entrypoint = render_claude_entrypoint()
     if not claude_path.exists() or "AGENTS.md" not in claude_path.read_text(encoding="utf-8", errors="replace"):
-        claude_path.write_text(CLAUDE_ENTRYPOINT, encoding="utf-8")
+        claude_path.write_text(claude_entrypoint, encoding="utf-8")
         written.append(claude_path)
     cursor_rule = target / ".cursor" / "rules" / "everyChat.mdc"
+    cursor_entrypoint = render_cursor_every_chat_rule()
     if not cursor_rule.exists() or "AGENTS.md" not in cursor_rule.read_text(encoding="utf-8", errors="replace"):
         cursor_rule.parent.mkdir(parents=True, exist_ok=True)
-        cursor_rule.write_text(CURSOR_EVERY_CHAT_RULE, encoding="utf-8")
+        cursor_rule.write_text(cursor_entrypoint, encoding="utf-8")
         written.append(cursor_rule)
     return written
 
@@ -2053,6 +1970,18 @@ def _default_launchagent_env_file_for_storage(memory_root: Path) -> str:
     return str((memory_root / "local" / "agent-context-engine.env").resolve())
 
 
+def _legacy_launchagent_env_file_specs() -> set[str]:
+    return {
+        DEFAULT_ENV_FILE,
+        "memory/local/agent-memory.env",
+        "memory/local/agent-context-engine.env",
+    }
+
+
+def _expected_launchagent_plist_path(label: str) -> str:
+    return default_launchagent_profile(label=label)["path"]
+
+
 def _default_instance_id_for_target(target: Path, args: argparse.Namespace) -> str:
     if getattr(args, "instance_name", None):
         return safe_slug(str(args.instance_name))
@@ -2111,7 +2040,7 @@ def _relocate_runtime_storage(old_memory_root: Path, new_memory_root: Path) -> l
 
 def _should_rewrite_launchagent_env_file(current_env_file: str, *, old_memory_root: Path) -> bool:
     text = str(current_env_file or "").strip()
-    if not text or text in {DEFAULT_ENV_FILE, "memory/local/agent-memory.env"}:
+    if not text or text in _legacy_launchagent_env_file_specs():
         return True
     try:
         candidate = Path(text).expanduser()
@@ -2285,12 +2214,12 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
             }
         )
 
-    launchagent_profile = dict(profile.get("launchagent") or {})
-    launchagent_label = str(launchagent_profile.get("label") or DEFAULT_LABEL).strip() or DEFAULT_LABEL
-    launchagent_path = str(launchagent_profile.get("path") or launch_agent_path(launchagent_label)).strip() or str(launch_agent_path(launchagent_label))
-    launchagent_env_file = str(launchagent_profile.get("env_file") or DEFAULT_ENV_FILE).strip() or DEFAULT_ENV_FILE
+    launchagent_profile = normalize_launchagent_profile(dict(profile.get("launchagent") or {}))
+    launchagent_label = launchagent_profile["label"]
+    launchagent_path = launchagent_profile["path"]
+    launchagent_env_file = launchagent_profile["env_file"]
     launchagent_status = launchagent_runtime_status(label=launchagent_label, env_file=launchagent_env_file, plist_path=launchagent_path, root=root)
-    expected_launchagent_path = str(launch_agent_path(launchagent_label))
+    expected_launchagent_path = _expected_launchagent_plist_path(launchagent_label)
     if launchagent_path != expected_launchagent_path and str((launchagent_status.get("installed") or {}).get("plist_path") or "") == expected_launchagent_path:
         findings.append(
             {
@@ -2396,7 +2325,7 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
                     message=f"Rewrite the {client} workspace hook adapter in {workspace_root} after reviewing the root mapping.",
                     command=(
                         f"{agent_memory_cli_for_root(root)} repair-installation --apply "
-                        f"--rewrite-workspace-hook-adapters --{client}-workspace-root {sh_quote(str(workspace_root))}"
+                        f"--rewrite-workspace-hook-adapters --{client}-workspace-root {_quote_platform_path(workspace_root)}"
                     ),
                 )
             if str(item.get("hooks_state") or "") != "enabled":
@@ -2418,7 +2347,7 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
                     message=f"Enable {client} hooks in {workspace_root}",
                     command=(
                         f"{agent_memory_cli_for_root(root)} repair-installation --apply "
-                        f"--{client}-workspace-root {sh_quote(str(workspace_root))}"
+                        f"--{client}-workspace-root {_quote_platform_path(workspace_root)}"
                         + (" --rewrite-workspace-hook-adapters" if requires_confirmation else "")
                     ),
                 )
@@ -2448,7 +2377,7 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
                     message=f"Rebind the {client} workspace in {workspace_root} to this Agent Context Engine instance.",
                     command=(
                         f"{agent_memory_cli_for_root(root)} repair-installation --apply "
-                        f"--{client}-workspace-root {sh_quote(str(workspace_root))}"
+                        f"--{client}-workspace-root {_quote_platform_path(workspace_root)}"
                         + (" --rewrite-workspace-hook-adapters" if requires_confirmation else "")
                     ),
                 )
@@ -2511,9 +2440,9 @@ def _print_installation_check(payload: dict[str, object]) -> None:
         print(f"monitor port detail: {monitor_profile['port_error']}")
     print(
         "launchagent default: "
-        + f"label={launchagent_profile.get('label') or DEFAULT_LABEL} "
+        + f"label={launchagent_profile.get('label') or '-'} "
         + f"path={launchagent_profile.get('path') or '-'} "
-        + f"env_file={launchagent_profile.get('env_file') or DEFAULT_ENV_FILE}"
+        + f"env_file={launchagent_profile.get('env_file') or '-'}"
     )
     print("configured workflows:")
     for check in payload["workflow_checks"]:
@@ -2622,184 +2551,13 @@ def agent_memory_command_prefix_for_target(target: Path, memory_root: Path) -> s
     cli_path = preferred_agent_memory_cli_for_root(memory_root)
     if target.resolve() == memory_root.resolve():
         return cli_path
-    return f"cd {sh_quote(str(memory_root.resolve()))} && {cli_path}"
+    return f"cd {_quote_platform_path(memory_root.resolve())} && {cli_path}"
 
 
 def cursor_hook_wrapper(memory_root: Path) -> str:
-    quoted_root = sh_quote(str(memory_root.resolve()))
-    script_rel = agent_memory_script_for_root(memory_root)
-    return f"""#!/usr/bin/env bash
-set -euo pipefail
+    from ....application.hook_rendering import build_cursor_project_hook_wrapper_spec, render_cursor_project_hook_wrapper
 
-# Cursor hooks must never break the editor workflow. This wrapper logs the
-# payload to the central Agent Memory root and then returns the allow/continue
-# JSON expected by before-hooks.
-if [ "${{AGENT_MEMORY_DREAM:-0}}" = "1" ] || [ "${{AGENT_MEMORY_INTERNAL_RUN:-0}}" = "1" ]; then
-  printf '{{}}\\n'
-  exit 0
-fi
-
-MEMORY_ROOT={quoted_root}
-LOG="$MEMORY_ROOT/memory/logs/cursor-hook.err.log"
-HOOKS_STATE="$MEMORY_ROOT/memory/local/hooks-state.json"
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-mkdir -p "$(dirname "$LOG")"
-TMP="$(mktemp)"
-OUT="$(mktemp)"
-ERR="$(mktemp)"
-trap 'rm -f "$TMP" "$OUT" "$ERR"' EXIT
-cat > "$TMP"
-
-EVENT="$(python3 - "$TMP" <<'PY'
-import json, sys
-try:
-    with open(sys.argv[1], "r", encoding="utf-8", errors="replace") as handle:
-        data = json.load(handle)
-except Exception:
-    data = {{}}
-for key in ("hook_event_name", "event_name", "hookName", "hook_name", "event", "type"):
-    if data.get(key):
-        print(data[key])
-        break
-PY
-)"
-
-if ! python3 - "$HOOKS_STATE" cursor <<'PY'
-import json
-import sys
-from pathlib import Path
-
-
-path = Path(sys.argv[1])
-runner = sys.argv[2]
-if not path.exists():
-    raise SystemExit(0)
-try:
-    state = json.loads(path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
-if state.get("enabled") is False:
-    raise SystemExit(1)
-runner_state = state.get("runners", {{}}).get(runner)
-if isinstance(runner_state, dict) and runner_state.get("enabled") is False:
-    raise SystemExit(1)
-if runner_state is False:
-    raise SystemExit(1)
-raise SystemExit(0)
-PY
-then
-  case "$EVENT" in
-    beforeSubmitPrompt)
-      printf '{{"continue":true}}\\n'
-      ;;
-    beforeShellExecution|beforeMCPExecution|beforeReadFile)
-      printf '{{"permission":"allow"}}\\n'
-      ;;
-    *)
-      printf '{{}}\\n'
-      ;;
-  esac
-  exit 0
-fi
-
-set +e
-env AGENT_CONTEXT_ENGINE_ROOT="$MEMORY_ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${{AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}}" python3 "$MEMORY_ROOT/{script_rel}" log-hook --client cursor \\
-  < "$TMP" \\
-  > "$OUT" \\
-  2> "$ERR"
-CODE=$?
-set -e
-cat "$ERR" >> "$LOG"
-
-if [ "$CODE" != "0" ] && [ "$CODE" != "2" ]; then
-  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] cursor hook log failed code=$CODE" >> "$LOG"
-fi
-
-python3 - "$TMP" "$OUT" "$ERR" "$CODE" <<'PY'
-import json, sys
-payload_path, stdout_path, stderr_path, code_text = sys.argv[1:5]
-try:
-    with open(payload_path, "r", encoding="utf-8", errors="replace") as handle:
-        payload = json.load(handle)
-except Exception:
-    payload = {{}}
-try:
-    stdout = open(stdout_path, "r", encoding="utf-8", errors="replace").read()
-except Exception:
-    stdout = ""
-try:
-    stderr = open(stderr_path, "r", encoding="utf-8", errors="replace").read()
-except Exception:
-    stderr = ""
-event = ""
-for key in ("hook_event_name", "event_name", "hookName", "hook_name", "event", "type"):
-    if payload.get(key):
-        event = str(payload[key])
-        break
-code = int(code_text or "0")
-
-def context_message() -> str:
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            value = json.loads(line)
-        except Exception:
-            continue
-        context = (
-            value.get("hookSpecificOutput", {{}})
-            .get("additionalContext", "")
-        )
-        if context:
-            return str(context)
-    return ""
-
-def block_message() -> str:
-    text = stderr.strip()
-    if text:
-        return text[-6000:]
-    return "Agent Context Engine blocked this tool use by policy. Open agent-monitor or run `./scripts/agent-context-engine risk list --limit 10` for details."
-
-def with_message(response: dict, message: str, *, for_agent: bool = True) -> dict:
-    if not message:
-        return response
-    # Cursor hook fields have varied across releases. Emit the known aliases so
-    # the user sees blocks while the agent can also receive health notices.
-    response["message"] = message
-    response["user_message"] = message
-    response["userMessage"] = message
-    if for_agent:
-        response["agent_message"] = message
-        response["agentMessage"] = message
-        response["followup_message"] = message
-    return response
-
-if event == "beforeSubmitPrompt":
-    if code == 2:
-        print(json.dumps(with_message({{"continue": False}}, block_message()), ensure_ascii=False))
-        sys.exit(2)
-    else:
-        message = context_message()
-        if message:
-            print(json.dumps(with_message({{"continue": True}}, message), ensure_ascii=False))
-        else:
-            print(json.dumps({{"continue": True}}, ensure_ascii=False))
-elif event in {{"beforeShellExecution", "beforeMCPExecution", "beforeReadFile"}}:
-    if code == 2:
-        print(json.dumps(with_message({{"permission": "deny"}}, block_message()), ensure_ascii=False))
-        sys.exit(2)
-    else:
-        print(json.dumps({{"permission": "allow"}}, ensure_ascii=False))
-else:
-    if code == 2:
-        print(json.dumps(with_message({{}}, block_message()), ensure_ascii=False))
-    else:
-        message = context_message()
-        print(json.dumps(with_message({{}}, message), ensure_ascii=False) if message else "{{}}")
-PY
-"""
-
+    return render_cursor_project_hook_wrapper(build_cursor_project_hook_wrapper_spec(agent_context_engine_root=memory_root))
 
 def antigravity_hook_wrapper(memory_root: Path) -> str:
     script_rel = agent_memory_script_for_root(memory_root)
@@ -2872,7 +2630,7 @@ def cmd_cursor_enable(args: argparse.Namespace) -> int:
     script_path = target / ".cursor" / "hooks" / "hook_adapter.sh"
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(cursor_hook_wrapper(installation_root), encoding="utf-8")
-    script_path.chmod(0o755)
+    _mark_platform_executable(script_path)
     result, target_item = _run_integration_hook_action(
         client="cursor",
         action="enable",
@@ -2880,6 +2638,14 @@ def cmd_cursor_enable(args: argparse.Namespace) -> int:
         memory_root=installation_root,
         background_runner=background["headless_runner"],
     )
+    profile = load_installation_profile(installation_root)
+    workspace_roots = {
+        client: [Path(path).expanduser().resolve() for path in list((profile.get("workspace_roots") or {}).get(client) or [])]
+        for client in ("codex", "claude", "cursor")
+    }
+    if target not in workspace_roots["cursor"]:
+        workspace_roots["cursor"].append(target)
+        merge_installation_profile(installation_root, workspace_roots=workspace_roots)
     print(f"enabled Cursor IDE memory hooks: {target_item.get('hook_config_path') or (target / '.cursor' / 'hooks.json')}")
     print(f"hook wrapper: {target_item.get('hook_script_path') or script_path}")
     print(f"installation root: {installation_root}")
@@ -2919,7 +2685,7 @@ def cmd_antigravity_enable(args: argparse.Namespace) -> int:
     script_path = paths["script_path"]
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(antigravity_hook_wrapper(installation_root), encoding="utf-8")
-    script_path.chmod(0o755)
+    _mark_platform_executable(script_path)
     result, target_item = _run_integration_hook_action(client="antigravity", action="enable", target=target, memory_root=installation_root)
     print(f"enabled global Antigravity Agent Context Engine hooks: {paths['config_path']}")
     print(f"hook wrapper: {script_path}")
@@ -3251,8 +3017,8 @@ def cmd_repair_installation(args: argparse.Namespace) -> int:
             applied.extend(_relocate_runtime_storage(current_storage_root, runtime_memory_root))
             ensure_storage_profile(runtime_memory_root, schema_version=int(resolve_storage_profile(root).get("schema_version") or DEFAULT_STORAGE_SCHEMA_VERSION), storage_instance_id=str(load_installation_profile(root).get("instance_id") or root.name))
             current_profile = load_installation_profile(root)
-            current_launchagent = dict(current_profile.get("launchagent") or {})
-            current_env_file = str(current_launchagent.get("env_file") or DEFAULT_ENV_FILE)
+            current_launchagent = normalize_launchagent_profile(dict(current_profile.get("launchagent") or {}))
+            current_env_file = str(current_launchagent.get("env_file") or "")
             launchagent_updates: dict[str, str] | None = None
             if _should_rewrite_launchagent_env_file(current_env_file, old_memory_root=current_storage_root):
                 launchagent_updates = {"env_file": _default_launchagent_env_file_for_storage(runtime_memory_root)}
@@ -3401,25 +3167,15 @@ def install_command_prefix(args: argparse.Namespace) -> str:
 
 
 def link_command_name(base: str, prefix: str, suffix: str = "") -> str:
-    rendered_base = base
-    if prefix or suffix:
-        if base.endswith("-memory"):
-            rendered_base = base[: -len("-memory")]
-        elif base.endswith("-ace"):
-            rendered_base = base[: -len("-ace")]
-    return safe_slug(f"{prefix}{rendered_base}{suffix}")
+    from ....application.wrapper_publication import build_wrapper_command_name
+
+    return build_wrapper_command_name(base, prefix, suffix)
 
 
 def wrapper_script_path(root: Path, wrapper_name: str) -> Path:
-    if wrapper_name not in GLOBAL_WRAPPERS and wrapper_name not in LEGACY_GLOBAL_WRAPPERS:
-        raise ValueError(f"unsupported wrapper: {wrapper_name}")
-    direct = root / "scripts" / wrapper_name
-    if direct.exists():
-        return direct
-    installed = root / "docs" / "skills" / "agent-context-engine" / "scripts" / wrapper_name
-    if installed.exists():
-        return installed
-    return root / "docs" / "skills" / "agent-memory" / "scripts" / wrapper_name
+    from ....application.wrapper_publication import resolve_wrapper_script_path
+
+    return resolve_wrapper_script_path(root, wrapper_name)
 
 
 def create_command_link(
@@ -3431,6 +3187,9 @@ def create_command_link(
     link_kind: str = "global_wrapper",
     installation_root: Path | None = None,
 ) -> Path:
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_command_publisher
+
     link = link_dir / link_name
     if link.exists() or link.is_symlink():
         try:
@@ -3452,8 +3211,7 @@ def create_command_link(
             raise FileExistsError(f"link exists, use --force or a different --command-prefix: {link}")
         if link.is_dir() and not link.is_symlink():
             raise FileExistsError(f"cannot replace directory link target: {link}")
-        link.unlink()
-    link.symlink_to(target)
+    select_command_publisher(current_platform_profile()).create_symlink(link, target, force=force)
     record_link_registry_entry(
         logical_name=link_name,
         link_kind=link_kind,
@@ -3467,9 +3225,11 @@ def create_command_link(
 
 
 def remove_command_link(link_dir: Path, link_name: str, *, installation_root: Path | None = None) -> Path:
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_command_publisher
+
     link = link_dir / link_name
-    if link.exists() or link.is_symlink():
-        link.unlink()
+    select_command_publisher(current_platform_profile()).remove_symlink(link)
     record_link_registry_entry(
         logical_name=link_name,
         link_kind="global_wrapper",
@@ -3736,24 +3496,47 @@ def cmd_install(args: argparse.Namespace) -> int:
             )
         )
         monitor_port = resolved_monitor_port
-    launchagent_label = str(getattr(args, "launchagent_label", None) or _default_launchagent_label_for_target(target)).strip() or _default_launchagent_label_for_target(target)
-    launchagent_path = str(getattr(args, "launchagent_path", None) or launch_agent_path(launchagent_label)).strip() or str(launch_agent_path(launchagent_label))
-    launchagent_env_file = str(getattr(args, "launchagent_env_file", None) or _default_launchagent_env_file_for_storage(runtime_memory_root)).strip() or _default_launchagent_env_file_for_storage(runtime_memory_root)
+    default_launchagent = _default_launchagent_profile_for_target(
+        checkout_role="unknown_checkout",
+        target_root=target,
+        memory_root=runtime_memory_root,
+    )
+    launchagent_label = str(getattr(args, "launchagent_label", None) or default_launchagent["label"]).strip() or default_launchagent["label"]
+    launchagent_path = (
+        str(getattr(args, "launchagent_path", None) or _expected_launchagent_plist_path(launchagent_label)).strip()
+        or _expected_launchagent_plist_path(launchagent_label)
+    )
+    launchagent_env_file = str(getattr(args, "launchagent_env_file", None) or default_launchagent["env_file"]).strip() or default_launchagent["env_file"]
     codex_templates = SKILL_ROOT / "templates" / "codex-hooks"
     script_abs = str((target / script_rel).resolve())
     root_abs = str(target.resolve())
+    from ....application.hook_rendering import build_shell_hook_adapter_spec, render_shell_hook_adapter_script
+    (target / ".codex" / "hooks").mkdir(parents=True, exist_ok=True)
+    (target / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
+    (target / ".agents" / "hooks").mkdir(parents=True, exist_ok=True)
+    (target / ".gemini" / "hooks").mkdir(parents=True, exist_ok=True)
     copy_text(codex_templates / "hooks.json", target / ".codex" / "hooks.json")
-    copy_text(
-        codex_templates / "hook_adapter.sh",
-        target / ".codex" / "hooks" / "hook_adapter.sh",
-        {"__AGENT_MEMORY_SCRIPT__": script_abs, "__AGENT_CONTEXT_ENGINE_ROOT__": root_abs},
+    (target / ".codex" / "hooks" / "hook_adapter.sh").write_text(
+        render_shell_hook_adapter_script(
+            build_shell_hook_adapter_spec(
+                "codex",
+                agent_context_engine_root=target,
+                agent_memory_script=script_abs,
+            )
+        ),
+        encoding="utf-8",
     )
     claude_templates = SKILL_ROOT / "templates" / "claude-hooks"
     copy_text(claude_templates / "settings.json", target / ".claude" / "settings.json")
-    copy_text(
-        claude_templates / "hook_adapter.sh",
-        target / ".claude" / "hooks" / "hook_adapter.sh",
-        {"__AGENT_MEMORY_SCRIPT__": script_abs, "__AGENT_CONTEXT_ENGINE_ROOT__": root_abs},
+    (target / ".claude" / "hooks" / "hook_adapter.sh").write_text(
+        render_shell_hook_adapter_script(
+            build_shell_hook_adapter_spec(
+                "claude",
+                agent_context_engine_root=target,
+                agent_memory_script=script_abs,
+            )
+        ),
+        encoding="utf-8",
     )
     antigravity_templates = SKILL_ROOT / "templates" / "antigravity-hooks"
     copy_text(
@@ -3761,20 +3544,27 @@ def cmd_install(args: argparse.Namespace) -> int:
         target / ".agents" / "hooks.json",
         {"__ANTIGRAVITY_HOOK_SCRIPT__": str((target / ".agents" / "hooks" / "hook_adapter.sh").resolve())},
     )
-    copy_text(
-        antigravity_templates / "hook_adapter.sh",
-        target / ".agents" / "hooks" / "hook_adapter.sh",
-        {
-            "__AGENT_MEMORY_SCRIPT__": script_rel,
-            "__AGENT_CONTEXT_ENGINE_ROOT__": str(target.resolve()),
-        },
+    (target / ".agents" / "hooks" / "hook_adapter.sh").write_text(
+        render_shell_hook_adapter_script(
+            build_shell_hook_adapter_spec(
+                "antigravity",
+                agent_context_engine_root=target,
+                agent_memory_script=script_rel,
+            )
+        ),
+        encoding="utf-8",
     )
     gemini_templates = SKILL_ROOT / "templates" / "gemini-hooks"
     copy_text(gemini_templates / "settings.json", target / ".gemini" / "settings.json")
-    copy_text(
-        gemini_templates / "hook_adapter.sh",
-        target / ".gemini" / "hooks" / "hook_adapter.sh",
-        {"__AGENT_MEMORY_SCRIPT__": script_abs, "__AGENT_CONTEXT_ENGINE_ROOT__": root_abs},
+    (target / ".gemini" / "hooks" / "hook_adapter.sh").write_text(
+        render_shell_hook_adapter_script(
+            build_shell_hook_adapter_spec(
+                "gemini",
+                agent_context_engine_root=target,
+                agent_memory_script=script_abs,
+            )
+        ),
+        encoding="utf-8",
     )
     write_workspace_binding("codex", root=target, memory_root=target, written_by="install")
     write_workspace_binding("claude", root=target, memory_root=target, written_by="install")
@@ -3807,7 +3597,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         target / ".agents" / "hooks" / "hook_adapter.sh",
         target / ".gemini" / "hooks" / "hook_adapter.sh",
     ]:
-        path.chmod(0o755)
+        _mark_platform_executable(path)
     skip_runtime_bootstrap = os.environ.get("AGENT_MEMORY_TEST_SKIP_RUNTIME_BOOTSTRAP", "") in {"1", "true", "True", "yes"}
     if getattr(args, "bootstrap_runtime", False) and not skip_runtime_bootstrap:
         try:
@@ -3860,7 +3650,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         last_used_installation_root=target,
         last_used_memory_root=runtime_memory_root,
     )
-    sync_instance_metadata(target)
+    instance_metadata = sync_instance_metadata(target)
     linked_wrapper_specs = _linked_wrapper_specs(args)
     link_dir = Path(args.link_dir).expanduser().resolve()
     link_dir.mkdir(parents=True, exist_ok=True)
@@ -3918,6 +3708,28 @@ def cmd_install(args: argparse.Namespace) -> int:
     if args.instance_name:
         print(f"instance: {safe_slug(args.instance_name)}")
     print(f"preferred interaction language: {LANGUAGE_LABELS.get(language, language)}")
+    from ....application.platform import CapabilityStatus, current_platform_profile
+    from ....application.platform.runtime_summary import runtime_selection_summary
+    platform_profile = current_platform_profile()
+    runtime_selection = runtime_selection_summary(platform_profile)
+    scheduler_capability = platform_profile.capability("scheduler_backend")
+    print(
+        "platform profile: "
+        + f"{platform_profile.profile_id} support={platform_profile.support_level.value} evidence={platform_profile.evidence.value}"
+    )
+    print(
+        "selected runtime adapters: "
+        + f"instruction_renderer={((runtime_selection.get('instruction_renderer') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"hook_renderer={((runtime_selection.get('hook_renderer') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"wrapper_renderer={((runtime_selection.get('wrapper_renderer') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"command_publisher={((runtime_selection.get('command_publisher') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"executable_permission_adapter={((runtime_selection.get('executable_permission_adapter') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"system_open_adapter={((runtime_selection.get('system_open_adapter') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"process_launch_adapter={((runtime_selection.get('process_launch_adapter') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"workspace_binding_adapter={((runtime_selection.get('workspace_binding_adapter') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"path_quoting_adapter={((runtime_selection.get('path_quoting_adapter') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"scheduler_installer={((runtime_selection.get('scheduler_installer') or {}).get('name') if isinstance(runtime_selection, dict) else '')}"
+    )
     print("configured workflows:")
     for key in WORKFLOW_RUNNER_DEFAULTS:
         print(f"- {WORKFLOW_LABELS[key]}: {workflow_settings[key]}")
@@ -3929,6 +3741,18 @@ def cmd_install(args: argparse.Namespace) -> int:
     print(f"installation profile: {installation_profile_path(target)}")
     print(f"user config: {user_config_path()}")
     print(f"instance metadata: {instance_metadata_path_for_root(target)}")
+    if str(instance_metadata.get("installed_at") or "").strip():
+        print(
+            "installed at: "
+            + f"{instance_metadata.get('installed_at')} "
+            + f"(version={instance_metadata.get('installed_by_version') or '-'})"
+        )
+    if str(instance_metadata.get("last_updated_at") or "").strip():
+        print(
+            "last updated at: "
+            + f"{instance_metadata.get('last_updated_at')} "
+            + f"(version={instance_metadata.get('last_updated_by_version') or '-'})"
+        )
     print(f"link registry: {link_registry_path()}")
     print(f"global cli command: {global_cli_link or '-'}")
     print(f"user cli shortcut: {user_cli_link or '-'}")
@@ -3937,7 +3761,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     print(f"repo index: {repos_index}")
     for path in entrypoints:
         print(f"updated harness entrypoint: {path}")
-    if args.install_launchagent:
+    if args.install_launchagent and scheduler_capability is not None and scheduler_capability.status == CapabilityStatus.SUPPORTED and scheduler_capability.implementation == "launchagent":
         if not isolated_install:
             for action in _stop_superseded_launchagents_for_memory_root(target=target, memory_root=runtime_memory_root):
                 print(action)
@@ -3963,11 +3787,19 @@ def cmd_install(args: argparse.Namespace) -> int:
         else:
             message = launchagent.stderr.strip() or launchagent.stdout.strip()
             print(f"warn: LaunchAgent install failed; run manually if needed: {message}", file=sys.stderr)
+    elif args.install_launchagent:
+        print(
+            "warn: LaunchAgent install skipped on this platform profile: "
+            + f"profile={platform_profile.profile_id} status={scheduler_capability.status.value if scheduler_capability else 'unsupported'} "
+            + f"support={scheduler_capability.support_level.value if scheduler_capability else platform_profile.support_level.value} "
+            + f"evidence={scheduler_capability.evidence.value if scheduler_capability else platform_profile.evidence.value}",
+            file=sys.stderr,
+        )
     else:
         print(
             "next: run "
             + f"{agent_memory_cli_for_root(target)} install-launchagent --label {launchagent_label} "
-            + f"--plist-path {sh_quote(launchagent_path)} --env-file {sh_quote(launchagent_env_file)} --load"
+            + f"--plist-path {_quote_platform_path(launchagent_path)} --env-file {_quote_platform_path(launchagent_env_file)} --load"
         )
     verification = _run_post_install_checks(target, language=language)
     if getattr(args, "start_monitor", True) and os.environ.get("AGENT_MEMORY_TEST_SKIP_MONITOR_START", "") not in {"1", "true", "True", "yes"}:
@@ -4034,8 +3866,8 @@ def cmd_attach_memory_root(args: argparse.Namespace) -> int:
     schema_version = int(getattr(args, "storage_schema_version", None) or resolve_storage_profile(root).get("schema_version") or DEFAULT_STORAGE_SCHEMA_VERSION)
     migrated_actions = _relocate_runtime_storage(current_storage_root, memory_root)
     ensure_storage_profile(memory_root, schema_version=schema_version, storage_instance_id=str(profile.get("instance_id") or root.name))
-    launchagent_profile = dict(profile.get("launchagent") or {})
-    launchagent_env_file = str(launchagent_profile.get("env_file") or DEFAULT_ENV_FILE)
+    launchagent_profile = normalize_launchagent_profile(dict(profile.get("launchagent") or {}))
+    launchagent_env_file = str(launchagent_profile.get("env_file") or "")
     if _should_rewrite_launchagent_env_file(launchagent_env_file, old_memory_root=current_storage_root):
         launchagent_env_file = _default_launchagent_env_file_for_storage(memory_root)
     merge_installation_profile(

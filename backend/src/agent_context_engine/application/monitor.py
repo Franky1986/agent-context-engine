@@ -6,11 +6,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..adapters.launchagent import DEFAULT_ENV_FILE, DEFAULT_LABEL, launchagent_runtime_status, reconcile_launchagent
+from ..adapters.launchagent import launchagent_runtime_status, reconcile_launchagent
 from .firewall import firewall_status
 from .hooks_state import hooks_control_status
 from .instance_profile import (
     active_monitor_runtime_entries,
+    normalize_launchagent_profile,
     instance_metadata_path_for_root,
     link_registry_path,
     load_link_registry,
@@ -25,6 +26,8 @@ from .instance_profile import (
     user_state_root,
 )
 from .integrations import integration_summary, manage_integration_hooks
+from .platform import current_runtime_capabilities_payload, platform_profile_for_family, platform_profile_from_payload
+from .platform.runtime_summary import runtime_selection_summary
 from ..interfaces.hooks.support.queue import hook_queue_status
 from .personal import PERSONAL_ROOT, parse_frontmatter, personal_files
 from .retrieval import retrieve_memory_with_safety, search_memory_chunks
@@ -50,7 +53,7 @@ def _watched_runtime_paths(root: Path) -> list[Path]:
         root / "backend" / "src" / "agent_memory" / "interfaces" / "cli" / "main.py",
         root / "scripts" / "ace",
         root / "scripts" / "agent-memory",
-        root / DEFAULT_ENV_FILE,
+        env_file_path(root),
     ]
 
 
@@ -75,7 +78,11 @@ def _monitor_process_status(
     latest_runtime_change_epoch = _latest_runtime_change_epoch(root)
     stale = latest_runtime_change_epoch > started_at_epoch
     profile = load_installation_profile(root)
-    launchagent_profile = dict(profile.get("launchagent") or {})
+    launchagent_profile = normalize_launchagent_profile(dict(profile.get("launchagent") or {}))
+    platform_profile = dict(profile.get("platform_profile") or {})
+    selected_platform_profile = platform_profile_from_payload(platform_profile)
+    runtime_selection = runtime_selection_summary(selected_platform_profile)
+    runtime_capabilities = current_runtime_capabilities_payload()
     storage = resolve_storage_profile(root)
     return {
         "pid": int(monitor_context.get("pid") or os.getpid()) if monitor_context else os.getpid(),
@@ -93,9 +100,12 @@ def _monitor_process_status(
         "stale": stale,
         "restart_command": monitor_restart_command(root, runner=runner),
         "stale_reason": "repo runtime files changed after monitor start" if stale else "",
-        "configured_launchagent_label": str(launchagent_profile.get("label") or DEFAULT_LABEL),
-        "configured_launchagent_path": str(launchagent_profile.get("path") or ""),
-        "configured_launchagent_env_file": str(launchagent_profile.get("env_file") or DEFAULT_ENV_FILE),
+        "configured_launchagent_label": launchagent_profile["label"],
+        "configured_launchagent_path": launchagent_profile["path"],
+        "configured_launchagent_env_file": launchagent_profile["env_file"],
+        "configured_platform_profile": platform_profile,
+        "configured_runtime_capabilities": runtime_capabilities,
+        "configured_runtime_selection": runtime_selection,
         "configured_memory_root": str(storage.get("memory_root") or ""),
         "configured_storage_schema_version": int(storage.get("schema_version") or 1),
     }
@@ -121,10 +131,14 @@ def monitor_status(
     ).fetchone()["c"]
 
     profile = load_installation_profile(root)
-    launchagent_profile = dict(profile.get("launchagent") or {})
-    launchagent_label = str(launchagent_profile.get("label") or DEFAULT_LABEL)
-    launchagent_path = str(launchagent_profile.get("path") or "")
-    launchagent_env_file = str(launchagent_profile.get("env_file") or DEFAULT_ENV_FILE)
+    launchagent_profile = normalize_launchagent_profile(dict(profile.get("launchagent") or {}))
+    platform_profile = dict(profile.get("platform_profile") or {})
+    selected_platform_profile = platform_profile_from_payload(platform_profile)
+    runtime_selection = runtime_selection_summary(selected_platform_profile)
+    runtime_capabilities = current_runtime_capabilities_payload()
+    launchagent_label = launchagent_profile["label"]
+    launchagent_path = launchagent_profile["path"]
+    launchagent_env_file = launchagent_profile["env_file"]
     storage = resolve_storage_profile(root)
     runtime_storage_profile = load_storage_profile(Path(str(storage.get("memory_root") or root / "memory")))
     instance_metadata = sync_instance_metadata(root)
@@ -145,6 +159,10 @@ def monitor_status(
         "backend_version": PRODUCT_VERSION,
         "root": str(root),
         "install_root": str(root),
+        "platform": str(profile.get("platform") or ""),
+        "platform_profile": platform_profile,
+        "runtime_capabilities": runtime_capabilities,
+        "runtime_selection": runtime_selection,
         "memory_root": str(storage.get("memory_root") or ""),
         "storage_schema_version": int(storage.get("schema_version") or 1),
         "storage_attached_at": str(storage.get("attached_at") or ""),
@@ -188,11 +206,18 @@ def monitor_status(
 
 def monitor_reconcile_runtime(*, root: Path) -> dict[str, Any]:
     profile = load_installation_profile(root)
-    launchagent_profile = dict(profile.get("launchagent") or {})
-    launchagent_label = str(launchagent_profile.get("label") or DEFAULT_LABEL)
-    launchagent_path = str(launchagent_profile.get("path") or "")
-    launchagent_env_file = str(launchagent_profile.get("env_file") or DEFAULT_ENV_FILE)
+    launchagent_profile = normalize_launchagent_profile(dict(profile.get("launchagent") or {}))
+    platform_profile = dict(profile.get("platform_profile") or {})
+    selected_platform_profile = platform_profile_from_payload(platform_profile)
+    runtime_selection = runtime_selection_summary(selected_platform_profile)
+    runtime_capabilities = current_runtime_capabilities_payload()
+    launchagent_label = launchagent_profile["label"]
+    launchagent_path = launchagent_profile["path"]
+    launchagent_env_file = launchagent_profile["env_file"]
     return {
+        "platform_profile": platform_profile,
+        "runtime_capabilities": runtime_capabilities,
+        "runtime_selection": runtime_selection,
         "launchagent": reconcile_launchagent(label=launchagent_label, env_file=launchagent_env_file, plist_path=launchagent_path, root=root),
         "monitor_restart_command": monitor_restart_command(root),
         "root": str(root),

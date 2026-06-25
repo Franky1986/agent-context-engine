@@ -1,0 +1,13 @@
+## Agent Context Engine Quick Path
+- Preferred interaction language for future agents: English.
+- When asked about previous sessions, handovers, project context, "what happened last", "continue there", "we already analyzed this", or similar memory requests, use the local Agent Context Engine CLI first.
+- Agent Context Engine command prefix: `agent-context-engine`
+- Canonical public CLI contract: `agent-context-engine` from `PATH`. Repo-local `./scripts/ace` and `./scripts/agent-context-engine` remain compatibility fallbacks, not the primary hook/session contract.
+- Traceable retrieval: `agent-context-engine retrieve "<question or search terms>" --limit 10`
+- Quick keyword search: `agent-context-engine search "<search terms>" --limit 5`
+- Load a session handover: `agent-context-engine handover "<session|title|search terms>"`
+- Recent sessions: `agent-context-engine last --limit 10`
+- Status: `agent-context-engine doctor`
+- For list/count/today questions about sessions, use `last` first and stop there unless the user explicitly asks for details about a specific session.
+- Do not inspect `~/.cursor/projects/...`, local Cursor transcripts, or terminal metadata for session-history questions while the Agent Context Engine CLI is available.
+- Only after these commands should agents broaden the search with `rg` in the repository or memory tree.

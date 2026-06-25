@@ -7,7 +7,7 @@ from typing import Any
 from pathlib import Path
 
 from ....application.integrations import cursor_project_background_runner_status
-from ....infrastructure.config import ROOT, json_dumps, session_short, sh_quote
+from ....infrastructure.config import ROOT, json_dumps, session_short
 from ....application.personal import PERSONAL_ROOT, parse_frontmatter, personal_files, startup_safe_personal_context
 from ....application.firewall import active_firewall_override, firewall_status
 from .payloads import normalized_path, one_line
@@ -17,54 +17,34 @@ from ....application.instance_profile import preferred_agent_memory_cli_for_root
 SESSION_START_HOOK_ENTRY = ROOT / "session-start-hook-entry.md"
 
 
+def _quote_platform_value(value: str | Path) -> str:
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_path_quoting_adapter
+
+    return select_path_quoting_adapter(current_platform_profile()).quote(str(value))
+
+
 def agent_memory_command_prefix() -> str:
     cli = preferred_agent_memory_cli_for_root(ROOT)
     if cli == "agent-context-engine":
         return cli
-    return f"cd {sh_quote(str(ROOT))} && {cli}"
+    return f"cd {_quote_platform_value(ROOT)} && {cli}"
 
 
 def _default_startup_entry(command_prefix: str) -> str:
-    return f"""# Session Start
+    from ....application.agent_flow import build_agent_flow_contract, render_session_start_hook_entry
+    from ....application.instance_profile import WORKFLOW_RUNNER_DEFAULTS, load_installation_profile
 
-Agent Context Engine command prefix: `{command_prefix}`
-
-- For session list/count/today questions, use `last --limit 10` first and answer from that result. Do not open session, summary, or dream files unless the user explicitly asks for details.
-- If the user mentions a local repo/project/folder by name, or asks for side information about another project, resolve it via one of these — do not browse the filesystem:
-  - `cat ./memory/knowledge/repos.md` — full repos context (fastest, no CLI needed)
-  - `repo-context --list` — overview of known repos
-  - `repo-context <identifier>` — targeted context for a specific repo
-- Load personal context only on demand, e.g. for "my preferences", "as usual", writing style, language, or personal standards.
-
-Start here for previous work:
-- `{command_prefix} last --limit 10`
-- `{command_prefix} use "<session|title|search terms>"`
-- `{command_prefix} handover "<session|title|search terms>"`
-- `{command_prefix} retrieve "<question or search terms>" --limit 10`
-- `{command_prefix} search "<search terms>" --limit 5`
-
-Load extra context when needed:
-- `{command_prefix} session-start-context`
-- `{command_prefix} personal-context --list`
-- `{command_prefix} personal-context <identifier>`
-- `{command_prefix} repo-context --list`
-- `{command_prefix} repo-context <identifier>`
-- `{command_prefix} retrieval-runs --limit 10`
-- `{command_prefix} retrieval-run <retrieval_run_id>`
-
-User-only controls:
-- `approve ...`
-- `reset taint`
-- `firewall add ...`
-- `firewall disable session`
-- `firewall enable session`
-- `hooks-disable [--runner <runner>]`
-- `hooks-enable [--runner <runner>]`
-- `hooks-status`
-
-Monitor:
-- `{command_prefix} monitor --runner codex --replace-existing`
-"""
+    monitor_runner = str(
+        load_installation_profile(ROOT).get("workflows", {}).get("monitor_runner") or WORKFLOW_RUNNER_DEFAULTS["monitor_runner"]
+    ).strip() or "codex"
+    contract = build_agent_flow_contract(
+        preferred_language="en",
+        command_prefix=command_prefix,
+        repo_context_path="./docs/knowledge/repos.md",
+        monitor_runner=monitor_runner,
+    )
+    return render_session_start_hook_entry(contract)
 
 
 def _user_only_controls_block() -> str:

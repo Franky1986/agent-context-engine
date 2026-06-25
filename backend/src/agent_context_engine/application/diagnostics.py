@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import unquote
 from typing import Any
 
-from ..adapters.launchagent import DEFAULT_LABEL, launch_agent_path, launchagent_loaded, launchagent_runtime_status, load_env_file
+from ..adapters.launchagent import launchagent_loaded, launchagent_runtime_status, load_env_file
 from .instance_profile import (
     instance_metadata_path_for_root,
     link_registry_path,
@@ -15,6 +15,7 @@ from .instance_profile import (
     load_installation_profile,
     load_instance_metadata,
     load_storage_profile,
+    normalize_launchagent_profile,
     resolve_monitor_profile,
     resolve_storage_profile,
     resolve_wrapper_naming,
@@ -25,6 +26,8 @@ from .instance_profile import (
 )
 from .installation import frontend_build_status, python_runtime_status
 from .integrations import workspace_binding_status
+from .platform import current_runtime_capabilities_payload, platform_profile_for_family, platform_profile_from_payload
+from .platform.runtime_summary import runtime_selection_summary
 from ..infrastructure.config import DB_PATH, ENV_FILE_PATH, MEMORY_DIR, REPOS_INDEX, ROOT, SKILL_ROOT
 from ..infrastructure.db import connect, dreamable_sessions
 
@@ -131,7 +134,7 @@ def run_doctor_checks(
     wrapper_naming = resolve_wrapper_naming(ROOT)
     monitor_profile = resolve_monitor_profile(ROOT)
     storage_profile = resolve_storage_profile(ROOT)
-    launchagent_profile = dict(profile.get("launchagent") or {})
+    launchagent_profile = normalize_launchagent_profile(dict(profile.get("launchagent") or {}))
     instance_id = str(profile.get("instance_id") or ROOT.name)
     runtime_storage_profile = load_storage_profile(Path(storage_profile["memory_root"]))
     lines.append(f"ok  instance id: {instance_id}")
@@ -181,10 +184,109 @@ def run_doctor_checks(
     )
     lines.append(
         "ok  launchagent profile: "
-        + f"label={launchagent_profile.get('label') or DEFAULT_LABEL} "
-        + f"path={launchagent_profile.get('path') or str(launch_agent_path(DEFAULT_LABEL))} "
-        + f"env_file={launchagent_profile.get('env_file') or DEFAULT_ENV_FILE}"
+        + f"label={launchagent_profile.get('label') or '-'} "
+        + f"path={launchagent_profile.get('path') or '-'} "
+        + f"env_file={launchagent_profile.get('env_file') or '-'}"
     )
+    platform_profile = dict(profile.get("platform_profile") or {})
+    platform_profile_id = str(platform_profile.get("profile_id") or profile.get("platform") or "unknown")
+    platform_support_level = str(platform_profile.get("support_level") or "unsupported")
+    platform_evidence = str(platform_profile.get("evidence") or "inferred")
+    platform_notes = str(platform_profile.get("notes") or "").strip()
+    selected_platform_profile = platform_profile_from_payload(platform_profile)
+    runtime_selection = runtime_selection_summary(selected_platform_profile)
+    runtime_capabilities = current_runtime_capabilities_payload()
+    platform_label = "ok" if platform_support_level == "supported" else "warn"
+    lines.append(
+        f"{platform_label}  platform profile: "
+        + f"{platform_profile_id} support={platform_support_level} evidence={platform_evidence}"
+    )
+    if platform_notes:
+        lines.append(f"{platform_label}  platform notes: {platform_notes}")
+    lines.append(
+        "ok  runtime capabilities: "
+        + f"platform_token={runtime_capabilities.get('platform_token') or ''} "
+        + f"profile={runtime_capabilities.get('profile_id') or ''} "
+        + f"entries={len(dict(runtime_capabilities.get('capability_matrix') or {}))}"
+    )
+    lines.append(
+        f"{platform_label}  instruction renderer: "
+        + f"{((runtime_selection.get('instruction_renderer') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"support={((runtime_selection.get('instruction_renderer') or {}).get('support_level') if isinstance(runtime_selection, dict) else '')} "
+        + f"evidence={((runtime_selection.get('instruction_renderer') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
+    )
+    lines.append(
+        f"{platform_label}  hook renderer: "
+        + f"{((runtime_selection.get('hook_renderer') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"support={((runtime_selection.get('hook_renderer') or {}).get('support_level') if isinstance(runtime_selection, dict) else '')} "
+        + f"evidence={((runtime_selection.get('hook_renderer') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
+    )
+    lines.append(
+        f"{platform_label}  wrapper renderer: "
+        + f"{((runtime_selection.get('wrapper_renderer') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"support={((runtime_selection.get('wrapper_renderer') or {}).get('support_level') if isinstance(runtime_selection, dict) else '')} "
+        + f"evidence={((runtime_selection.get('wrapper_renderer') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
+    )
+    lines.append(
+        f"{platform_label}  command publisher: "
+        + f"{((runtime_selection.get('command_publisher') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"support={((runtime_selection.get('command_publisher') or {}).get('support_level') if isinstance(runtime_selection, dict) else '')} "
+        + f"evidence={((runtime_selection.get('command_publisher') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
+    )
+    lines.append(
+        f"{platform_label}  executable permission adapter: "
+        + f"{((runtime_selection.get('executable_permission_adapter') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"support={((runtime_selection.get('executable_permission_adapter') or {}).get('support_level') if isinstance(runtime_selection, dict) else '')} "
+        + f"evidence={((runtime_selection.get('executable_permission_adapter') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
+    )
+    lines.append(
+        f"{platform_label}  system open adapter: "
+        + f"{((runtime_selection.get('system_open_adapter') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"support={((runtime_selection.get('system_open_adapter') or {}).get('support_level') if isinstance(runtime_selection, dict) else '')} "
+        + f"evidence={((runtime_selection.get('system_open_adapter') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
+    )
+    lines.append(
+        f"{platform_label}  process launch adapter: "
+        + f"{((runtime_selection.get('process_launch_adapter') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"support={((runtime_selection.get('process_launch_adapter') or {}).get('support_level') if isinstance(runtime_selection, dict) else '')} "
+        + f"evidence={((runtime_selection.get('process_launch_adapter') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
+    )
+    lines.append(
+        f"{platform_label}  workspace binding adapter: "
+        + f"{((runtime_selection.get('workspace_binding_adapter') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"support={((runtime_selection.get('workspace_binding_adapter') or {}).get('support_level') if isinstance(runtime_selection, dict) else '')} "
+        + f"evidence={((runtime_selection.get('workspace_binding_adapter') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
+    )
+    lines.append(
+        f"{platform_label}  path quoting adapter: "
+        + f"{((runtime_selection.get('path_quoting_adapter') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+        + f"support={((runtime_selection.get('path_quoting_adapter') or {}).get('support_level') if isinstance(runtime_selection, dict) else '')} "
+        + f"evidence={((runtime_selection.get('path_quoting_adapter') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
+    )
+    scheduler_capability = next(
+        (
+            capability
+            for capability in list(platform_profile.get("capabilities") or [])
+            if isinstance(capability, dict) and str(capability.get("name") or "") == "scheduler_backend"
+        ),
+        None,
+    )
+    if isinstance(scheduler_capability, dict):
+        scheduler_status = str(scheduler_capability.get("status") or "unsupported")
+        scheduler_support = str(scheduler_capability.get("support_level") or platform_support_level)
+        scheduler_evidence = str(scheduler_capability.get("evidence") or platform_evidence)
+        scheduler_implementation = str(scheduler_capability.get("implementation") or "").strip() or "-"
+        scheduler_label = "ok" if scheduler_status == "supported" else "warn"
+        lines.append(
+            f"{scheduler_label}  scheduler capability: "
+            + f"status={scheduler_status} support={scheduler_support} evidence={scheduler_evidence} implementation={scheduler_implementation}"
+        )
+        lines.append(
+            f"{scheduler_label}  scheduler installer: "
+            + f"{((runtime_selection.get('scheduler_installer') or {}).get('name') if isinstance(runtime_selection, dict) else '')} "
+            + f"support={((runtime_selection.get('scheduler_installer') or {}).get('support_level') if isinstance(runtime_selection, dict) else '')} "
+            + f"evidence={((runtime_selection.get('scheduler_installer') or {}).get('evidence') if isinstance(runtime_selection, dict) else '')}"
+        )
 
     checks = [
         (ROOT / ".codex" / "hooks.json", "Codex hooks config", True),
@@ -221,8 +323,8 @@ def run_doctor_checks(
     lines.append(f"ok  runtime neo4j database: {neo4j_database}")
     lines.append(f"ok  runtime neo4j uri configured: {'yes' if neo4j_uri != '-' else 'no'}")
 
-    launch_label = str(launchagent_profile.get("label") or DEFAULT_LABEL)
-    launch_path = Path(str(launchagent_profile.get("path") or launch_agent_path(launch_label)))
+    launch_label = str(launchagent_profile.get("label") or "")
+    launch_path = Path(str(launchagent_profile.get("path") or ""))
     installed = launch_path.exists()
     loaded = launchagent_loaded(launch_label)
     if version == "2" and not installed:
@@ -290,7 +392,7 @@ def run_doctor_checks(
     lines.append(f"{'ok' if frontend['node_modules_exists'] else 'warn'}  monitor frontend deps: {frontend['project_root']}/node_modules")
     launchagent_status = launchagent_runtime_status(
         label=launch_label,
-        env_file=str(launchagent_profile.get("env_file") or DEFAULT_ENV_FILE),
+        env_file=str(launchagent_profile.get("env_file") or ""),
         plist_path=launch_path,
         root=ROOT,
     )

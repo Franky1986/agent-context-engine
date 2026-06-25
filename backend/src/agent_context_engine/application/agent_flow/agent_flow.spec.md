@@ -1,0 +1,68 @@
+# Spec: Agent Flow Application Boundary
+
+## Purpose
+
+Represent agent-facing startup instructions and retrieval workflow guidance as a
+structured application contract so all rendered instruction targets stay aligned
+across installation, hook startup, and harness entrypoints.
+
+## Scope
+
+- Canonical agent-flow contract fields.
+- Rendering of agent-facing instruction artifacts.
+- Stable wording for retrieval, handover, repo-context, monitor, and
+  user-control guidance.
+
+## Non-Scope
+
+- Concrete hook adapter shell behavior.
+- Concrete wrapper/symlink rendering.
+- Concrete scheduler or platform adapter implementation.
+- Personal-context loading logic itself.
+
+## Responsibilities
+
+- Keep generated startup/instruction artifacts consistent.
+- Remove drift between installation-time and runtime startup guidance.
+- Make command prefix, repo-context path, public-CLI repair stance, and monitor
+  startup defaults explicit inputs.
+- Preserve current macOS-visible instruction behavior while boundaries are
+  extracted.
+
+## Inputs / Outputs
+
+- Inputs: command prefix, preferred language, repo-context path, monitor runner,
+  monitor host/port defaults, and public-CLI expectations.
+- Outputs: rendered markdown/text artifacts for agent-facing startup surfaces.
+
+## Dependencies / Ports
+
+- May depend on installation profile read models for selected runner defaults.
+- Must not depend on concrete shell hook adapters or LaunchAgent behavior.
+
+## Failure Modes
+
+- Unknown languages fall back to English labels.
+- Missing monitor runner falls back to the documented default.
+- Renderers must stay deterministic for the same contract input.
+
+## Acceptance Criteria
+
+- `AGENTS.md` quick-path block is rendered from the shared contract.
+- `session-start-hook-entry.md` is rendered from the shared contract.
+- `CLAUDE.md` and Cursor every-chat entrypoint text come from the same boundary.
+- Installation and hook-session startup no longer maintain separate default
+  wording for the same retrieval workflow.
+- Public-CLI/PATH repair guidance and monitor startup defaults stay aligned
+  between the shared contract and the checked-in startup docs.
+
+## Tests / Checks
+
+- `python3 tests/test_agent_context_engine.py`
+- `python3 scripts/update_docs_index.py --check`
+
+## Agent Guardrails
+
+- Do not duplicate agent-flow wording in separate render paths when the shared
+  contract can express it.
+- Do not claim unsupported platform/runtime behavior through rendered guidance.

@@ -11,7 +11,6 @@ from typing import Any
 from ..infrastructure.config import ROOT, session_short
 from ..infrastructure.db import connect
 from ..adapters.runners.cursor import CURSOR_EVENTS, cursor_status
-from ..adapters.launchagent import DEFAULT_ENV_FILE, DEFAULT_LABEL, launch_agent_path
 from .integrations import cursor_project_background_runner_status
 from .instance_profile import (
     DEFAULT_MONITOR_HOST,
@@ -26,6 +25,7 @@ from .instance_profile import (
     load_installation_profile as profile_load_installation_profile,
     merge_installation_profile as profile_merge_installation_profile,
     monitor_restart_command as profile_monitor_restart_command,
+    normalize_launchagent_profile as profile_normalize_launchagent_profile,
     resolve_monitor_profile as profile_resolve_monitor_profile,
     resolve_runner_wrapper_name as profile_resolve_runner_wrapper_name,
     resolve_wrapper_command_name as profile_resolve_wrapper_command_name,
@@ -178,10 +178,19 @@ def default_installation_profile() -> dict[str, Any]:
 
 
 def _normalize_installation_profile(payload: dict[str, Any] | None) -> dict[str, Any]:
+    from .platform import current_platform_profile_payload, legacy_platform_profile_payload
+
     profile = default_installation_profile()
     if isinstance(payload, dict):
         profile["version"] = int(payload.get("version") or 1)
-        profile["platform"] = str(payload.get("platform") or "mac")
+        profile["platform"] = str(payload.get("platform") or profile["platform"])
+        raw_platform_profile = payload.get("platform_profile")
+        if isinstance(raw_platform_profile, dict) and str(raw_platform_profile.get("profile_id") or "").strip():
+            profile["platform_profile"] = raw_platform_profile
+        elif payload.get("platform") is not None:
+            profile["platform_profile"] = legacy_platform_profile_payload(str(payload.get("platform") or profile["platform"]))
+        else:
+            profile["platform_profile"] = current_platform_profile_payload()
         workflows = payload.get("workflows")
         if isinstance(workflows, dict):
             for key, default_value in WORKFLOW_RUNNER_DEFAULTS.items():
@@ -218,14 +227,7 @@ def _normalize_installation_profile(payload: dict[str, Any] | None) -> dict[str,
             }
         launchagent = payload.get("launchagent")
         if isinstance(launchagent, dict):
-            label = str(launchagent.get("label") or DEFAULT_LABEL).strip() or DEFAULT_LABEL
-            path = str(launchagent.get("path") or launch_agent_path(label)).strip() or str(launch_agent_path(label))
-            env_file = str(launchagent.get("env_file") or DEFAULT_ENV_FILE).strip() or DEFAULT_ENV_FILE
-            profile["launchagent"] = {
-                "label": label,
-                "path": path,
-                "env_file": env_file,
-            }
+            profile["launchagent"] = profile_normalize_launchagent_profile(launchagent)
     return profile
 
 

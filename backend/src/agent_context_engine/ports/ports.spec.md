@@ -7,6 +7,10 @@ on stable capabilities instead of concrete infrastructure details.
 ## Scope
 - Clock, filesystem, repository, and runner command protocols.
 - Small shared abstractions used by application services.
+- Platform-adjacent capability ports such as process launch, workspace binding,
+  executable permissions, and path quoting.
+- Platform-detection and runtime-capability ports used to materialize the
+  current host capability matrix.
 
 ## Non-Scope
 - Concrete SQLite, LaunchAgent, Neo4j, or runner implementations.

@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 import gc
@@ -23,6 +24,7 @@ from time import sleep
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL_ROOT / "scripts" / "agent_context_engine.py"
+PLATFORM_REFACTOR_FIXTURES = SKILL_ROOT / "tests" / "fixtures" / "platform_capability_agent_flow_refactor"
 
 
 def load_agent_memory(root: Path):
@@ -112,6 +114,105 @@ def default_install_memory_root(home_root: Path) -> Path:
 
 def default_install_root(home_root: Path) -> Path:
     return (home_root / ".agent-context-engine" / "install").resolve()
+
+
+def read_platform_refactor_fixture(name: str) -> str:
+    return (PLATFORM_REFACTOR_FIXTURES / name).read_text(encoding="utf-8")
+
+
+def normalize_platform_refactor_output(
+    rendered: str,
+    *,
+    root: Path | None = None,
+    script_path: str | None = None,
+) -> str:
+    normalized = rendered.replace("\r\n", "\n")
+    if root is not None:
+        normalized = normalized.replace(str(root.resolve()), "__ROOT__")
+    if script_path is not None:
+        normalized = normalized.replace(str(script_path), "__SCRIPT__")
+    return normalized
+
+
+def assert_platform_refactor_fixture(
+    testcase: unittest.TestCase,
+    fixture_name: str,
+    rendered: str,
+    *,
+    root: Path | None = None,
+    script_path: str | None = None,
+) -> None:
+    testcase.assertEqual(
+        normalize_platform_refactor_output(rendered, root=root, script_path=script_path),
+        read_platform_refactor_fixture(fixture_name),
+    )
+
+
+def assert_scaffolded_platform_profile_contract(
+    testcase: unittest.TestCase,
+    profile,
+    *,
+    platform_capability_matrix,
+) -> None:
+    testcase.assertEqual(profile.support_level.value, "scaffolded")
+    testcase.assertEqual(profile.evidence.value, "public_docs")
+    before = tuple(profile.capabilities)
+    matrix_a = platform_capability_matrix(profile)
+    matrix_b = platform_capability_matrix(profile)
+    testcase.assertEqual(matrix_a, matrix_b)
+    testcase.assertEqual(tuple(profile.capabilities), before)
+
+    for name, payload in matrix_a.items():
+        testcase.assertEqual(payload["support_level"], "scaffolded")
+        if name == "agent_guidance_rendering":
+            testcase.assertEqual(payload["status"], "supported")
+            testcase.assertEqual(payload["evidence"], "static_contract_test")
+            testcase.assertEqual(payload["implementation"], "markdown")
+        else:
+            testcase.assertEqual(payload["status"], "scaffolded")
+            testcase.assertEqual(payload["evidence"], "public_docs")
+
+
+def assert_unsupported_platform_profile_contract(
+    testcase: unittest.TestCase,
+    profile,
+    *,
+    platform_capability_matrix,
+) -> None:
+    testcase.assertEqual(profile.support_level.value, "unsupported")
+    testcase.assertEqual(profile.evidence.value, "inferred")
+    before = tuple(profile.capabilities)
+    matrix_a = platform_capability_matrix(profile)
+    matrix_b = platform_capability_matrix(profile)
+    testcase.assertEqual(matrix_a, matrix_b)
+    testcase.assertEqual(tuple(profile.capabilities), before)
+
+    for name, payload in matrix_a.items():
+        testcase.assertEqual(payload["support_level"], "unsupported")
+        testcase.assertEqual(payload["evidence"], "inferred")
+        if name == "agent_guidance_rendering":
+            testcase.assertEqual(payload["status"], "degraded")
+            testcase.assertEqual(payload["implementation"], "markdown")
+        else:
+            testcase.assertEqual(payload["status"], "unsupported")
+
+
+def assert_scaffolded_renderer_contract(
+    testcase: unittest.TestCase,
+    first_render: str,
+    second_render: str,
+    *,
+    renderer_name: str,
+    support_level: str,
+    evidence: str,
+    expected_lines: tuple[str, ...] = (),
+) -> None:
+    testcase.assertEqual(first_render, second_render)
+    testcase.assertIn(f"# renderer={renderer_name}", first_render)
+    testcase.assertIn(f"# support={support_level}", first_render)
+    testcase.assertIn(f"# evidence={evidence}", first_render)
+    for line in expected_lines:
+        testcase.assertIn(line, first_render)
 
 
 INSTALL_INTEGRATION_TEST_PREFIXES = (
@@ -9500,6 +9601,592 @@ The session reconciled stale queue state and resumed pending dreams.
                 self.assertEqual(item["hooks_state"], "inactive_missing_binding")
                 self.assertFalse(item["hooks_enabled"])
 
+    def test_agent_guidance_block_matches_current_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands.installation import agents_memory_block
+
+            assert_platform_refactor_fixture(
+                self,
+                "agent_guidance_block.md",
+                agents_memory_block("en", command_prefix="agent-context-engine"),
+            )
+
+    def test_session_start_entry_matches_current_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands.installation import render_session_start_hook_entry
+
+            assert_platform_refactor_fixture(
+                self,
+                "session_start_hook_entry.md",
+                render_session_start_hook_entry(root, command_prefix="agent-context-engine", language="en", memory_root=root),
+            )
+
+    def test_claude_entrypoint_matches_current_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands.installation import render_claude_entrypoint
+
+            assert_platform_refactor_fixture(self, "claude_entrypoint.md", render_claude_entrypoint())
+
+    def test_cursor_every_chat_rule_matches_current_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands.installation import render_cursor_every_chat_rule
+
+            assert_platform_refactor_fixture(self, "cursor_every_chat_rule.md", render_cursor_every_chat_rule())
+
+    def test_platform_profiles_keep_future_platforms_scaffolded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.platform import (
+                CapabilityStatus,
+                PlatformFamily,
+                SupportLevel,
+                platform_capability_matrix,
+                platform_profile_for_family,
+            )
+
+            macos = platform_profile_for_family(PlatformFamily.MACOS)
+            self.assertEqual(macos.support_level, SupportLevel.SUPPORTED)
+            self.assertEqual(macos.capability("scheduler_backend").implementation, "launchagent")
+            self.assertEqual(macos.capability("global_command_publication").implementation, "symlink")
+
+            for family in (PlatformFamily.LINUX, PlatformFamily.WSL, PlatformFamily.WINDOWS, PlatformFamily.POSIX_GENERIC):
+                with self.subTest(family=family.value):
+                    profile = platform_profile_for_family(family)
+                    assert_scaffolded_platform_profile_contract(
+                        self,
+                        profile,
+                        platform_capability_matrix=platform_capability_matrix,
+                    )
+                    self.assertEqual(profile.capability("scheduler_backend").status, CapabilityStatus.SCAFFOLDED)
+                    self.assertEqual(profile.capability("global_command_publication").status, CapabilityStatus.SCAFFOLDED)
+                    self.assertEqual(profile.capability("agent_guidance_rendering").status, CapabilityStatus.SUPPORTED)
+                    self.assertEqual(profile.capability("path_quoting_strategy").status, CapabilityStatus.SCAFFOLDED)
+                    self.assertEqual(profile.capability("symlink_shim_strategy").status, CapabilityStatus.SCAFFOLDED)
+
+            unknown = platform_profile_for_family("not-a-platform")
+            assert_unsupported_platform_profile_contract(
+                self,
+                unknown,
+                platform_capability_matrix=platform_capability_matrix,
+            )
+            self.assertEqual(unknown.capability("scheduler_backend").status, CapabilityStatus.UNSUPPORTED)
+            self.assertEqual(unknown.capability("browser_file_open").status, CapabilityStatus.UNSUPPORTED)
+
+    def test_default_installation_profile_includes_platform_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import default_installation_profile, default_launchagent_profile
+
+            profile = default_installation_profile()
+            platform_profile = dict(profile.get("platform_profile") or {})
+
+            self.assertTrue(profile.get("platform"))
+            self.assertTrue(platform_profile.get("profile_id"))
+            self.assertTrue(platform_profile.get("support_level"))
+            self.assertIsInstance(platform_profile.get("capabilities"), list)
+            self.assertEqual(profile.get("launchagent"), default_launchagent_profile())
+
+    def test_launchagent_profile_normalization_uses_shared_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import normalize_launchagent_profile
+
+            normalized = normalize_launchagent_profile({"label": "com.agent-context-engine.custom"})
+
+            self.assertEqual(normalized["label"], "com.agent-context-engine.custom")
+            self.assertTrue(normalized["path"].endswith("com.agent-context-engine.custom.plist"))
+            self.assertEqual(normalized["env_file"], "memory/local/agent-context-engine.env")
+
+    def test_launchagent_identity_for_target_uses_project_local_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands.installation import _launchagent_identity_for_target
+
+            memory_root = root / "external-memory"
+            label, env_file, path = _launchagent_identity_for_target(
+                checkout_role="public_checkout",
+                target_root=root,
+                recommended_memory_root=str(memory_root),
+            )
+
+            self.assertTrue(label.startswith("com.agent-context-engine."))
+            self.assertEqual(env_file, str((memory_root / "local" / "agent-context-engine.env").resolve()))
+            self.assertTrue(path.endswith(f"{label}.plist"))
+
+    def test_launchagent_env_file_rewrite_recognizes_legacy_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands.installation import _should_rewrite_launchagent_env_file
+
+            memory_root = root / "memory"
+
+            self.assertTrue(_should_rewrite_launchagent_env_file("memory/local/agent-memory.env", old_memory_root=memory_root))
+            self.assertTrue(_should_rewrite_launchagent_env_file("memory/local/agent-context-engine.env", old_memory_root=memory_root))
+            self.assertTrue(_should_rewrite_launchagent_env_file(str((memory_root / "local" / "agent-context-engine.env").resolve()), old_memory_root=memory_root))
+            self.assertFalse(_should_rewrite_launchagent_env_file(str((root / "other.env").resolve()), old_memory_root=memory_root))
+
+    def test_launchagent_cli_parser_uses_shared_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import default_launchagent_profile
+            from agent_context_engine.interfaces.cli.main import build_parser
+
+            defaults = default_launchagent_profile()
+            parser = build_parser()
+
+            install_args = parser.parse_args(["install-launchagent"])
+            status_args = parser.parse_args(["launchagent-status"])
+
+            self.assertEqual(install_args.label, defaults["label"])
+            self.assertEqual(install_args.env_file, defaults["env_file"])
+            self.assertEqual(install_args.graph_runner, "same-as-session")
+            self.assertEqual(status_args.label, defaults["label"])
+
+    def test_platform_profile_roundtrip_from_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.platform import (
+                PlatformFamily,
+                platform_profile_for_family,
+                platform_profile_from_payload,
+                platform_profile_to_dict,
+            )
+
+            profile = platform_profile_for_family(PlatformFamily.WINDOWS)
+            roundtrip = platform_profile_from_payload(platform_profile_to_dict(profile))
+
+            self.assertEqual(roundtrip.profile_id, profile.profile_id)
+            self.assertEqual(roundtrip.support_level, profile.support_level)
+            self.assertEqual(roundtrip.capability("scheduler_backend").status, profile.capability("scheduler_backend").status)
+
+    def test_runtime_capabilities_payload_exposes_current_capability_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.platform import current_runtime_capabilities_payload
+            from agent_context_engine.adapters.platform_detection import SystemRuntimeCapabilities
+
+            payload = current_runtime_capabilities_payload(SystemRuntimeCapabilities())
+
+            self.assertTrue(payload.get("platform_token"))
+            self.assertTrue(payload.get("profile_id"))
+            self.assertIsInstance(payload.get("capability_matrix"), dict)
+            self.assertIn("scheduler_backend", dict(payload.get("capability_matrix") or {}))
+
+    def test_shell_hook_renderer_substitutes_placeholders(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.hook_rendering import build_shell_hook_adapter_spec, render_shell_hook_adapter_script
+
+            rendered = render_shell_hook_adapter_script(
+                build_shell_hook_adapter_spec(
+                    "codex",
+                    agent_context_engine_root=root,
+                    agent_memory_script="/tmp/fake-agent-context-engine.py",
+                )
+            )
+
+            assert_platform_refactor_fixture(
+                self,
+                "codex_hook_adapter.sh",
+                rendered,
+                root=root,
+                script_path="/tmp/fake-agent-context-engine.py",
+            )
+            self.assertIn('ROOT="' + str(root.resolve()) + '"', rendered)
+            self.assertIn('SCRIPT="/tmp/fake-agent-context-engine.py"', rendered)
+            self.assertNotIn("__AGENT_MEMORY_SCRIPT__", rendered)
+            self.assertNotIn("__AGENT_CONTEXT_ENGINE_ROOT__", rendered)
+
+    def test_cursor_hook_renderer_pins_installation_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.hook_rendering import (
+                build_cursor_project_hook_wrapper_spec,
+                render_cursor_project_hook_wrapper,
+            )
+
+            rendered = render_cursor_project_hook_wrapper(build_cursor_project_hook_wrapper_spec(agent_context_engine_root=root))
+
+            assert_platform_refactor_fixture(self, "cursor_hook_adapter.sh", rendered, root=root)
+            self.assertIn("ROOT='" + str(root.resolve()) + "'", rendered)
+            self.assertIn('HOOKS_STATE="$ROOT/memory/local/hooks-state.json"', rendered)
+            self.assertNotIn('ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"', rendered)
+
+    def test_wrapper_publication_name_renderer_matches_current_suffix_behavior(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.wrapper_publication import build_wrapper_command_name, normalize_wrapper_base_name
+
+            self.assertEqual(build_wrapper_command_name("codex-ace", "", "-ace"), "codex-ace")
+            self.assertEqual(build_wrapper_command_name("claude-ace", "test-", ""), "test-claude")
+            self.assertEqual(normalize_wrapper_base_name("gemini-ace"), "gemini")
+
+    def test_wrapper_command_name_resolution_uses_shared_renderer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import resolve_wrapper_command_name
+
+            self.assertEqual(resolve_wrapper_command_name("codex-ace", root=root), "codex-ace")
+
+    def test_wrapper_render_spec_exposes_backing_client_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.hook_rendering import build_wrapper_render_spec
+
+            spec = build_wrapper_render_spec("codex-ace", installation_root=root)
+
+            self.assertEqual(spec.wrapper_name, "codex-ace")
+            self.assertEqual(spec.backing_client_command, "codex")
+            self.assertEqual(spec.installation_root, root.resolve())
+
+    def test_bash_wrapper_renderer_accepts_wrapper_spec(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.adapters.wrapper_renderers import BashWrapperRenderer
+            from agent_context_engine.application.hook_rendering import build_wrapper_render_spec
+
+            rendered = BashWrapperRenderer().render_wrapper(
+                build_wrapper_render_spec("codex-ace", installation_root=root)
+            )
+
+            assert_platform_refactor_fixture(self, "codex_wrapper.sh", rendered, root=root)
+            self.assertIn("# wrapper=codex-ace", rendered)
+            self.assertIn("# backing_client_command=codex", rendered)
+            self.assertIn(f"# installation_root={root.resolve()}", rendered)
+
+    def test_instruction_renderer_preserves_current_agents_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.adapters.instruction_rendering import MarkdownInstructionRenderer
+            from agent_context_engine.application.agent_flow import build_agent_flow_contract
+
+            contract = build_agent_flow_contract(preferred_language="en", command_prefix="agent-context-engine")
+            rendered = MarkdownInstructionRenderer().render_agents_quick_path(contract)
+
+            self.assertIn("## Agent Context Engine Quick Path", rendered)
+            self.assertIn("Agent Context Engine command prefix: `agent-context-engine`", rendered)
+            self.assertIn("Canonical public CLI contract: `agent-context-engine` from `PATH`.", rendered)
+
+    def test_bash_hook_renderer_preserves_current_codex_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.hook_rendering import build_shell_hook_adapter_spec
+            from agent_context_engine.adapters.hook_adapter_rendering import BashHookAdapterRenderer
+
+            rendered = BashHookAdapterRenderer().render_shell_hook_adapter(
+                build_shell_hook_adapter_spec(
+                    "codex",
+                    agent_context_engine_root=root,
+                    agent_memory_script="/tmp/fake-agent-context-engine.py",
+                )
+            )
+
+            self.assertIn('ROOT="' + str(root.resolve()) + '"', rendered)
+            self.assertIn('SCRIPT="/tmp/fake-agent-context-engine.py"', rendered)
+
+    def test_scaffolded_hook_renderer_contract_reports_support_and_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.adapters.hook_adapter_rendering import PowerShellHookAdapterRenderer
+            from agent_context_engine.application.hook_rendering import (
+                build_cursor_project_hook_wrapper_spec,
+                build_shell_hook_adapter_spec,
+            )
+
+            renderer = PowerShellHookAdapterRenderer()
+            shell_spec = build_shell_hook_adapter_spec(
+                "codex",
+                agent_context_engine_root=root,
+                agent_memory_script="C:/agent-context-engine.py",
+                support_level="scaffolded",
+                evidence="public_docs",
+            )
+            cursor_spec = build_cursor_project_hook_wrapper_spec(
+                agent_context_engine_root=root,
+                support_level="scaffolded",
+                evidence="public_docs",
+            )
+
+            assert_scaffolded_renderer_contract(
+                self,
+                renderer.render_shell_hook_adapter(shell_spec),
+                renderer.render_shell_hook_adapter(shell_spec),
+                renderer_name="powershell",
+                support_level="scaffolded",
+                evidence="public_docs",
+                expected_lines=(
+                    "# scaffolded hook renderer only",
+                    "# client=codex",
+                    f"# root={root.resolve()}",
+                    "# script=C:/agent-context-engine.py",
+                ),
+            )
+            assert_scaffolded_renderer_contract(
+                self,
+                renderer.render_cursor_project_hook_wrapper(cursor_spec),
+                renderer.render_cursor_project_hook_wrapper(cursor_spec),
+                renderer_name="powershell",
+                support_level="scaffolded",
+                evidence="public_docs",
+                expected_lines=(
+                    "# scaffolded cursor hook wrapper only",
+                    f"# root={root.resolve()}",
+                ),
+            )
+
+    def test_scaffolded_wrapper_renderer_contract_reports_support_and_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.adapters.wrapper_renderers import PowerShellWrapperRenderer
+            from agent_context_engine.application.hook_rendering import build_wrapper_render_spec
+
+            renderer = PowerShellWrapperRenderer()
+            spec = build_wrapper_render_spec(
+                "codex-ace",
+                installation_root=root,
+                support_level="scaffolded",
+                evidence="public_docs",
+            )
+
+            assert_scaffolded_renderer_contract(
+                self,
+                renderer.render_wrapper(spec),
+                renderer.render_wrapper(spec),
+                renderer_name="powershell",
+                support_level="scaffolded",
+                evidence="public_docs",
+                expected_lines=(
+                    "# scaffolded wrapper renderer only",
+                    "# profile=windows",
+                    "# wrapper=codex-ace",
+                    "# backing_client_command=codex",
+                ),
+            )
+
+    def test_render_spec_builders_fail_explicitly_for_unsupported_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.hook_rendering import (
+                build_shell_hook_adapter_spec,
+                build_wrapper_render_spec,
+            )
+
+            with self.assertRaises(ValueError):
+                build_shell_hook_adapter_spec(
+                    "unsupported-client",
+                    agent_context_engine_root=root,
+                    agent_memory_script="/tmp/fake-agent-context-engine.py",
+                )
+
+            with self.assertRaises(ValueError):
+                build_wrapper_render_spec("unsupported-wrapper", installation_root=root)
+
+    def test_symlink_global_command_publisher_exposes_expected_operations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.adapters.global_command_publication import SymlinkGlobalCommandPublisher
+
+            publisher = SymlinkGlobalCommandPublisher()
+            self.assertTrue(hasattr(publisher, "create_symlink"))
+            self.assertTrue(hasattr(publisher, "remove_symlink"))
+
+    def test_platform_runtime_selection_keeps_windows_publication_scaffolded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.platform import PlatformFamily, platform_profile_for_family
+            from agent_context_engine.application.platform.runtime_selection import (
+                select_command_publisher,
+                select_executable_permission_adapter,
+                select_hook_adapter_renderer,
+                select_path_quoting_adapter,
+                select_wrapper_renderer,
+            )
+
+            windows_profile = platform_profile_for_family(PlatformFamily.WINDOWS)
+            publisher = select_command_publisher(windows_profile)
+            executable_permissions = select_executable_permission_adapter(windows_profile)
+            hook_renderer = select_hook_adapter_renderer(windows_profile)
+            path_quoting = select_path_quoting_adapter(windows_profile)
+            renderer = select_wrapper_renderer(windows_profile)
+
+            self.assertEqual(type(publisher).__name__, "CmdShimPublisher")
+            self.assertEqual(type(executable_permissions).__name__, "WindowsExecutablePermissionAdapter")
+            self.assertEqual(getattr(hook_renderer, "renderer_name", ""), "powershell")
+            self.assertEqual(type(path_quoting).__name__, "WindowsPathQuotingAdapter")
+            self.assertEqual(getattr(renderer, "renderer_name", ""), "powershell")
+
+    def test_platform_runtime_selection_keeps_linux_runtime_non_active(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.platform import PlatformFamily, platform_profile_for_family
+            from agent_context_engine.application.platform.runtime_selection import (
+                select_command_publisher,
+                select_executable_permission_adapter,
+                select_hook_adapter_renderer,
+                select_instruction_renderer,
+                select_path_quoting_adapter,
+                select_process_launch_adapter,
+                select_system_open_adapter,
+                select_workspace_binding_adapter,
+                select_wrapper_renderer,
+            )
+
+            linux_profile = platform_profile_for_family(PlatformFamily.LINUX)
+            publisher = select_command_publisher(linux_profile)
+            instruction_renderer = select_instruction_renderer(linux_profile)
+            executable_permissions = select_executable_permission_adapter(linux_profile)
+            hook_renderer = select_hook_adapter_renderer(linux_profile)
+            path_quoting = select_path_quoting_adapter(linux_profile)
+            process_launch = select_process_launch_adapter(linux_profile)
+            system_open = select_system_open_adapter(linux_profile)
+            workspace_binding = select_workspace_binding_adapter(linux_profile)
+            renderer = select_wrapper_renderer(linux_profile)
+
+            self.assertEqual(getattr(instruction_renderer, "support_level", ""), "scaffolded")
+            self.assertEqual(getattr(hook_renderer, "renderer_name", ""), "bash")
+            self.assertEqual(getattr(hook_renderer, "support_level", ""), "scaffolded")
+            self.assertEqual(getattr(renderer, "renderer_name", ""), "bash")
+            self.assertEqual(getattr(renderer, "support_level", ""), "scaffolded")
+            self.assertEqual(getattr(path_quoting, "support_level", ""), "scaffolded")
+            self.assertEqual(getattr(process_launch, "support_level", ""), "scaffolded")
+            self.assertEqual(getattr(workspace_binding, "support_level", ""), "scaffolded")
+            self.assertEqual(getattr(executable_permissions, "support_level", ""), "scaffolded")
+            self.assertEqual(getattr(system_open, "support_level", ""), "scaffolded")
+            self.assertFalse(system_open.open_local_path(root / "missing.txt"))
+            with self.assertRaises(NotImplementedError):
+                publisher.create_symlink(root / "bin" / "ace", root / "target", force=False)
+
+    def test_runtime_selection_summary_surfaces_windows_scaffolded_stack(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.platform import PlatformFamily, platform_profile_for_family
+            from agent_context_engine.application.platform.runtime_summary import runtime_selection_summary
+
+            summary = runtime_selection_summary(platform_profile_for_family(PlatformFamily.WINDOWS))
+
+            self.assertIsInstance(summary.get("capability_matrix"), dict)
+            self.assertEqual((summary.get("hook_renderer") or {}).get("name"), "powershell")
+            self.assertEqual((summary.get("wrapper_renderer") or {}).get("name"), "powershell")
+            self.assertEqual((summary.get("command_publisher") or {}).get("name"), "CmdShimPublisher")
+            self.assertEqual((summary.get("executable_permission_adapter") or {}).get("name"), "WindowsExecutablePermissionAdapter")
+            self.assertEqual((summary.get("path_quoting_adapter") or {}).get("name"), "WindowsPathQuotingAdapter")
+            self.assertEqual((summary.get("instruction_renderer") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("system_open_adapter") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("system_open_adapter") or {}).get("adapter_name"), "windows_system_open")
+            self.assertEqual((summary.get("scheduler_installer") or {}).get("support_level"), "scaffolded")
+
+    def test_runtime_selection_summary_surfaces_linux_scaffolded_non_active_stack(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.platform import PlatformFamily, platform_profile_for_family
+            from agent_context_engine.application.platform.runtime_summary import runtime_selection_summary
+
+            summary = runtime_selection_summary(platform_profile_for_family(PlatformFamily.LINUX))
+
+            self.assertEqual((summary.get("instruction_renderer") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("hook_renderer") or {}).get("name"), "bash")
+            self.assertEqual((summary.get("hook_renderer") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("wrapper_renderer") or {}).get("name"), "bash")
+            self.assertEqual((summary.get("wrapper_renderer") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("command_publisher") or {}).get("adapter_name"), "scaffolded_publication")
+            self.assertEqual((summary.get("command_publisher") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("system_open_adapter") or {}).get("adapter_name"), "scaffolded_system_open")
+            self.assertEqual((summary.get("system_open_adapter") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("process_launch_adapter") or {}).get("adapter_name"), "scaffolded_process")
+            self.assertEqual((summary.get("workspace_binding_adapter") or {}).get("adapter_name"), "scaffolded_binding")
+            self.assertEqual((summary.get("executable_permission_adapter") or {}).get("adapter_name"), "scaffolded_noop")
+            self.assertEqual((summary.get("path_quoting_adapter") or {}).get("adapter_name"), "posix_shell_scaffolded")
+
+    def test_runtime_selection_summary_surfaces_system_open_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.platform import PlatformFamily, platform_profile_for_family
+            from agent_context_engine.application.platform.runtime_summary import runtime_selection_summary
+
+            summary = runtime_selection_summary(platform_profile_for_family(PlatformFamily.MACOS))
+
+            self.assertEqual((summary.get("system_open_adapter") or {}).get("name"), "DefaultSystemOpenAdapter")
+            self.assertEqual((summary.get("system_open_adapter") or {}).get("support_level"), "supported")
+            self.assertEqual((summary.get("command_publisher") or {}).get("support_level"), "supported")
+            self.assertEqual((summary.get("process_launch_adapter") or {}).get("name"), "SubprocessLaunchAdapter")
+            self.assertEqual((summary.get("executable_permission_adapter") or {}).get("name"), "ChmodExecutablePermissionAdapter")
+            self.assertEqual((summary.get("path_quoting_adapter") or {}).get("name"), "PosixShellPathQuotingAdapter")
+
+    def test_runtime_selection_summary_surfaces_windows_process_launch_scaffolded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.platform import PlatformFamily, platform_profile_for_family
+            from agent_context_engine.application.platform.runtime_summary import runtime_selection_summary
+
+            summary = runtime_selection_summary(platform_profile_for_family(PlatformFamily.WINDOWS))
+
+            self.assertEqual((summary.get("process_launch_adapter") or {}).get("name"), "WindowsProcessLaunchAdapter")
+            self.assertEqual((summary.get("process_launch_adapter") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("workspace_binding_adapter") or {}).get("name"), "WindowsWorkspaceBindingAdapter")
+            self.assertEqual((summary.get("workspace_binding_adapter") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("executable_permission_adapter") or {}).get("support_level"), "scaffolded")
+            self.assertEqual((summary.get("path_quoting_adapter") or {}).get("support_level"), "scaffolded")
+
+    def test_doctor_reports_scaffolded_platform_runtime_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.diagnostics import run_doctor_checks
+            from agent_context_engine.application.instance_profile import default_installation_profile, save_installation_profile
+            from agent_context_engine.application.platform import PlatformFamily, platform_profile_for_family, platform_profile_to_dict
+
+            profile = default_installation_profile()
+            profile["platform"] = "windows"
+            profile["platform_profile"] = platform_profile_to_dict(platform_profile_for_family(PlatformFamily.WINDOWS))
+            save_installation_profile(root, profile)
+
+            lines, _failures = run_doctor_checks(
+                check_codex_features=False,
+                relocation_report_requested=False,
+            )
+            output = "\n".join(lines)
+
+            self.assertIn("warn  platform profile: windows support=scaffolded evidence=public_docs", output)
+            self.assertIn("ok  runtime capabilities:", output)
+            self.assertIn("warn  hook renderer: powershell support=scaffolded evidence=public_docs", output)
+            self.assertIn("warn  wrapper renderer: powershell support=scaffolded evidence=public_docs", output)
+            self.assertIn("warn  command publisher: CmdShimPublisher support=scaffolded evidence=public_docs", output)
+            self.assertIn("warn  scheduler installer: windows_task_scheduler support=scaffolded evidence=public_docs", output)
+
     def test_log_hook_skips_when_workspace_binding_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -11152,8 +11839,8 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("beforeSubmitPrompt", hooks["hooks"])
             self.assertEqual(hooks["hooks"]["beforeSubmitPrompt"][0]["command"], "./.cursor/hooks/hook_adapter.sh")
             self.assertIn(f"ROOT='{root.resolve()}'", script_path.read_text(encoding="utf-8"))
-            self.assertIn(str(SCRIPT.resolve()), script_path.read_text(encoding="utf-8"))
-            self.assertIn("AGENT_MEMORY_INTERNAL_RUN", script_path.read_text(encoding="utf-8"))
+            self.assertIn('SCRIPT="$ROOT/scripts/agent_context_engine.py"', script_path.read_text(encoding="utf-8"))
+            self.assertIn("AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC", script_path.read_text(encoding="utf-8"))
 
             status = run_cli(root, "cursor-status", extra_env=env)
             self.assertEqual(status.returncode, 0, status.stderr)
@@ -11188,7 +11875,10 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn(f"cd '{root.resolve()}' && ./docs/skills/agent-context-engine/scripts/agent-context-engine", target_hook_entry)
             self.assertIn("Do not inspect `~/.cursor/projects/...`", target_hook_entry)
             self.assertIn("use `last` first and stop there", target_hook_entry)
-            self.assertIn("monitor --runner codex --replace-existing", target_hook_entry)
+            self.assertIn(
+                "monitor --runner codex --host 127.0.0.1 --port 8787 --language en --replace-existing --no-open",
+                target_hook_entry,
+            )
             target_status = run_cli(root, "cursor-status", "--target", str(target), extra_env=env)
             self.assertEqual(target_status.returncode, 0, target_status.stderr)
             self.assertIn("active events: 9/9", target_status.stdout)
@@ -11882,16 +12572,30 @@ print("{}")
             root = Path(tmp)
             load_agent_memory(root)
             from agent_context_engine.adapters.runners.session_metadata import native_resume_command
+            from agent_context_engine.application.sessions.commands import resume_command as sessions_resume_command
             from agent_context_engine.application.installation import merge_installation_profile
 
-            workdir = str(root)
+            workdir = str(root / "folder with spaces")
             merge_installation_profile(root, wrapper_naming={"prefix": "exp-", "suffix": "-v2"})
             self.assertEqual(native_resume_command("codex", "codex-session", workdir, root=root), "exp-codex-v2 resume codex-session")
             self.assertEqual(native_resume_command("claude", "claude-session", workdir, root=root), "exp-claude-v2 --resume claude-session")
-            self.assertIn("cursor-agent --resume 'cursor-session'", native_resume_command("cursor", "cursor-session", workdir) or "")
-            self.assertIn("agy --conversation 'anti-session'", native_resume_command("antigravity", "anti-session", workdir) or "")
-            self.assertIn("opencode --session 'open-session'", native_resume_command("opencode", "open-session", workdir) or "")
+            self.assertEqual(
+                native_resume_command("cursor", "cursor-session", workdir) or "",
+                f"cd '{workdir}' && cursor-agent --resume 'cursor-session'",
+            )
+            self.assertEqual(
+                native_resume_command("antigravity", "anti-session", workdir) or "",
+                f"cd '{workdir}' && agy --conversation 'anti-session'",
+            )
+            self.assertEqual(
+                native_resume_command("opencode", "open-session", workdir) or "",
+                f"cd '{workdir}' && opencode --session 'open-session'",
+            )
             self.assertIsNone(native_resume_command("gemini", "gemini-session", workdir))
+            self.assertEqual(
+                sessions_resume_command({"client_type": "codex", "session_id": "codex session", "native_resume_command": ""}),
+                "exp-codex-v2 resume 'codex session'",
+            )
 
     def test_integration_helpers_report_opencode_gemini_and_antigravity_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -12036,6 +12740,80 @@ print("{}")
             self.assertEqual(cursor_item["activated_project_count"], 1)
             self.assertEqual(cursor_item["activated_projects"][0]["path"], str(target.resolve()))
             self.assertEqual(cursor_item["activated_projects"][0]["hooks_state"], "enabled")
+
+    def test_cursor_enable_persists_external_workspace_root_in_installation_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "external-cursor-project"
+            target.mkdir(parents=True, exist_ok=True)
+            load_agent_memory(root)
+            fake_bin = install_fake_headless_runner(root)
+
+            enable = run_cli(
+                root,
+                "cursor-enable",
+                "--target",
+                str(target),
+                "--installation-root",
+                str(root),
+                extra_env={"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")},
+            )
+            self.assertEqual(enable.returncode, 0, enable.stderr)
+
+            profile = json.loads((root / "memory" / "local" / "installation-profile.json").read_text(encoding="utf-8"))
+            self.assertEqual(profile["workspace_roots"]["cursor"], [str(target.resolve())])
+
+    def test_queue_reservation_reverts_covered_session_to_pending_before_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            am = load_agent_memory(root)
+            conn = am.connect()
+            with conn:
+                conn.execute(
+                    """
+                    insert into sessions (
+                      session_id, client_type, project_id, cwd, started_at, last_event_at,
+                      status, summary_status, dream_status, last_event_seq, last_reserved_event_seq,
+                      last_summary_event_seq, last_dream_event_seq
+                    ) values (
+                      'queued-covered-session', 'codex', 'demoProject', ?, ?, ?,
+                      'open', 'summarized', 'dreamed', 1, 1, 1, 1
+                    )
+                    """,
+                    (str(root), "2026-06-25T10:00:00+00:00", "2026-06-25T10:00:00+00:00"),
+                )
+            conn.close()
+
+            queued = run_cli(
+                root,
+                "log-hook",
+                "--client",
+                "codex",
+                "--mode",
+                "queue",
+                stdin={
+                    "session_id": "queued-covered-session",
+                    "hook_event_name": "Stop",
+                    "cwd": str(root),
+                },
+                extra_env={"AGENT_MEMORY_TEST_AUTO_REPLAY": "0"},
+            )
+            self.assertEqual(queued.returncode, 0, queued.stdout + queued.stderr)
+
+            conn = am.connect()
+            session = conn.execute(
+                """
+                select summary_status, dream_status, last_event_seq, last_reserved_event_seq
+                from sessions
+                where session_id = 'queued-covered-session'
+                """
+            ).fetchone()
+            conn.close()
+            self.assertIsNotNone(session)
+            self.assertEqual(session["summary_status"], "summary_pending")
+            self.assertEqual(session["dream_status"], "dream_pending")
+            self.assertEqual(session["last_event_seq"], 1)
+            self.assertEqual(session["last_reserved_event_seq"], 2)
 
     def test_cursor_disable_keeps_project_in_integration_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

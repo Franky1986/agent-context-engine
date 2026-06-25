@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 
+from ....application.platform import current_platform_profile
+from ....application.platform.runtime_selection import select_system_open_adapter
 from ....application.monitoring.monitor.analysis import (
     build_session_analysis_report_for_selector,
     write_session_analysis_report_html,
@@ -15,43 +15,7 @@ from ....infrastructure.config import json_dumps, session_short
 
 
 def _try_open_with_system_command(path: Path) -> bool:
-    """Try to open a local file in the system browser using direct commands."""
-    uri = path.as_uri()
-    command_candidates: list[list[str]] = []
-
-    if sys.platform.startswith("darwin"):
-        if shutil.which("open") is not None:
-            command_candidates.append(["open", str(path)])
-    elif sys.platform.startswith("linux"):
-        if shutil.which("xdg-open") is not None:
-            command_candidates.append(["xdg-open", uri])
-        elif shutil.which("gio") is not None:
-            command_candidates.append(["gio", "open", uri])
-    elif sys.platform.startswith("win"):
-        command_candidates.append(["cmd", "/c", f'start "" "{uri}"'])
-
-    for command in command_candidates:
-        executable = command[0].split(" ")[0]
-        if executable and " " in executable:
-            # Safety for the Windows fallback shell form.
-            executable = "cmd"
-        if executable and shutil.which(executable) is None and executable != "cmd":
-            continue
-
-        try:
-            result = subprocess.run(
-                command,
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=3,
-            )
-            if result.returncode == 0:
-                return True
-        except Exception:
-            continue
-
-    return False
+    return select_system_open_adapter(current_platform_profile()).open_local_path(path)
 
 
 def _open_html_report(path: Path) -> None:

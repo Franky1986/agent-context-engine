@@ -10,17 +10,24 @@ from pathlib import Path
 from typing import Any
 
 from ..instance_profile import resolve_runner_wrapper_name
-from ...infrastructure.config import ROOT, detect_project, json_dumps, session_short, sh_quote
+from ...infrastructure.config import ROOT, detect_project, json_dumps, session_short
 from ...infrastructure.db import connect
 from ...adapters.runners.claude import claude_session_title, sync_transcript_claude
 from ...adapters.runners.codex import codex_thread_name, discover_codex_transcripts_for_folder, iter_codex_transcript_messages, sync_transcript_metrics
 from ...adapters.runners.session_metadata import refresh_session_row_metadata
 
 
+def _quote_platform_value(value: str | Path) -> str:
+    from ..platform import current_platform_profile
+    from ..platform.runtime_selection import select_path_quoting_adapter
+
+    return select_path_quoting_adapter(current_platform_profile()).quote(str(value))
+
+
 def resume_command(session: sqlite3.Row) -> str:
     if session["client_type"] == "codex":
         wrapper_name = resolve_runner_wrapper_name("codex", root=ROOT)
-        return f"{wrapper_name} resume {sh_quote(session['session_id'])}"
+        return f"{wrapper_name} resume {_quote_platform_value(session['session_id'])}"
     return session["native_resume_command"] or f"# unsupported client: {session['client_type']} {session['session_id']}"
 
 

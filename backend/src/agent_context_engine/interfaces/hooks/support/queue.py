@@ -151,6 +151,8 @@ def reserve_queue_slot(
                     native_resume_command = coalesce(?, native_resume_command),
                     last_event_at = ?,
                     started_at = coalesce(started_at, ?),
+                    summary_status = 'summary_pending',
+                    dream_status = 'dream_pending',
                     last_reserved_event_seq = ?,
                     preferred_dream_runner = coalesce(preferred_dream_runner, ?)
                 where session_id = ?

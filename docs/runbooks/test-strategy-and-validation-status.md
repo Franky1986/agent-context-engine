@@ -369,6 +369,11 @@ Example:
   for reconciliation and semantic parsing errors
 - install/install-discovery and integration flows are now documented as multi-scenario:
   takeover, isolated, and cursor-specific activation with explicit `--background-runner`
+- isolated install `agent-context-engine-refactor-2` validated target-local runtime
+  storage, local SQLite, and LaunchAgent wiring
+- retrieval smoke on `refactor-2` succeeded for both `search` and `retrieve`
+- Cursor activation for `/Users/frankrichter/projects/test` succeeded with
+  `--background-runner claude`, and resulting Cursor sessions were summarized and dreamed
 
 ## Recommended Depth
 
@@ -397,6 +402,8 @@ Change set under test:
 - installation integration tests are now a separate `install-integration-suite`
   in `./scripts/check`
 - dream JSON extraction and fallback hardening already included in this branch
+- isolated install/runtime validation now includes `agent-context-engine-refactor-2`
+  with local `memory/`
 
 Status legend:
 
@@ -416,16 +423,21 @@ Status legend:
 ### B. CLI And Retrieval Basics
 
 - [x] `last --limit 10`, `status --limit 10`, `dream-queue-status`, and `dream-v2-inspect` worked against `test29`.
-- [ ] `search`, `retrieve`, `session-start-context`, `repo-context --list`, and `personal-context --list` still need a dedicated smoke pass on the current branch.
+- [x] `search "deutsche häuser" --limit 5` on `refactor-2` returned the expected fresh session/window artifacts.
+- [x] `retrieve "Was wurde in den letzten Sessions über deutsche Häuser geschrieben?" --limit 5` on `refactor-2` succeeded and persisted a retrieval run.
+- [ ] `session-start-context`, `repo-context --list`, and `personal-context --list` still need a dedicated smoke pass on the current branch.
 
 ### C. Wrappers And Integrations
 
 - [x] `cursor-enable --target ... --installation-root ...` wrote installation-root-aware bindings for `pr-llm-service`.
+- [x] `cursor-enable --target /Users/frankrichter/projects/test --installation-root /Users/frankrichter/projects/agent-context-engine-refactor-2 --background-runner claude` succeeded.
 - [x] generated Cursor hook files now carry the effective launch workdir so routing resolves against the actual project path.
 - [x] `cursor-status --target /Users/frankrichter/projects/pr-llm-service` reported active hooks and one recorded session.
+- [x] `cursor-status --target /Users/frankrichter/projects/test` on `refactor-2` reported `9/9` active events, `background runner: claude`, and `background readiness: ready`.
 - [x] `/api/integrations` for `test29` reported one activated Cursor project with `hooks_state=enabled` and `hooks_enabled=true`.
 - [x] session list now shows `cursor` as origin client with separate dream runner metadata, and prefers `last_workdir` in session table paths.
 - [x] session rows now render explicit origin/dream badges for quick provenance checks.
+- [x] install-wide `doctor` / `check-installation` now mirror external Cursor project activations into `workspace_roots.cursor`, so the install-wide view matches `cursor-status --target ...`.
 - [ ] full runner matrix for `codex-ace`, `claude-ace`, `agy-ace`, `gemini-ace`, and `opencode-ace` from dedicated project roots is still open.
 
 ### D. Hook Capture
@@ -455,7 +467,9 @@ Status legend:
   - semantic extraction: prompt `55153`, completion `511`
   - reconciliation: prompt `26210`, completion `468`
 - [x] both successful runs wrote audit artifacts, including prompt manifests, `memory_changes`, `review_needed`, and `summary`.
-- [ ] `status --limit 10` still showed the Cursor session as `dream_pending` even though the queue entry succeeded. This is an open state-drift bug.
+- [x] isolated install `refactor-2` produced two Cursor sessions with `summary_status=summarized`, `dream_status=dreamed`, and `preferred_dream_runner=claude`.
+- [x] stale shared-runtime dream state was recoverable through `scheduler-run --dream-enqueue-limit 0 --dream-queue-limit 0 --runner same-as-session --no-sync-neo4j`, leaving `running dreams: 0`.
+- [x] queued follow-up hook events now revert covered session rows back to `dream_pending` immediately; any remaining non-zero `pending dreams` counts reflect real uncovered event ranges rather than stale row state.
 - [ ] antigravity, gemini, and opencode dream paths still need revalidation after the JSON hardening work.
 
 ### G. Graph And Semantic Persistence
@@ -468,7 +482,9 @@ Status legend:
 ### H. Monitor, LaunchAgent, And Scheduler
 
 - [x] recent isolated installs started a monitor and loaded a LaunchAgent.
+- [x] `launchagent-status --verbose` for `refactor-2` showed the isolated local env file and `--runner same-as-session --graph-runner same-as-session` defaults for the normal install path.
 - [x] `dream-queue-status` in `test29` reported `queued=0 running=0 failed=0 terminal_failed=0 succeeded=2`.
+- [x] `dream-queue-status` in `refactor-2` reported `queued=0 running=0 failed=0 terminal_failed=0 succeeded=3` after the isolated validation runs.
 - [x] `test29` monitor API confirmed the activated Cursor project and its hook state.
 - [ ] a fresh `/api/status` drift audit after the latest monitor UI changes is still open.
 - [ ] the Sessions UI change and the Cursor aggregate card should still be checked visually in a live monitor session.
@@ -482,6 +498,7 @@ Status legend:
 
 - [x] isolated installs no longer rely on shared-global takeover as the intended path.
 - [x] integration bindings now carry the active `installation_root`, which reduces cross-install drift for Cursor-style project activation.
+- [x] one shared install (`refactor-1`) and one isolated install (`refactor-2`) were both exercised without reusing the same runtime root.
 - [ ] one clean three-install matrix still needs to be executed on the latest code:
   - `test-main`
   - `test-takeover`
@@ -489,6 +506,26 @@ Status legend:
 - [ ] `agent-context-engine`, `ace`, `agy-ace`, and `opencode-ace` should still be checked from all three roots after that matrix run.
 
 ## Observed Recent Runner Snapshot
+
+From `refactor-2`:
+
+- codex session `019efedc-d41a-7410-983b-89bfda283575`
+  - summary: `summarized`
+  - current dream status: `dream_pending`
+  - one earlier queue entry succeeded
+  - `pending dreams` remained non-zero because later event coverage still lagged `last_event_seq`
+
+- cursor session `99979a47-1e71-4595-b0b0-e63543c1859e`
+  - project: `/Users/frankrichter/projects/test`
+  - summary: `summarized`
+  - dream status: `dreamed`
+  - preferred dream runner: `claude`
+
+- cursor session `746d43b2-371d-4d7b-9cd7-2f77c04669a1`
+  - project: `/Users/frankrichter/projects/test`
+  - summary: `summarized`
+  - dream status: `dreamed`
+  - preferred dream runner: `claude`
 
 From `test29`:
 
@@ -504,5 +541,7 @@ From `test29`:
   - `status --limit 10` still showed `dream=dream_pending`
   - dream queue entry for that session succeeded
 
-This means the core Cursor activation path is working, but at least one status
-projection still needs reconciliation.
+This means the core Cursor activation path is working, install-wide activation
+visibility now stays aligned with target-local Cursor status, and any remaining
+`pending dreams` counts should be read as uncovered event ranges rather than
+stale session-row state.

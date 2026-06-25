@@ -92,10 +92,9 @@ from ...application.graph import (
 )
 from ..hooks.main import cmd_recover_hook_queue_failures, cmd_replay_hook_queue, log_hook
 from ...application.personal import cmd_personal_accept, cmd_personal_audit, cmd_personal_init, cmd_personal_list, cmd_personal_proposals, cmd_personal_propose, cmd_personal_show
+from ...application.instance_profile import default_launchagent_profile
 from ...application.scheduler import (
-    DEFAULT_ENV_FILE,
     DEFAULT_LAUNCHD_PATH,
-    DEFAULT_LABEL,
     cmd_install_launchagent,
     cmd_launchagent_status,
     cmd_scheduler_run,
@@ -135,6 +134,7 @@ def _cmd_monitor_lazy(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-context-engine")
+    launchagent_defaults = default_launchagent_profile()
     sub = parser.add_subparsers(dest="command", required=True)
 
     log = sub.add_parser("log-hook")
@@ -355,7 +355,7 @@ def build_parser() -> argparse.ArgumentParser:
     dream.add_argument("--runner-timeout", type=int, default=1800)
     dream.add_argument("--pipeline-version", type=int, choices=[2], help="Only pipeline version 2 is supported")
     dream.add_argument("--dry-run", action="store_true", help="For pipeline v2, write run artifacts without durable semantic/session persistence")
-    dream.add_argument("--graph-runner", default="codex")
+    dream.add_argument("--graph-runner", default="same-as-session")
     dream.add_argument("--graph-runner-model")
     dream.add_argument("--fix-windows", action=argparse.BooleanOptionalAction, default=True)
     dream.add_argument("--window-grace-minutes", type=int, default=5)
@@ -799,7 +799,7 @@ def build_parser() -> argparse.ArgumentParser:
     scheduler_run.add_argument("--runner-model")
     scheduler_run.add_argument("--runner-timeout", type=int, default=1800)
     scheduler_run.add_argument("--pipeline-version", type=int, choices=[2], help="Only pipeline version 2 is supported")
-    scheduler_run.add_argument("--graph-runner", default="codex")
+    scheduler_run.add_argument("--graph-runner", default="same-as-session")
     scheduler_run.add_argument("--graph-runner-model")
     scheduler_run.add_argument("--sync-neo4j", action=argparse.BooleanOptionalAction, default=True)
     scheduler_run.add_argument("--neo4j-sync-limit", type=int, default=5)
@@ -812,13 +812,13 @@ def build_parser() -> argparse.ArgumentParser:
     scheduler_run.set_defaults(func=cmd_scheduler_run)
 
     install_launchagent = sub.add_parser("install-launchagent")
-    install_launchagent.add_argument("--label", default=DEFAULT_LABEL)
+    install_launchagent.add_argument("--label", default=launchagent_defaults["label"])
     install_launchagent.add_argument("--interval", type=int, default=900)
     install_launchagent.add_argument("--grace-minutes", type=int, default=5)
     install_launchagent.add_argument("--runner", default="same-as-session")
     install_launchagent.add_argument("--runner-model")
     install_launchagent.add_argument("--runner-timeout", type=int, default=1800)
-    install_launchagent.add_argument("--graph-runner", default="codex")
+    install_launchagent.add_argument("--graph-runner", default="same-as-session")
     install_launchagent.add_argument("--graph-runner-model")
     install_launchagent.add_argument("--sync-neo4j", action=argparse.BooleanOptionalAction, default=False)
     install_launchagent.add_argument("--neo4j-sync-limit", type=int, default=5)
@@ -829,19 +829,19 @@ def build_parser() -> argparse.ArgumentParser:
     install_launchagent.add_argument("--dream-queue-limit", type=int, default=5)
     install_launchagent.add_argument("--path", default=DEFAULT_LAUNCHD_PATH)
     install_launchagent.add_argument("--plist-path")
-    install_launchagent.add_argument("--env-file", default=DEFAULT_ENV_FILE)
+    install_launchagent.add_argument("--env-file", default=launchagent_defaults["env_file"])
     install_launchagent.add_argument("--run-at-load", action="store_true")
     install_launchagent.add_argument("--load", action="store_true")
     install_launchagent.set_defaults(func=cmd_install_launchagent)
 
     uninstall_launchagent = sub.add_parser("uninstall-launchagent")
-    uninstall_launchagent.add_argument("--label", default=DEFAULT_LABEL)
+    uninstall_launchagent.add_argument("--label", default=launchagent_defaults["label"])
     uninstall_launchagent.add_argument("--plist-path")
     uninstall_launchagent.add_argument("--unload", action=argparse.BooleanOptionalAction, default=True)
     uninstall_launchagent.set_defaults(func=cmd_uninstall_launchagent)
 
     launchagent_status = sub.add_parser("launchagent-status")
-    launchagent_status.add_argument("--label", default=DEFAULT_LABEL)
+    launchagent_status.add_argument("--label", default=launchagent_defaults["label"])
     launchagent_status.add_argument("--plist-path")
     launchagent_status.add_argument("--verbose", action="store_true")
     launchagent_status.set_defaults(func=cmd_launchagent_status)

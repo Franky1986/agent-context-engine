@@ -25,7 +25,7 @@ graph repair, sync, cleanup, and recovery.
 
 ## Dependencies / Ports
 - SQLite scheduler adapter.
-- LaunchAgent adapter for OS integration.
+- Platform-selected scheduler installation adapter for OS integration.
 - Locking infrastructure.
 - Application services for dream, graph, summaries, and ingestion.
 

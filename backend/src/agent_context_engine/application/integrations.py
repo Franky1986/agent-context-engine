@@ -11,7 +11,7 @@ from typing import Any
 from ..adapters.runners.cursor import CURSOR_EVENTS, cursor_hook_entry, cursor_paths, enable_cursor_hooks, is_agent_memory_cursor_hook, load_cursor_hooks, write_cursor_hooks
 from .dreaming.runners import runner_auth_status
 from .hooks_state import hook_runner_status
-from ..infrastructure.config import ANTIGRAVITY_DREAM_MODEL, CLAUDE_DREAM_MODEL, CODEX_DREAM_MODEL, OPENCODE_DREAM_MODEL, ROOT, SCRIPT_PATH, SKILL_ROOT, sh_quote
+from ..infrastructure.config import ANTIGRAVITY_DREAM_MODEL, CLAUDE_DREAM_MODEL, CODEX_DREAM_MODEL, OPENCODE_DREAM_MODEL, ROOT, SCRIPT_PATH, SKILL_ROOT
 from .instance_profile import agent_memory_cli_for_root, load_installation_profile, preferred_agent_memory_cli_for_root, resolve_runner_wrapper_name, resolve_wrapper_command_name
 
 
@@ -23,8 +23,22 @@ INTEGRATION_PROJECTS_REGISTRY = Path("memory") / "status" / "integration-project
 INTEGRATION_HISTORY_PATH = Path("memory") / "status" / "integration-history.jsonl"
 
 
+def _quote_platform_path(value: str | Path) -> str:
+    from .platform import current_platform_profile
+    from .platform.runtime_selection import select_path_quoting_adapter
+
+    return select_path_quoting_adapter(current_platform_profile()).quote(str(value))
+
+
+def _mark_platform_executable(path: Path) -> None:
+    from .platform import current_platform_profile
+    from .platform.runtime_selection import select_executable_permission_adapter
+
+    select_executable_permission_adapter(current_platform_profile()).ensure_executable(path)
+
+
 def _root_prefixed(command: str, *, root: Path = ROOT) -> str:
-    return f"cd {sh_quote(str(root.resolve()))} && {command}"
+    return f"cd {_quote_platform_path(root.resolve())} && {command}"
 
 
 def _agent_memory_cli_display(root: Path = ROOT) -> str:
@@ -168,163 +182,18 @@ def _effective_binding_hooks_state(local_state: str, binding_state: str) -> tupl
 def integration_hook_command(*, client: str, action: str, target_root: Path | None = None, root: Path = ROOT) -> str:
     command = f"{_agent_memory_cli_display(root)} integration-hooks --client {client} --action {action}"
     if target_root is not None:
-        command += f" --target {sh_quote(str(target_root.resolve()))}"
+        command += f" --target {_quote_platform_path(target_root.resolve())}"
     return _root_prefixed(command, root=root)
 
 
 def _cursor_hook_wrapper(memory_root: Path) -> str:
-    return f"""#!/usr/bin/env bash
-set -euo pipefail
-ROOT={sh_quote(str(memory_root.resolve()))}
-SCRIPT={sh_quote(str(Path(SCRIPT_PATH).resolve()))}
-WORKSPACE_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
-HOOKS_STATE="$ROOT/memory/local/hooks-state.json"
-AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${{AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}}"
-AGENT_MEMORY_LAUNCH_CWD="${{AGENT_MEMORY_LAUNCH_CWD:-$WORKSPACE_ROOT}}"
-export AGENT_MEMORY_LAUNCH_CWD
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-TMP="$(mktemp)"
-OUT="$(mktemp)"
-ERR="$(mktemp)"
-trap 'rm -f "$TMP" "$OUT" "$ERR"' EXIT
-cat > "$TMP"
+    from .hook_rendering import build_cursor_project_hook_wrapper_spec
+    from .platform import current_platform_profile
+    from .platform.runtime_selection import select_hook_adapter_renderer
 
-EVENT="$(python3 - "$TMP" <<'PY'
-import json, sys
-try:
-    with open(sys.argv[1], "r", encoding="utf-8", errors="replace") as handle:
-        data = json.load(handle)
-except Exception:
-    data = {{}}
-for key in ("hook_event_name", "event_name", "hookName", "hook_name", "event", "type"):
-    if data.get(key):
-        print(data[key])
-        break
-PY
-)"
-
-if [ "${{AGENT_MEMORY_DREAM:-0}}" = "1" ] || [ "${{AGENT_MEMORY_INTERNAL_RUN:-0}}" = "1" ]; then
-  printf '{{}}\\n'
-  exit 0
-fi
-
-if ! python3 - "$HOOKS_STATE" cursor <<'PY'
-import json
-import sys
-from pathlib import Path
-
-
-path = Path(sys.argv[1])
-runner = sys.argv[2]
-if not path.exists():
-    raise SystemExit(0)
-try:
-    state = json.loads(path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
-if state.get("enabled") is False:
-    raise SystemExit(1)
-runner_state = state.get("runners", {{}}).get(runner)
-if isinstance(runner_state, dict) and runner_state.get("enabled") is False:
-    raise SystemExit(1)
-if runner_state is False:
-    raise SystemExit(1)
-raise SystemExit(0)
-PY
-then
-  case "$EVENT" in
-    beforeSubmitPrompt)
-      printf '{{"continue":true}}\\n'
-      ;;
-    beforeShellExecution|beforeMCPExecution|beforeReadFile)
-      printf '{{"permission":"allow"}}\\n'
-      ;;
-    *)
-      printf '{{}}\\n'
-      ;;
-  esac
-  exit 0
-fi
-
-set +e
-cd "$ROOT"
-env AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="$AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC" python3 "$SCRIPT" log-hook --client cursor --detect-version \\
-  < "$TMP" \\
-  > "$OUT" \\
-  2> "$ERR"
-CODE=$?
-set -e
-
-python3 - "$OUT" "$ERR" "$CODE" "$EVENT" <<'PY'
-import json
-import sys
-
-stdout_path, stderr_path, code_text, event = sys.argv[1:5]
-try:
-    stdout = open(stdout_path, "r", encoding="utf-8", errors="replace").read()
-except Exception:
-    stdout = ""
-try:
-    stderr = open(stderr_path, "r", encoding="utf-8", errors="replace").read()
-except Exception:
-    stderr = ""
-code = int(code_text or "0")
-
-def context_message() -> str:
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            value = json.loads(line)
-        except Exception:
-            continue
-        context = value.get("hookSpecificOutput", {{}}).get("additionalContext", "")
-        if context:
-            return str(context)
-    return ""
-
-def block_message() -> str:
-    text = stderr.strip()
-    if text:
-        return text[-6000:]
-    return "Agent Context Engine blocked this tool use by policy. Open agent-monitor or run `./scripts/agent-context-engine risk list --limit 10` for details."
-
-def with_message(response: dict, message: str, *, for_agent: bool = True) -> dict:
-    if not message:
-        return response
-    response["message"] = message
-    response["user_message"] = message
-    response["userMessage"] = message
-    if for_agent:
-        response["agent_message"] = message
-        response["agentMessage"] = message
-        response["followup_message"] = message
-    return response
-
-if event == "beforeSubmitPrompt":
-    if code == 2:
-        print(json.dumps(with_message({{"continue": False}}, block_message()), ensure_ascii=False))
-        sys.exit(2)
-    message = context_message()
-    if message:
-        print(json.dumps(with_message({{"continue": True}}, message), ensure_ascii=False))
-    else:
-        print(json.dumps({{"continue": True}}, ensure_ascii=False))
-elif event in {{"beforeShellExecution", "beforeMCPExecution", "beforeReadFile"}}:
-    if code == 2:
-        print(json.dumps(with_message({{"permission": "deny"}}, block_message()), ensure_ascii=False))
-        sys.exit(2)
-    print(json.dumps({{"permission": "allow"}}, ensure_ascii=False))
-else:
-    if code == 2:
-        print(json.dumps(with_message({{}}, block_message()), ensure_ascii=False))
-    else:
-        message = context_message()
-        print(json.dumps(with_message({{}}, message), ensure_ascii=False) if message else "{{}}")
-PY
-"""
-
+    return select_hook_adapter_renderer(current_platform_profile()).render_cursor_project_hook_wrapper(
+        build_cursor_project_hook_wrapper_spec(agent_context_engine_root=memory_root)
+    )
 
 def _global_wrapper_status(command_name: str) -> dict[str, Any]:
     resolved = shutil.which(command_name)
@@ -541,11 +410,16 @@ def _agent_memory_script_absolute_path(memory_root: Path) -> Path:
 
 
 def _render_shell_hook_script(client: str, *, memory_root: Path) -> str:
-    spec = _hook_spec(client)
-    return (
-        spec["template_script"].read_text(encoding="utf-8")
-        .replace("__AGENT_CONTEXT_ENGINE_ROOT__", str(memory_root.resolve()))
-        .replace("__AGENT_MEMORY_SCRIPT__", str(_agent_memory_script_absolute_path(memory_root)))
+    from .hook_rendering import build_shell_hook_adapter_spec
+    from .platform import current_platform_profile
+    from .platform.runtime_selection import select_hook_adapter_renderer
+
+    return select_hook_adapter_renderer(current_platform_profile()).render_shell_hook_adapter(
+        build_shell_hook_adapter_spec(
+            client,
+            agent_context_engine_root=memory_root,
+            agent_memory_script=str(_agent_memory_script_absolute_path(memory_root)),
+        )
     )
 
 
@@ -929,7 +803,7 @@ def _prepare_shell_hook_client(client: str, *, root: Path = ROOT, memory_root: P
     script_path: Path = spec["script_path"]
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(script_text, encoding="utf-8")
-    script_path.chmod(0o755)
+    _mark_platform_executable(script_path)
     write_workspace_binding(client, root=root, memory_root=script_memory_root, written_by="hook-prepare")
 
 
@@ -1095,13 +969,21 @@ def _prepare_antigravity_hook_client(*, root: Path = ROOT, memory_root: Path | N
         disabled_path.replace(config_path)
     if not config_path.exists():
         _write_json(config_path, {})
-    script_text = (SKILL_ROOT / "templates" / "antigravity-hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
-    script_text = script_text.replace("__AGENT_MEMORY_SCRIPT__", _agent_memory_script_for_root(memory_root))
-    script_text = script_text.replace("__AGENT_CONTEXT_ENGINE_ROOT__", str(memory_root.resolve()))
+    from .hook_rendering import build_shell_hook_adapter_spec
+    from .platform import current_platform_profile
+    from .platform.runtime_selection import select_hook_adapter_renderer
+
+    script_text = select_hook_adapter_renderer(current_platform_profile()).render_shell_hook_adapter(
+        build_shell_hook_adapter_spec(
+            "antigravity",
+            agent_context_engine_root=memory_root,
+            agent_memory_script=_agent_memory_script_for_root(memory_root),
+        )
+    )
     script_path = paths["script_path"]
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(script_text, encoding="utf-8")
-    script_path.chmod(0o755)
+    _mark_platform_executable(script_path)
 
 
 def _render_antigravity_template(*, root: Path = ROOT) -> dict[str, Any]:
@@ -1243,7 +1125,7 @@ def _enable_cursor_project_hooks(*, root: Path = ROOT, memory_root: Path = ROOT,
     enable_cursor_hooks(root)
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(_cursor_hook_wrapper(memory_root), encoding="utf-8")
-    script_path.chmod(0o755)
+    _mark_platform_executable(script_path)
     write_workspace_binding(
         "cursor",
         root=root,

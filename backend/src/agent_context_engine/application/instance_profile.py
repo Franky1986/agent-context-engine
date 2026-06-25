@@ -44,6 +44,29 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def default_launchagent_profile(*, label: str | None = None) -> dict[str, str]:
+    launchagent_label = str(label or DEFAULT_LABEL).strip() or DEFAULT_LABEL
+    return {
+        "label": launchagent_label,
+        "path": str(launch_agent_path(launchagent_label)),
+        "env_file": DEFAULT_ENV_FILE,
+    }
+
+
+def normalize_launchagent_profile(payload: dict[str, Any] | None) -> dict[str, str]:
+    defaults = default_launchagent_profile()
+    if not isinstance(payload, dict):
+        return defaults
+    label = str(payload.get("label") or defaults["label"]).strip() or defaults["label"]
+    path = str(payload.get("path") or default_launchagent_profile(label=label)["path"]).strip() or default_launchagent_profile(label=label)["path"]
+    env_file = str(payload.get("env_file") or defaults["env_file"]).strip() or defaults["env_file"]
+    return {
+        "label": label,
+        "path": path,
+        "env_file": env_file,
+    }
+
+
 def user_state_root(home: Path | None = None) -> Path:
     return ((home or Path.home()).expanduser() / USER_STATE_ROOT_NAME).resolve()
 
@@ -159,11 +182,16 @@ def _normalize_path_strings(values: list[object] | tuple[object, ...] | None) ->
 
 
 def default_installation_profile() -> dict[str, Any]:
+    from .platform import current_platform_profile, current_platform_profile_payload
+
+    current_platform = current_platform_profile()
+
     return {
         "version": 4,
         "instance_id": ROOT.name,
         "root": str(ROOT.resolve()),
-        "platform": "mac",
+        "platform": "mac" if current_platform.profile_id == "macos" else current_platform.profile_id,
+        "platform_profile": current_platform_profile_payload(),
         "storage": {
             "memory_root": str((ROOT / "memory").resolve()),
             "schema_version": DEFAULT_STORAGE_SCHEMA_VERSION,
@@ -189,11 +217,7 @@ def default_installation_profile() -> dict[str, Any]:
             "last_known_url": "",
             "last_known_pid": 0,
         },
-        "launchagent": {
-            "label": DEFAULT_LABEL,
-            "path": str(launch_agent_path(DEFAULT_LABEL)),
-            "env_file": DEFAULT_ENV_FILE,
-        },
+        "launchagent": default_launchagent_profile(),
     }
 
 
@@ -298,6 +322,7 @@ def default_instance_metadata(
     installation_root: Path,
     memory_root: Path,
 ) -> dict[str, Any]:
+    launchagent = default_launchagent_profile()
     return {
         "version": INSTANCE_METADATA_VERSION,
         "instance_id": safe_instance_id(instance_id),
@@ -312,9 +337,9 @@ def default_instance_metadata(
         "language": "en",
         "wrapper_prefix": "",
         "wrapper_suffix": "",
-        "launchagent_label": DEFAULT_LABEL,
-        "launchagent_path": str(launch_agent_path(DEFAULT_LABEL)),
-        "launchagent_env_file": DEFAULT_ENV_FILE,
+        "launchagent_label": launchagent["label"],
+        "launchagent_path": launchagent["path"],
+        "launchagent_env_file": launchagent["env_file"],
         "checkout_name": installation_root.name,
         "checkout_branch": "",
         "checkout_commit": "",
@@ -426,17 +451,11 @@ def record_link_registry_entry(
 
 
 def _write_symlink(path: Path, target: Path) -> None:
+    from .platform import current_platform_profile
+    from .platform.runtime_selection import select_command_publisher
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink() or path.exists():
-        try:
-            if path.resolve() == target.resolve():
-                return
-        except OSError:
-            pass
-        if path.is_dir() and not path.is_symlink():
-            raise OSError(f"cannot replace non-symlink directory: {path}")
-        path.unlink()
-    path.symlink_to(target)
+    select_command_publisher(current_platform_profile()).create_symlink(path, target, force=True)
 
 
 def sync_active_instance(
@@ -484,12 +503,21 @@ def _git_checkout_metadata(root: Path) -> dict[str, Any]:
 
 
 def _normalize_installation_profile(payload: dict[str, Any] | None) -> dict[str, Any]:
+    from .platform import current_platform_profile_payload, legacy_platform_profile_payload
+
     profile = default_installation_profile()
     if isinstance(payload, dict):
         profile["version"] = max(2, int(payload.get("version") or 4))
         profile["instance_id"] = str(payload.get("instance_id") or profile["instance_id"]).strip() or profile["instance_id"]
         profile["root"] = str(payload.get("root") or profile["root"]).strip() or profile["root"]
-        profile["platform"] = str(payload.get("platform") or "mac")
+        profile["platform"] = str(payload.get("platform") or profile["platform"])
+        raw_platform_profile = payload.get("platform_profile")
+        if isinstance(raw_platform_profile, dict) and str(raw_platform_profile.get("profile_id") or "").strip():
+            profile["platform_profile"] = raw_platform_profile
+        elif payload.get("platform") is not None:
+            profile["platform_profile"] = legacy_platform_profile_payload(str(payload.get("platform") or profile["platform"]))
+        else:
+            profile["platform_profile"] = current_platform_profile_payload()
         storage = payload.get("storage")
         legacy_memory_root = str(profile["storage"]["memory_root"])
         if isinstance(storage, dict):
@@ -561,14 +589,7 @@ def _normalize_installation_profile(payload: dict[str, Any] | None) -> dict[str,
             }
         launchagent = payload.get("launchagent")
         if isinstance(launchagent, dict):
-            label = str(launchagent.get("label") or DEFAULT_LABEL).strip() or DEFAULT_LABEL
-            path = str(launchagent.get("path") or launch_agent_path(label)).strip() or str(launch_agent_path(label))
-            env_file = str(launchagent.get("env_file") or DEFAULT_ENV_FILE).strip() or DEFAULT_ENV_FILE
-            profile["launchagent"] = {
-                "label": label,
-                "path": path,
-                "env_file": env_file,
-            }
+            profile["launchagent"] = normalize_launchagent_profile(launchagent)
     return profile
 
 
@@ -666,15 +687,21 @@ def merge_installation_profile(
                 current_monitor["last_known_pid"] = 0
         profile["monitor"] = current_monitor
     if launchagent:
-        current_launchagent = dict(profile.get("launchagent") or {})
+        current_launchagent = normalize_launchagent_profile(dict(profile.get("launchagent") or {}))
         if "label" in launchagent:
-            label = str(launchagent.get("label") or DEFAULT_LABEL).strip() or DEFAULT_LABEL
+            label = str(launchagent.get("label") or current_launchagent.get("label") or DEFAULT_LABEL).strip() or DEFAULT_LABEL
             current_launchagent["label"] = label
-            current_launchagent.setdefault("path", str(launch_agent_path(label)))
+            current_launchagent["path"] = default_launchagent_profile(label=label)["path"]
         if "path" in launchagent:
-            current_launchagent["path"] = str(launchagent.get("path") or current_launchagent.get("path") or "")
+            current_launchagent["path"] = (
+                str(launchagent.get("path") or current_launchagent.get("path") or "").strip()
+                or default_launchagent_profile(label=current_launchagent["label"])["path"]
+            )
         if "env_file" in launchagent:
-            current_launchagent["env_file"] = str(launchagent.get("env_file") or DEFAULT_ENV_FILE).strip() or DEFAULT_ENV_FILE
+            current_launchagent["env_file"] = (
+                str(launchagent.get("env_file") or current_launchagent.get("env_file") or "").strip()
+                or DEFAULT_ENV_FILE
+            )
         profile["launchagent"] = current_launchagent
     return save_installation_profile(root, profile)
 
@@ -1021,19 +1048,16 @@ def resolve_wrapper_naming(root: Path = ROOT) -> dict[str, str]:
 
 
 def resolve_wrapper_command_name(base_name: str, *, root: Path = ROOT) -> str:
+    from .wrapper_publication import build_wrapper_command_name, normalize_wrapper_base_name
+
     naming = resolve_wrapper_naming(root)
-    normalized_base = base_name
-    if naming["prefix"] or naming["suffix"]:
-        if base_name.endswith("-memory"):
-            normalized_base = base_name[: -len("-memory")]
-        elif base_name.endswith("-ace"):
-            normalized_base = base_name[: -len("-ace")]
     template = naming["template"]
     try:
+        normalized_base = normalize_wrapper_base_name(base_name) if (naming["prefix"] or naming["suffix"]) else base_name
         rendered = template.format(prefix=naming["prefix"], base=normalized_base, suffix=naming["suffix"])
     except Exception:
-        rendered = f"{naming['prefix']}{normalized_base}{naming['suffix']}"
-    return rendered.strip() or normalized_base
+        rendered = build_wrapper_command_name(base_name, naming["prefix"], naming["suffix"])
+    return rendered.strip() or normalize_wrapper_base_name(base_name)
 
 
 def resolve_runner_wrapper_name(client: str, *, root: Path = ROOT) -> str:
@@ -1089,6 +1113,7 @@ def sync_instance_metadata(
         memory_root=Path(str(storage.get("memory_root") or default_user_storage_root())),
     )
     metadata.update(current)
+    normalized_launchagent = normalize_launchagent_profile(launchagent)
     metadata.update(
         {
             "version": INSTANCE_METADATA_VERSION,
@@ -1104,9 +1129,9 @@ def sync_instance_metadata(
             "language": str(monitor.get("language") or "en"),
             "wrapper_prefix": str(wrapper.get("prefix") or ""),
             "wrapper_suffix": str(wrapper.get("suffix") or ""),
-            "launchagent_label": str(launchagent.get("label") or DEFAULT_LABEL),
-            "launchagent_path": str(launchagent.get("path") or launch_agent_path(str(launchagent.get("label") or DEFAULT_LABEL))),
-            "launchagent_env_file": str(launchagent.get("env_file") or DEFAULT_ENV_FILE),
+            "launchagent_label": normalized_launchagent["label"],
+            "launchagent_path": normalized_launchagent["path"],
+            "launchagent_env_file": normalized_launchagent["env_file"],
             "last_updated_at": now,
             "last_updated_by_version": PRODUCT_VERSION,
             "last_seen_at": now,

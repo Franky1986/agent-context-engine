@@ -375,17 +375,21 @@ def _parse_gemini_transcript(path: Path) -> NativeSessionMetadata:
 
 
 def native_resume_command(client: str, session_id: str, workdir: str | None, *, root: Path = ROOT) -> str | None:
+    from ...application.platform import current_platform_profile
+    from ...application.platform.runtime_selection import select_path_quoting_adapter
+
+    quote = select_path_quoting_adapter(current_platform_profile()).quote
     resolved_workdir = workdir or str(ROOT)
     if client == "codex":
         return f"{resolve_runner_wrapper_name('codex', root=root)} resume {session_id}"
     if client == "claude":
         return f"{resolve_runner_wrapper_name('claude', root=root)} --resume {session_id}"
     if client == "cursor":
-        return f"cd {sh_quote(resolved_workdir)} && cursor-agent --resume {sh_quote(session_id)}"
+        return f"cd {quote(resolved_workdir)} && cursor-agent --resume {quote(session_id)}"
     if client == "antigravity":
-        return f"cd {sh_quote(resolved_workdir)} && agy --conversation {sh_quote(session_id)}"
+        return f"cd {quote(resolved_workdir)} && agy --conversation {quote(session_id)}"
     if client == "opencode":
-        return f"cd {sh_quote(resolved_workdir)} && opencode --session {sh_quote(session_id)}"
+        return f"cd {quote(resolved_workdir)} && opencode --session {quote(session_id)}"
     return None
 
 

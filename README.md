@@ -2,6 +2,17 @@
   <img src="docs/assets/agent-context-engine-logo.png" alt="Agent Context Engine logo" width="220">
 </p>
 
+<p align="center">
+  <a href="README.md">English</a> | <a href="README_de.md">Deutsch</a>
+</p>
+
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white">
+  <img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-D22128">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-active%20runtime%20target-000000?logo=apple&logoColor=white">
+</p>
+
 # Agent Context Engine
 
 Local-first cross-harness context engine for coding agents with memory,
@@ -72,6 +83,7 @@ agent-context-engine launchagent-status
 - [Build And Checks](docs/setup/BUILD_AND_CHECKS.md)
 - [Monitor Operator Workflows](docs/runbooks/monitor-operator-workflows.md)
 - [Project Origin](docs/project-origin.md)
+- [German README](README_de.md)
 
 ## For Agents
 
@@ -463,6 +475,8 @@ agent-context-engine cursor-status --target /path/to/project
 After enabling or disabling, reload the Cursor window or reopen the project
 folder. The commands preserve non-Agent-Memory Cursor hooks by backing up and
 removing only the `./.cursor/hooks/hook_adapter.sh` entries.
+For external Cursor projects, treat `cursor-status --target /path/to/project`
+as the authoritative activation check.
 
 Cursor `afterAgentResponse`/`stop` payloads include token usage and model
 metadata. The hook writes those values into `token_usage` and `turn_metrics`.
@@ -891,20 +905,28 @@ For normal restart/reload operations, use the wrapper with controlled defaults:
 ./scripts/restart-launchagent
 ```
 
-The wrapper rewrites and loads the LaunchAgent in hybrid mode: deterministic
-Dream runner, Codex graph structurer by default, 900-second interval, Neo4j sync
-disabled, and graph-patch repair disabled unless overridden by flags.
+`agent-context-engine install-launchagent --load` installs the normal scheduler
+defaults for the active installation. `./scripts/restart-launchagent` remains a
+separate hybrid wrapper for deterministic Dream processing plus optional LLM
+graph structuring.
 
 Default behavior:
 
 - Label: `com.agent-context-engine.<project-folder>`
 - Interval: 900 seconds
-- Command: `scheduler-run --grace-minutes 5 --runner deterministic --graph-runner codex`
+- Command: `scheduler-run --grace-minutes 5 --runner same-as-session --graph-runner same-as-session`
 - Plist: `~/Library/LaunchAgents/com.agent-context-engine.<project-folder>.plist`
 - Optional local env file: `memory/local/agent-context-engine.env` (gitignored)
 - Logs:
   - `memory/logs/launchagent.out.log`
   - `memory/logs/launchagent.err.log`
+
+Hybrid wrapper defaults (`./scripts/restart-launchagent`):
+
+- Dream runner: `deterministic` (fixed)
+- Graph runner: `deterministic` by default, override with `--graph-runner`
+- Interval: 300 seconds
+- Neo4j sync: disabled by default
 
 For multiple Agent Context Engine instances with the same folder name, choose an
 explicit label and use it consistently for status and uninstall:
@@ -931,7 +953,7 @@ The first completed agent turn in a session queues a fast initial dream by defau
 
 ```text
 AGENT_MEMORY_INITIAL_DREAM_ON_PROMPT=1
-AGENT_MEMORY_INITIAL_DREAM_RUNNER=deterministic
+AGENT_MEMORY_INITIAL_DREAM_RUNNER=same-as-session
 AGENT_MEMORY_INITIAL_DREAM_TIMEOUT=60
 ```
 
@@ -1082,9 +1104,10 @@ Existing entities are not dumped wholesale into the LLM prompt. The graph phase
 builds query terms from the deterministic facts and dream text, scores local
 entity candidates with fuzzy matching, and injects only the top matches.
 
-For the scheduler / LaunchAgent path, prefer the restart wrapper. It intentionally
-installs only the hybrid mode: deterministic Dream processing plus LLM graph
-structuring.
+For the scheduler / LaunchAgent path, prefer the restart wrapper when you
+explicitly want the hybrid deterministic-Dream mode. It intentionally keeps the
+Dream runner deterministic and only delegates semantic graph structuring through
+`--graph-runner`.
 
 ```sh
 ./scripts/restart-launchagent --graph-runner codex

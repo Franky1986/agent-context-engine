@@ -73,6 +73,10 @@ application services.
 - `cursor-enable --background-runner <codex|claude>` must pin that exact
   background runner into the workspace binding and fail clearly when the
   requested runner is missing or not authenticated for headless use.
+- Successful `cursor-enable --target <external-project> --installation-root <installation>`
+  runs must also persist that external Cursor workspace into the installation
+  profile so `doctor`, `check-installation`, and monitor installation summaries
+  report the same activated-project set as `cursor-status --target ...`.
 - For `claude`, Agent Context Engine must use the real `claude auth status`
   contract instead of inventing a fake `claude status` probe, and auth
   guidance must point to `claude auth login`.
@@ -83,6 +87,9 @@ application services.
 - When Cursor activation fails, operators and agents must not treat
   `opencode-enable`, `gemini-enable`, or other client activation commands as a
   substitute for `cursor-enable`.
+- `dream`, `scheduler-run`, and `install-launchagent` must default
+  `--graph-runner` to `same-as-session` so deterministic or non-Codex dream
+  runs do not silently trigger a separate Codex graph-materialization fallback.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`

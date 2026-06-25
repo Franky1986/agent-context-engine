@@ -9,6 +9,24 @@ This repository currently has one public baseline commit:
 
 The entries below document the changes added since that initial public release.
 
+## Unreleased
+
+### Changed
+
+- external Cursor project activation now records the target in install-wide
+  `workspace_roots.cursor`, keeping `doctor`, `check-installation`, and monitor
+  installation summaries aligned with `cursor-status --target ...`
+- added bilingual top-level README entrypoints (`README.md`, `README_de.md`)
+  plus project badges for Python, Node.js, license, and macOS runtime scope
+
+### Fixed
+
+- queued hook reservations now revert previously covered sessions back to
+  `summary_pending` / `dream_pending` as soon as new work is reserved, instead
+  of leaving stale fully-covered states visible until later replay
+- runtime HTTP version constants now match the published public snapshot
+  (`0.2.7` backend / `0.6.5` monitor)
+
 ## Monitor 0.6.5
 
 ### Changed

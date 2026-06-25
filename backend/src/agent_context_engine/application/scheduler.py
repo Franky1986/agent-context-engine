@@ -10,14 +10,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from ..adapters.launchagent import DEFAULT_ENV_FILE, DEFAULT_LABEL, DEFAULT_LAUNCHD_PATH
-from ..adapters.launchagent import cmd_install_launchagent as adapter_cmd_install_launchagent
-from ..adapters.launchagent import cmd_launchagent_status as adapter_cmd_launchagent_status
-from ..adapters.launchagent import cmd_uninstall_launchagent as adapter_cmd_uninstall_launchagent
+from ..adapters.launchagent import DEFAULT_LAUNCHD_PATH
 from ..adapters.sqlite import scheduler as scheduler_repo
 from ..adapters.sqlite import repositories as repositories_repo
 from ..adapters.sqlite.request_db import connect as request_db_connect
 from .maintenance import run_prune_logs
+from .scheduler_installation import (
+    install_platform_scheduler,
+    platform_scheduler_status,
+    uninstall_platform_scheduler,
+)
 from ..application.sessions import cmd_sync_transcripts
 from ..infrastructure.config import MEMORY_DIR, json_dumps
 from .graph import cmd_neo4j_sync_pending
@@ -60,15 +62,15 @@ def _connect(init: bool = True, db_provider: SQLiteConnectionProvider | None = N
 
 
 def cmd_install_launchagent(args: argparse.Namespace) -> int:
-    return adapter_cmd_install_launchagent(args)
+    return install_platform_scheduler(args)
 
 
 def cmd_uninstall_launchagent(args: argparse.Namespace) -> int:
-    return adapter_cmd_uninstall_launchagent(args)
+    return uninstall_platform_scheduler(args)
 
 
 def cmd_launchagent_status(args: argparse.Namespace) -> int:
-    return adapter_cmd_launchagent_status(args)
+    return platform_scheduler_status(args)
 
 
 @dataclass(frozen=True)

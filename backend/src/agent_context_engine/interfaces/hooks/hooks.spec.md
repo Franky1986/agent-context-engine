@@ -68,6 +68,10 @@ pre-action safety checks, and enqueue or persist events for later processing.
 - Cursor queue reservation and later replay must preserve the resolved
   headless background runner (`codex` or `claude`) instead of falling back to
   `cursor` during the provisional session-row write.
+- When a queued hook reserves a new event for an already summarized or dreamed
+  session, the session row must revert to `summary_pending` / `dream_pending`
+  immediately so install-wide diagnostics do not keep stale fully-covered
+  states while uncovered work is waiting in the queue.
 - Cursor startup guidance and early prompt blocking must validate the delegated
   background runner's real auth-readiness, not just whether a `codex` or
   `claude` binary exists in `PATH`.

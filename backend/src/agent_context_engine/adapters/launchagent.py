@@ -233,7 +233,7 @@ def default_launchagent_args(
         runner="same-as-session",
         runner_model=None,
         runner_timeout=1800,
-        graph_runner="codex",
+        graph_runner="same-as-session",
         graph_runner_model=None,
         sync_neo4j=False,
         neo4j_sync_limit=5,
