@@ -1,0 +1,480 @@
+# Agent Context Engine Test Strategy And Validation Status
+
+Last updated: 2026-06-24
+
+This document defines a deterministic test order for Agent Context Engine and
+tracks which parts have already been verified in recent installation,
+integration, runner, and dreaming passes.
+
+## Relevant References
+
+- [AGENTS.md](/Users/frankrichter/projects/agent-context-engine/AGENTS.md)
+- [AGENT_BOOTSTRAP.md](/Users/frankrichter/projects/agent-context-engine/AGENT_BOOTSTRAP.md)
+- [Runner And Harness Guide](/Users/frankrichter/projects/agent-context-engine/docs/setup/RUNNER_HARNESSES.md)
+- [Integration Management Runbook](/Users/frankrichter/projects/agent-context-engine/docs/runbooks/integration-management.md)
+- [README.md](/Users/frankrichter/projects/agent-context-engine/README.md)
+
+## Testing Strategy
+
+Do not mix everything at once. Test in this order:
+
+1. Installation and drift
+2. CLI and retrieval
+3. Integrations and wrappers
+4. Hook capture per runner
+5. Firewall and risk
+6. Dreaming
+7. Graph and semantic persistence
+8. Monitor, LaunchAgent, and scheduler
+9. Repair and reinstall
+10. Multi-install and takeover/isolation
+
+For every phase:
+
+- define one expected state
+- introduce one failure source at a time
+- finish with a small documented pass/fail result
+
+## Recommended Test Environment
+
+Use three installation scenarios:
+
+1. `test-main`
+2. `test-takeover`
+3. `test-isolated`
+
+Use separate project targets and one dedicated runtime root:
+
+- `/Users/frankrichter/projects/agent-context-engine-test-main`
+- `/Users/frankrichter/projects/agent-context-engine-test-takeover`
+- `/Users/frankrichter/projects/agent-context-engine-test-isolated`
+- `/Users/frankrichter/projects/ace-runner-project-a`
+- `/Users/frankrichter/projects/ace-runner-project-b`
+- `/Users/frankrichter/.agent-context-engine-test-memory`
+
+## Phase A: Installation And Baseline
+
+Goal:
+
+- discovery is correct
+- install is correct
+- global links are correct
+- monitor and LaunchAgent are correct
+
+Tests:
+
+1. `install-discovery` on a fresh checkout
+2. `install` with a central `memory_root`
+3. `doctor`
+4. `check-installation`
+5. `launchagent-status --verbose`
+6. `integrations-status`
+
+Pass criteria:
+
+- no inconsistent root, memory, or port values
+- no replaced installation still appears active
+- `session-start-hook-entry.md` uses `agent-context-engine`
+
+## Phase B: CLI And Retrieval Basics
+
+Goal:
+
+- core CLI works without runner complexity
+
+Tests:
+
+1. `agent-context-engine doctor`
+2. `agent-context-engine last --limit 10`
+3. `agent-context-engine search "test" --limit 5`
+4. `agent-context-engine retrieve "test" --limit 5`
+5. `agent-context-engine session-start-context`
+6. `agent-context-engine repo-context --list`
+7. `agent-context-engine personal-context --list`
+
+Pass criteria:
+
+- no path failures
+- no stale installation references
+- output is parseable and either sensibly empty or sensibly populated
+
+## Phase C: Wrappers And Integrations
+
+Goal:
+
+- every runner starts through the intended path
+- hook bridges point to the active installation
+
+Runner matrix:
+
+1. `codex-ace`
+2. `claude-ace`
+3. `agy-ace`
+4. `gemini-ace`
+5. `opencode-ace`
+6. `cursor-enable --target ...` plus Cursor itself
+
+Per-runner test:
+
+1. start from `ace-runner-project-a`
+2. run a short session
+3. end the session
+4. `agent-context-engine last --limit 10`
+5. verify the session appears
+6. verify the workdir is the project, not the install root
+7. verify `handover` or `use` works
+
+Minimal prompt pair:
+
+- `Create a one-sentence summary of this project.`
+- `What did we just discuss?`
+
+Pass criteria:
+
+- session appears
+- resume and handover work
+- workdir is correct
+- no wrong root in session metadata
+
+## Phase D: Hook Capture In Detail
+
+Goal:
+
+- hooks really fire
+- events land in memory, DB, and monitor cleanly
+
+Per runner verify:
+
+1. start event
+2. user message
+3. assistant message
+4. tool event
+5. session end
+6. token and usage metadata when the runner provides them
+
+Pass criteria:
+
+- monitor shows events
+- `last` shows the session
+- `handover` finds the session
+- no runner-specific metadata gap breaks resume
+
+## Phase E: Firewall And Risk
+
+Goal:
+
+- local reads are treated differently from actual tool execution and network activity
+- taint behavior is correct
+- user control-plane lines work
+
+Test cases:
+
+1. harmless local read
+2. ACE CLI read such as `agent-context-engine last --limit 10`
+3. intentionally block-worthy command
+4. taint case followed by local read and then tool execution
+5. user control-plane lines such as `reset taint`, `hooks-status`, `firewall disable session`, `firewall enable session`
+
+Useful commands:
+
+- `agent-context-engine risk list --limit 20`
+- `agent-context-engine risk show <risk_event_id>`
+- `agent-context-engine firewall list`
+- `agent-context-engine firewall show <rule_id>`
+
+Pass criteria:
+
+- `CommandLine` payloads are classified correctly
+- `AbsolutePath` reads are classified correctly
+- ACE CLI reads do not get routed into false risk blocks
+
+## Phase F: Dreaming
+
+Goal:
+
+- the dream pipeline runs cleanly per runner
+- errors are auditable
+- persistence is meaningful
+
+Tests:
+
+1. create several small sessions
+2. `dream --pending`
+3. run once with codex
+4. run once with cursor
+5. run once with antigravity when intended
+6. inspect dream status afterwards
+
+Pass criteria:
+
+- successful runs create artifacts
+- failed runs are explainable
+- antigravity uses the current non-interactive path rather than stale flags
+
+## Phase G: Graph And Semantic Quality
+
+Goal:
+
+- dreams create useful graph and semantic artifacts
+- weak material does not over-persist
+
+Tests:
+
+1. session with clear facts
+2. session with weak or fuzzy claims
+3. run a dream
+4. inspect graph and semantic status
+5. verify what persisted and what did not
+
+Pass criteria:
+
+- clear facts are kept
+- weak claims are not hardened into memory
+- review and defer paths stay visible
+
+## Phase H: Monitor, LaunchAgent, And Scheduler
+
+Goal:
+
+- runtime status is consistent
+- there is no mixed state between monitor and LaunchAgent
+
+Tests:
+
+1. start or restart the monitor
+2. `launchagent-status --verbose`
+3. inspect `/api/status`
+4. inspect scheduler status
+5. repeat after runner and dream actions
+
+Pass criteria:
+
+- no stale runtime cards
+- no replaced installation still appears active
+- status separates hook, wrapper, and runtime state clearly
+
+## Phase I: Repair And Reinstall
+
+Goal:
+
+- self-healing works
+- reinstall is deterministic
+
+Tests:
+
+1. break selected symlinks intentionally
+2. `check-installation`
+3. `repair-installation --apply`
+4. `check-installation` again
+5. install from a newly cloned directory
+6. verify discovery recognizes existing shared globals
+7. verify the default proposal names the takeover clearly
+8. verify install does not require manual force guessing
+
+Pass criteria:
+
+- repair finds real problems
+- repair does not rewrite foreign roots blindly
+- reinstall from a new clone is deterministic and understandable
+
+## Phase J: Multi-Install, Takeover, And Isolation
+
+Goal:
+
+- takeover and isolation are clearly distinguishable
+
+Scenarios:
+
+1. install `test-main`
+2. install `test-takeover`
+3. verify shared globals move
+4. verify the old installation is no longer active
+5. install `test-isolated` with `--instance-name` or `--isolated`
+6. verify no shared global takeover happens
+7. verify isolated commands exist
+
+Then from all three roots:
+
+- `command -v agent-context-engine`
+- `command -v agy-ace`
+- `command -v opencode-ace`
+- start a session
+- verify which installation is actually active
+
+Pass criteria:
+
+- takeover and isolation are clearly distinct
+- docs, discovery, and runtime behavior agree
+
+## Test Protocol Template
+
+For each test case keep these columns:
+
+1. ID
+2. Area
+3. Setup
+4. Action
+5. Expected
+6. Actual
+7. Pass/Fail
+8. Artifact
+9. Follow-up issue
+
+Example:
+
+- `INT-AGY-01`
+- `Integration / Antigravity`
+- active installation `test-main`, start from `project-a`
+- run `agy-ace`, send two prompts, end the session
+- expect the session in `last`, correct workdir, working follow-up
+- attach CLI output, session ID, risk ID, or screenshot
+
+## Recommended Real Test-Day Order
+
+1. Baseline install
+2. CLI smoke
+3. Codex
+4. Claude
+5. Antigravity
+6. Gemini
+7. OpenCode
+8. Cursor
+9. Firewall and risk
+10. Dreaming
+11. Graph and semantics
+12. Repair
+13. Takeover install
+14. Isolated install
+
+## Recommended Depth
+
+Separate three levels:
+
+1. smoke
+2. contract
+3. regression
+
+Most important regressions:
+
+1. `agent-context-engine` replaces stale path guidance in hooks
+2. `agy-ace` sessions actually appear
+3. `opencode-ace` sessions actually appear
+4. shared-global takeover is deterministic
+5. risk and firewall do not falsely block ACE reads
+
+## Current Validation Status
+
+Change set under test:
+
+- backend version `0.2.2`
+- frontend version `0.6.2`
+- installation and integration command surface updated around `--installation-root`
+- isolated install flow updated around deterministic local memory and wrapper behavior
+- dream JSON extraction and fallback hardening already included in this branch
+
+Status legend:
+
+- `[x]` verified directly in recent runs
+- `[~]` observed indirectly or only in prior install transcripts
+- `[ ]` still open
+
+### A. Installation And Baseline
+
+- [x] `install-discovery` exposes target, monitor port, memory root, and wrapper decisions before writing.
+- [x] isolated installs in recent `test27`, `test28`, and `test29` runs revalidated the monitor port before writing config.
+- [x] runtime bootstrap, monitor start, and LaunchAgent load completed in recent isolated install runs.
+- [x] `session-start-hook-entry.md` now points at `agent-context-engine` instead of stale installation-only paths.
+- [ ] fresh deterministic takeover-install regression after the latest install changes still needs one clean scripted pass.
+- [ ] `repair-installation` still needs a targeted break-and-repair validation pass.
+
+### B. CLI And Retrieval Basics
+
+- [x] `last --limit 10`, `status --limit 10`, `dream-queue-status`, and `dream-v2-inspect` worked against `test29`.
+- [ ] `search`, `retrieve`, `session-start-context`, `repo-context --list`, and `personal-context --list` still need a dedicated smoke pass on the current branch.
+
+### C. Wrappers And Integrations
+
+- [x] `cursor-enable --target ... --installation-root ...` wrote installation-root-aware bindings for `pr-llm-service`.
+- [x] generated Cursor hook files point to `agent-context-engine-test29-isolated` rather than a stale installation.
+- [x] `cursor-status --target /Users/frankrichter/projects/pr-llm-service` reported active hooks and one recorded session.
+- [x] `/api/integrations` for `test29` reported one activated Cursor project with `hooks_state=enabled` and `hooks_enabled=true`.
+- [ ] full runner matrix for `codex-ace`, `claude-ace`, `agy-ace`, `gemini-ace`, and `opencode-ace` from dedicated project roots is still open.
+
+### D. Hook Capture
+
+- [x] recent `test29` state shows one codex session and one cursor session in `last`.
+- [x] the Cursor project activation recorded `9/9` active hook events.
+- [ ] explicit per-event validation for assistant messages, tool events, and session-end events across every runner is still open.
+- [ ] direct revalidation that `agy-ace` and `opencode-ace` sessions appear reliably after the latest fixes is still open.
+
+### E. Firewall And Risk
+
+- [~] previous failure cases established the need to separate ACE reads from riskier tool execution.
+- [ ] a fresh end-to-end firewall and taint matrix has not yet been rerun after the latest installation and integration fixes.
+- [ ] explicit re-check that `agent-context-engine last --limit 10` no longer falls into false risk blocks is still open.
+
+### F. Dreaming
+
+- [x] `test29` has two successful pipeline-v2 dream runs in the queue.
+- [x] codex dream run `dream_2026-06-24T11-14-19Z00-00_019ef955-756d-7330-bc4f-251778614e72_12943` succeeded with all 8 stages.
+- [x] that codex run recorded usage in the LLM stages:
+  - narrative: prompt `13759`, completion `808`, reasoning `516`
+  - semantic extraction: prompt `13335`, completion `1258`, reasoning `794`
+  - reconciliation: prompt `14934`, completion `2017`, reasoning `1531`
+- [x] cursor dream run `dream_2026-06-24T11-22-03Z00-00_35578cb9-a3e0-4e0c-869d-90537c0000fc_31259` also succeeded with all 8 stages.
+- [x] that cursor run recorded usage in the LLM stages:
+  - narrative: prompt `52663`, completion `326`
+  - semantic extraction: prompt `55153`, completion `511`
+  - reconciliation: prompt `26210`, completion `468`
+- [x] both successful runs wrote audit artifacts, including prompt manifests, `memory_changes`, `review_needed`, and `summary`.
+- [ ] `status --limit 10` still showed the Cursor session as `dream_pending` even though the queue entry succeeded. This is an open state-drift bug.
+- [ ] antigravity, gemini, and opencode dream paths still need revalidation after the JSON hardening work.
+
+### G. Graph And Semantic Persistence
+
+- [x] successful v2 dream runs reached semantic extraction, reconciliation, and persistence.
+- [~] persisted semantic artifacts exist for the successful codex and cursor dream runs.
+- [ ] the quality pass for entities, relations, and conservative persistence thresholds still needs a dedicated fact-vs-weak-claim review.
+- [ ] assistant-message-specific semantic evidence should still be inspected explicitly in a fresh graph-quality pass.
+
+### H. Monitor, LaunchAgent, And Scheduler
+
+- [x] recent isolated installs started a monitor and loaded a LaunchAgent.
+- [x] `dream-queue-status` in `test29` reported `queued=0 running=0 failed=0 terminal_failed=0 succeeded=2`.
+- [x] `test29` monitor API confirmed the activated Cursor project and its hook state.
+- [ ] a fresh `/api/status` drift audit after the latest monitor UI changes is still open.
+- [ ] the Sessions UI change and the Cursor aggregate card should still be checked visually in a live monitor session.
+
+### I. Repair And Reinstall
+
+- [ ] no current branch pass has intentionally broken symlinks and then validated `repair-installation --apply`.
+- [ ] no current branch pass has rerun a fresh reinstall smoke specifically to prove there is no more `--force` guesswork for normal takeover installs.
+
+### J. Multi-Install, Takeover, And Isolation
+
+- [x] isolated installs no longer rely on shared-global takeover as the intended path.
+- [x] integration bindings now carry the active `installation_root`, which reduces cross-install drift for Cursor-style project activation.
+- [ ] one clean three-install matrix still needs to be executed on the latest code:
+  - `test-main`
+  - `test-takeover`
+  - `test-isolated`
+- [ ] `agent-context-engine`, `ace`, `agy-ace`, and `opencode-ace` should still be checked from all three roots after that matrix run.
+
+## Observed Recent Runner Snapshot
+
+From `test29`:
+
+- codex session `019ef955-756d-7330-bc4f-251778614e72`
+  - workdir: `/Users/frankrichter`
+  - last dream run: succeeded
+  - dream runner: `codex`
+  - dream model: `gpt-5.4-mini`
+
+- cursor session `35578cb9-a3e0-4e0c-869d-90537c0000fc`
+  - transcript path was under the `pr-llm-service` Cursor project
+  - `cursor-status` recorded one session for the activated project
+  - `status --limit 10` still showed `dream=dream_pending`
+  - dream queue entry for that session succeeded
+
+This means the core Cursor activation path is working, but at least one status
+projection still needs reconciliation.

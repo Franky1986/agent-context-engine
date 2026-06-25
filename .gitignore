@@ -16,14 +16,21 @@ memory/
 *.log
 
 # Local harness installation artifacts for this repo as a memory root
-.codex/
 .codex-runtime/
-.claude/
-.cursor/
-.agents/
 .gemini/
 .opencode/
 .agents_probe
+
+# Persist command surfaces for this repo in these directories.
+# They are versioned and intended to be reused across checkouts.
+/.agents/
+/.codex/
+/.claude/
+/.cursor/
+!.agents/
+!.codex/
+!.claude/
+!.cursor/
 docs/knowledge/
 
 # Local environment and credentials
