@@ -55,7 +55,7 @@ def run_codex_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite3
         capture_output=True,
         timeout=timeout,
         cwd=str(ROOT),
-        env=codex_subprocess_env(extra={"AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)}),
+        env=codex_subprocess_env(extra={"AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)}),
     )
     duration_ms = int((monotonic() - started_mono) * 1000)
     tool_event_detected = codex_stdout_has_tool_events(proc.stdout)
@@ -113,7 +113,7 @@ def run_claude_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
     command = claude_dream_command(model)
     started = utc_now()
     started_mono = monotonic()
-    proc = subprocess.run(command, input=prompt, text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1"})
+    proc = subprocess.run(command, input=prompt, text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
     duration_ms = int((monotonic() - started_mono) * 1000)
     meta_path.write_text(
         json_dumps(
@@ -171,7 +171,7 @@ def run_cursor_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
         capture_output=True,
         timeout=timeout,
         cwd=str(ROOT),
-        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
+        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
     )
     duration_ms = int((monotonic() - started_mono) * 1000)
     meta_path.write_text(
@@ -230,7 +230,7 @@ def run_gemini_dream(session: sqlite3.Row, summary_rel: str, events: list[sqlite
         capture_output=True,
         timeout=timeout,
         cwd=str(ROOT),
-        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
+        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
     )
     duration_ms = int((monotonic() - started_mono) * 1000)
     meta_path.write_text(
@@ -287,7 +287,7 @@ def run_antigravity_dream(session: sqlite3.Row, summary_rel: str, events: list[s
         capture_output=True,
         timeout=timeout,
         cwd=str(ROOT),
-        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
+        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
     )
     duration_ms = int((monotonic() - started_mono) * 1000)
     meta_path.write_text(
@@ -344,7 +344,7 @@ def run_opencode_dream(session: sqlite3.Row, summary_rel: str, events: list[sqli
         capture_output=True,
         timeout=timeout,
         cwd=str(ROOT),
-        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
+        env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)},
     )
     duration_ms = int((monotonic() - started_mono) * 1000)
     meta_path.write_text(

@@ -46,6 +46,9 @@ minimal HTML fallback.
 - `/api/status` includes monitor version, backend version, installation
   timestamps, update timestamps, and integration/runtime bookkeeping required
   by the monitor.
+- LaunchAgent/runtime status exposed through monitor APIs is sufficient to flag
+  parallel loaded Agent Context Engine LaunchAgents that still point at the same
+  runtime storage root.
 
 ## Tests / Checks
 - `python3 scripts/generate_openapi.py --check`

@@ -39,6 +39,11 @@ role, suggests the install target, shows discovered `memory_root` candidates,
 and proposes safe defaults such as an isolated monitor port or the `-ace`
 wrapper suffix for test installs.
 
+For install language, discovery should prefer the user's current install
+interaction language first. If the user switches language during the approval
+flow, rerun discovery with an explicit `--language de` or `--language en`
+instead of silently keeping the older checkout default.
+
 `python3 scripts/agent_context_engine.py install` without an explicit `--target` now
 uses that same discovery context. In interactive use it guides the remaining
 choices, shows a final install-plan confirmation before writing files, and in
@@ -90,7 +95,11 @@ Rules:
 - Claude integration still depends on the `claude` CLI. Claude Desktop alone is
   not a sufficient Agent Context Engine runtime.
 - Cursor project hooks can be prepared separately, but headless flows still
-  require `cursor-agent` plus its login/auth path.
+  require a separate headless LLM runner.
+- Cursor project activation now requires `codex` or `claude` on the machine.
+- Cursor itself provides the IDE-side hook/session capture; Codex or Claude
+  handles firewall classification, dreaming, query expansion, and other
+  background LLM workflows.
 - `install` should also record the intended workflow runners via
   `--monitor-runner`, `--dream-runner`, and `--query-expansion-runner`, because
   those choices determine whether a GUI-only setup is sufficient later.
@@ -142,10 +151,11 @@ That means:
 
 If another Agent Context Engine installation already exists, the default shared
 public contract is to move `agent-context-engine`, `ace`, and the shared
-`*-ace` commands to the newly selected installation. Use the following only
-when you explicitly want side-by-side command isolation instead of takeover:
+`*-ace` commands to the newly selected installation. Use `--isolated` when you
+explicitly want side-by-side command isolation instead of takeover:
 
-- `--instance-name <name>` during install for isolated commands
+- `--isolated` for a target-local memory root and instance-specific command names
+- `--instance-name <name>` to override the auto-derived isolated instance name
 - or `--command-prefix <prefix>` for legacy-compatible prefixes
 - or `--wrapper-prefix <prefix>` / `--wrapper-suffix <suffix>` for explicit
   instance-specific command naming
@@ -161,7 +171,7 @@ Example:
 ```sh
 python3 scripts/agent_context_engine.py install \
   --target /path/to/second-agent-context-engine-root \
-  --instance-name client-a \
+  --isolated \
   --bootstrap-runtime \
   --link-codex-ace \
   --link-claude-ace \
@@ -201,8 +211,25 @@ templates, wrappers, and monitor assets.
 Use these after the central installation exists:
 
 ```sh
-agent-context-engine cursor-enable --target /path/to/project --memory-root /path/to/agent-context-engine-root
+agent-context-engine cursor-enable --target /path/to/project --installation-root /path/to/agent-context-engine-root
 ```
+
+To pin Cursor background workflows to a specific runner:
+
+```sh
+agent-context-engine cursor-enable --target /path/to/project --installation-root /path/to/agent-context-engine-root --background-runner claude
+```
+
+For `cursor-enable`, `antigravity-enable`, `gemini-enable`, `opencode-enable`,
+and `integration-hooks`, `--installation-root` selects the Agent Context Engine
+checkout that owns scripts, wrappers, templates, and hook bindings. The legacy
+`--memory-root` flag remains accepted there as a compatibility alias, but it is
+not the install-time runtime storage flag described above.
+
+For Cursor specifically, `--background-runner codex` or `--background-runner claude`
+pins the background LLM workflows for that workspace. The requested runner must
+be installed and authenticated; Agent Context Engine must not silently switch
+to the other runner after activation.
 
 For `codex`, `claude`, and `cursor`, the workspace hook setup now also writes a
 workspace binding file that points back to the owning Agent Context Engine instance.
@@ -283,6 +310,14 @@ agent-context-engine gemini-status
 agent-context-engine antigravity-status
 agent-context-engine opencode-status
 ```
+
+Verification rules:
+
+- use the active installation command prefix for isolated installs instead of
+  assuming the global `agent-context-engine` command was taken over
+- for project activation, run the concrete status command for that target, for
+  example `cursor-status --target /path/to/project`
+- do not count `--help` output as a verification step
 
 Use `repair-installation --apply` after review when the check reports a missing
 `.venv`, missing `PyYAML`, stale/missing `frontend/dist`, or missing GUI

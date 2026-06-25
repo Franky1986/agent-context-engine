@@ -176,6 +176,45 @@
   color: #18212f;
 }
 
+.session-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.session-meta-line > span:not(.session-client-badge) {
+  color: #657285;
+}
+
+.session-client-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  border: 1px solid rgba(23, 32, 47, 0.14);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #465568;
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
+}
+
+.session-client-badge-origin {
+  border-color: rgba(20, 83, 45, 0.16);
+  background: rgba(236, 253, 245, 0.88);
+  color: #166534;
+}
+
+.session-client-badge-dream {
+  border-color: rgba(29, 78, 216, 0.16);
+  background: rgba(239, 246, 255, 0.9);
+  color: #1d4ed8;
+}
+
 .session-preview {
   line-height: 1.4;
 }

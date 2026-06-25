@@ -17,6 +17,9 @@ agent should:
    answer onward.
 4. Run `python3 scripts/agent_context_engine.py install-discovery` first when this is a
    fresh public clone or the target/memory-root relationship is still unclear.
+   If the user later switches the install conversation language, rerun
+   discovery with an explicit `--language de` or `--language en`, and carry
+   that same explicit language into the final install command.
 5. Summarize the suggested target root, memory root, monitor port, wrapper
    naming, and refresh mode, then wait for the user's approval before any
    install or refresh mutation.
@@ -80,9 +83,12 @@ Reasonable defaults:
 - Target root: the cloned repository if the user wants a self-contained trial;
   otherwise another explicit workspace folder, while the runtime storage default stays `~/.agent-context-engine/memory`.
 - Preferred interaction language: English for public/default setups, or the
-  user's preferred language when stated.
+  user's preferred language when stated. Discovery should propose the install
+  language from the current install interaction before reusing an older
+  checkout language.
 - Harnesses: prepare Codex, Claude, Antigravity, and Gemini in the central
-  root; enable Cursor and OpenCode per project only when requested.
+  root; enable Cursor and OpenCode per project only when requested. Cursor
+  activation requires `codex` or `claude` for background LLM workflows.
 - Global commands: relink the shared public commands to the chosen
   installation by default; switch to `--instance-name` or explicit prefixes only
   when the user wants side-by-side isolated commands.
@@ -168,13 +174,13 @@ python3 scripts/agent_context_engine.py install \
 ```
 
 For a second local installation that must keep existing shared commands
-unchanged, use isolated naming explicitly:
+unchanged, use the deterministic isolated mode:
 
 ```sh
 python3 scripts/agent_context_engine.py install \
   --target /path/to/agent-context-engine-root \
   --language en \
-  --instance-name client-a \
+  --isolated \
   --link-codex-ace \
   --link-claude-ace \
   --link-agy-ace \
@@ -183,9 +189,9 @@ python3 scripts/agent_context_engine.py install \
   --no-interactive
 ```
 
-That produces prefixed global commands such as `client-a-codex-ace`,
-`client-a-claude-ace`, `client-a-agy-ace`, `client-a-gemini-ace`, and
-`client-a-opencode-ace`.
+That keeps shared `agent-context-engine`, `ace`, and unprefixed `*-ace`
+commands untouched, defaults runtime storage to `<target>/memory`, and
+produces instance-prefixed global commands.
 
 After install:
 
@@ -208,11 +214,25 @@ If a specific project should be activated for a client:
 ```sh
 agent-context-engine cursor-enable \
   --target /path/to/project \
-  --memory-root /path/to/agent-context-engine-root
+  --installation-root /path/to/agent-context-engine-root
 agent-context-engine antigravity-enable
 agent-context-engine gemini-enable
 agent-context-engine opencode-enable
 ```
+
+If Cursor should use a specific headless background runner instead of the
+default auto-selection:
+
+```sh
+agent-context-engine cursor-enable \
+  --target /path/to/project \
+  --installation-root /path/to/agent-context-engine-root \
+  --background-runner claude
+```
+
+The requested `codex` or `claude` runner must already be installed and
+authenticated; Cursor activation must fail instead of silently falling back to
+the other runner.
 
 ## Start Commands
 

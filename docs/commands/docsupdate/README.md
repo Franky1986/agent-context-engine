@@ -4,71 +4,30 @@ Use this command pack to keep documentation, specs, versions, and changelog alig
 
 ## Canonical runner
 
-From repo root:
+Use this workflow as an editor-level maintenance task:
 
-```sh
-./scripts/docsupdate \
-  --bump-backend patch \
-  --bump-monitor patch \
-  --changelog-note "backend: ..." \
-  --changelog-note "monitor: ..."
-```
+- Ensure all touched behavior boundaries are covered in the closest `*.spec.md`.
+- Confirm version-sensitive references are current (`backend/pyproject.toml`, frontend manifests).
+- Confirm snapshot docs (`README.md`, `docs/progress/CURRENT_STATUS.md`, and
+  `docs/runbooks/test-strategy-and-validation-status.md`) reflect current state.
+- Prepare backend and monitor changelog notes.
 
-Equivalent:
+`/docsupdate` should resolve to this document from the configured client entry points and be executed via the editor/runtime command path.
 
-```sh
-agent-context-engine docsupdate \
-  --bump-backend patch \
-  --bump-monitor patch \
-  --changelog-note "backend: ..." \
-  --changelog-note "monitor: ..."
-```
+## Required workflow before running docsupdate
 
-## Client surfaces
+- Confirm all touched behavior-facing files are covered in the nearest `*.spec.md`.
+- Confirm version-sensitive references are ready (`backend/pyproject.toml`, frontend version manifests).
+- Confirm release snapshots are current (`README.md`, `docs/index.md`, relevant progress/runbook snapshots).
+- Decide concise changelog notes for backend + monitor before finalizing.
 
-For Codex/CLI compatibility, the workflow is maintained as:
+## Client command surfaces
 
-- `.agents/skills/docsupdate/SKILL.md` (preferred)
-- `.codex/commands/docsupdate.md` (fallback)
+The canonical contract is this README. Client bindings are thin references:
+
+- `.codex/commands/docsupdate.md`
 - `.claude/commands/docsupdate.md`
 - `.cursor/commands/docsupdate.md`
 - `.opencode/commands/docsupdate.md`
 
-All references use the same command spec.
-
-If `/docsupdate` is not offered in the startup slash menu, run:
-
-```text
-/use docsupdate
-```
-
-Or if that is also unavailable:
-
-```text
-/skills
-```
-
-then invoke the `docsupdate` skill.
-
-If Codex exposes slash commands, run:
-
-```text
-/docsupdate
-```
-
-For OpenCode, use:
-
-```text
-/docsupdate
-```
-
-### Recommended usage pattern
-
-- Use the workflow after release-relevant changes:
-  - versions synced (`backend/pyproject.toml`, frontend package versions)
-  - release snapshots (`README.md`, `docs/progress/CURRENT_STATUS.md`, `docs/runbooks/test-strategy-and-validation-status.md`)
-  - `docs/index.md` spec section refreshed
-  - `CHANGELOG.md` sections updated
-
-- If a changelog note is not ready yet:
-  - use `--skip-index` once, then add notes in a follow-up run.
+Use `/docsupdate` in clients configured for slash-command mapping.

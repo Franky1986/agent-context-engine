@@ -31,54 +31,31 @@ and repository-level operating constraints.
 - Treat spec and documentation updates as part of the same change, not as a follow-up cleanup step. When behavior, command contracts, installation defaults, hook flows, or operator guidance changes, update the nearest `*.spec.md` plus the relevant user-facing docs in the same patch.
 - When a `*.spec.md` file is added or moved, run `python3 scripts/update_docs_index.py --check` and keep `docs/index.md` aligned.
 - Changes to installation, harnesses, monitor behavior, or agent workflow contracts must keep `AGENT_BOOTSTRAP.md`, `docs/setup/RUNNER_HARNESSES.md`, and `session-start-hook-entry.md` accurate.
-- After such changes, run one sync pass and commit:
+- After such changes, run the `/docsupdate` workflow once all files are aligned and
+  commit.
 
-```sh
-./scripts/release-doc-sync \
-  --bump-backend patch \
-  --bump-monitor patch \
-  --changelog-note "backend: <summary of changed backend behavior>"
-  --changelog-note "monitor: <summary of changed monitor/runtime behavior>"
-```
-
-Use the short form for release-cycle operations:
-
-```sh
-agent-context-engine docsupdate \
-  --changelog-note "backend: ..." \
-  --changelog-note "monitor: ..."
-```
-
-`docsupdate` is a CLI entry that executes `release-doc-sync` through the
-`agent-context-engine` command.
-
-`docsupdate` is the canonical maintenance workflow label for clients; see `/docsupdate` entries below.
-
-Client command surfaces should stay as thin references to the canonical command spec:
+Use `/docsupdate` as the editor workflow entry for release-oriented maintenance.
+The workflow details and required evidence are defined in:
 
 - `docs/commands/docsupdate/README.md`
-- `.agents/skills/docsupdate/SKILL.md` (preferred/primary in Codex)
-- `.codex/commands/docsupdate.md` (fallback in mixed Codex builds)
+- `.codex/commands/docsupdate.md` (Codex)
 - `.claude/commands/docsupdate.md`
 - `.cursor/commands/docsupdate.md`
 - `.opencode/commands/docsupdate.md`
 
-Canonical command behavior is centered in `./scripts/docsupdate`.
+`/docsupdate` is intentionally an editor/runtime workflow entry; it does not add a separate `agent-context-engine docsupdate` CLI verb.
 
-For Codex clients, use the skill (`$docsupdate`) directly; if the slash entry is not shown, run `/skills` and then `/use docsupdate`.
+`docsupdate` is the canonical maintenance workflow label for clients; it resolves to
+the instructions in `docs/commands/docsupdate/README.md`. Client-facing command
+surfaces should remain thin references only:
 
-- If explicit versions are required, pass `--backend-version` / `--monitor-version`
-  instead of bump flags. Example:
+- `.codex/commands/docsupdate.md`
+- `.claude/commands/docsupdate.md`
+- `.cursor/commands/docsupdate.md`
+- `.opencode/commands/docsupdate.md`
 
-```sh
-./scripts/release-doc-sync \
-  --backend-version 0.2.8 \
-  --monitor-version 0.6.5 \
-  --release-date 2026-06-25
-```
-
-- If changelog text is not ready yet, use `--skip-index` during draft work and add
-  `update_docs_index.py --check` / changelog notes as a follow-up.
+Use those entrypoints; keep implementation details and changelog/version notes in the
+source-of-truth document only.
 
 ## Installation Context
 
@@ -163,6 +140,14 @@ Before publishing changes, run:
 
 ```sh
 ./scripts/check --skip-runtime-db
+```
+
+Installation, activation, wrapper, LaunchAgent, and storage-root integration
+tests are intentionally separated from the normal unit suite. Run them
+explicitly when those flows changed:
+
+```sh
+./scripts/check --skip-runtime-db --include-install-integration-tests
 ```
 
 For focused tests:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Callable
 
@@ -18,6 +17,7 @@ from agent_context_engine.application.dreaming.runners import (
     runner_token_usage_available,
 )
 from agent_context_engine.adapters.runners.codex import codex_subprocess_env
+from agent_context_engine.application.dreaming.v2_refactor.json_output import DreamRunnerJsonError, extract_json, extract_json_with_diagnostics
 from agent_context_engine.application.dreaming.v2_ports import CommandResult, CommandRunner
 
 
@@ -25,8 +25,9 @@ __all__ = [
     "invoke_runner",
     "mock_llm_output",
     "extract_json",
+    "extract_json_with_diagnostics",
+    "DreamRunnerJsonError",
 ]
-
 
 def mock_llm_output(
     prompt: str,
@@ -148,6 +149,7 @@ def invoke_runner(
     extract_runner_token_usage_fn=extract_runner_token_usage,
     codex_subprocess_env_fn=codex_subprocess_env,
     write_input_text_separator: str = "\n",
+    allow_empty_output: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     if mock_enabled or runner == "deterministic":
         output = mock_llm_output(
@@ -173,6 +175,7 @@ def invoke_runner(
     started_mono = monotonic_fn()
     runner_env = {
         "AGENT_MEMORY_DREAM": "1",
+        "AGENT_MEMORY_INTERNAL_RUN": "1",
         "AGENT_CONTEXT_ENGINE_ROOT": root_path,
     }
 
@@ -196,7 +199,7 @@ def invoke_runner(
             input_text=prompt,
             timeout=timeout,
             cwd=root_path,
-            env={**base_env, **{"AGENT_MEMORY_DREAM": "1"}},
+            env={**base_env, **runner_env},
         )
         output = proc.stdout.strip()
         write_text_fn(raw_output_path, output + (write_input_text_separator if output else ""))
@@ -273,45 +276,8 @@ def invoke_runner(
         raise RuntimeError(f"{runner} v2 LLM stage failed with exit code {proc.returncode}: {(proc.stderr or proc.stdout)[-1000:]}")
     if tool_event_detected:
         raise RuntimeError(f"{runner} v2 LLM stage used or attempted to use a tool")
-    if not output:
+    if not output and not allow_empty_output:
         raise RuntimeError(f"{runner} v2 LLM stage produced empty output")
     if len(output.encode("utf-8")) > max_output_bytes:
         raise RuntimeError(f"{runner} v2 LLM stage output exceeds {max_output_bytes} bytes")
     return output, metadata
-
-
-def extract_json(text: str) -> Any:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-    try:
-        return json.loads(stripped)
-    except json.JSONDecodeError as primary_error:
-        decoder = json.JSONDecoder()
-        best_candidate: Any | None = None
-        best_score: tuple[int, int] | None = None
-        for index, char in enumerate(stripped):
-            if char not in "{[":
-                continue
-            try:
-                candidate, end = decoder.raw_decode(stripped[index:])
-            except json.JSONDecodeError:
-                continue
-            tail = stripped[index + end :].strip()
-            score = (
-                0 if isinstance(candidate, dict) and candidate.get("schema_version") else 1,
-                0 if not tail else 1,
-            )
-            if best_score is None or score < best_score:
-                best_candidate = candidate
-                best_score = score
-                if score == (0, 0):
-                    break
-        if best_candidate is not None:
-            return best_candidate
-        raise primary_error

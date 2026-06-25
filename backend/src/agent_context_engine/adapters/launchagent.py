@@ -317,6 +317,53 @@ def _parse_launchctl_runtime(text: str) -> dict[str, Any]:
     }
 
 
+def _parallel_launchagents_for_env_file(
+    *,
+    label: str,
+    env_file: str,
+    root: Path,
+) -> list[dict[str, Any]]:
+    launchagents_dir = Path.home() / "Library" / "LaunchAgents"
+    if not launchagents_dir.exists():
+        return []
+    expected_env_file = str(resolve_env_file(env_file, root=root).resolve())
+    peers: list[dict[str, Any]] = []
+    for plist_path in sorted(launchagents_dir.glob("com.agent-context-engine*.plist")):
+        try:
+            with plist_path.open("rb") as handle:
+                plist = plistlib.load(handle)
+        except Exception:
+            continue
+        if not isinstance(plist, dict):
+            continue
+        peer_label = str(plist.get("Label") or plist_path.stem).strip()
+        if not peer_label or peer_label == label:
+            continue
+        snapshot = _plist_snapshot(plist, path=plist_path)
+        peer_env_file = str((snapshot.get("managed_env") or {}).get("AGENT_MEMORY_ENV_FILE") or "").strip()
+        if not peer_env_file:
+            continue
+        try:
+            resolved_peer_env_file = str(resolve_env_file(peer_env_file, root=Path(str(snapshot.get("working_directory") or root))).resolve())
+        except OSError:
+            resolved_peer_env_file = str(Path(peer_env_file).expanduser())
+        if resolved_peer_env_file != expected_env_file:
+            continue
+        loaded = launchagent_loaded(peer_label)
+        peers.append(
+            {
+                "label": peer_label,
+                "plist_path": str(plist_path.resolve()),
+                "program": snapshot.get("program"),
+                "working_directory": snapshot.get("working_directory"),
+                "env_file": resolved_peer_env_file,
+                "loaded": loaded,
+                "runtime": _parse_launchctl_runtime(_launchctl_print(peer_label)) if loaded else {},
+            }
+        )
+    return peers
+
+
 def launchagent_runtime_status(
     *,
     label: str = DEFAULT_LABEL,
@@ -330,6 +377,8 @@ def launchagent_runtime_status(
     installed = _plist_snapshot(installed_plist, path=path) if installed_plist else None
     loaded = launchagent_loaded(label)
     runtime = _parse_launchctl_runtime(_launchctl_print(label)) if loaded else {}
+    parallel_launchagents = _parallel_launchagents_for_env_file(label=label, env_file=env_file, root=root)
+    loaded_parallel_launchagents = [item for item in parallel_launchagents if item.get("loaded") is True]
 
     drift_reasons: list[str] = []
     if installed is None:
@@ -349,6 +398,9 @@ def launchagent_runtime_status(
             drift_reasons.append("launchagent spec version is outdated")
     if loaded is False:
         drift_reasons.append("launchagent is installed but not loaded")
+    if loaded_parallel_launchagents:
+        labels = ", ".join(str(item.get("label") or "") for item in loaded_parallel_launchagents if str(item.get("label") or "").strip())
+        drift_reasons.append(f"parallel loaded launchagents share the same memory root: {labels}")
 
     return {
         "supported": shutil.which("launchctl") is not None,
@@ -357,6 +409,7 @@ def launchagent_runtime_status(
         "installed": installed,
         "loaded": loaded,
         "runtime": runtime,
+        "parallel_launchagents": parallel_launchagents,
         "drift": {
             "detected": bool(drift_reasons),
             "reasons": drift_reasons,

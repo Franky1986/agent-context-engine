@@ -37,10 +37,12 @@ development references in this repository.
 - [Monitor Runtime Stability And Session/Dream UX Hardening](progress/2026-06-08-monitor-runtime-stability-and-session-dream-ux-hardening.md)
 - [Semantic Integrity / Ontology / Graph Retrieval Epic](progress/2026-06-08-semantic-integrity-and-ontology-epic.md)
 - [SQLite Lock Hardening And Stale Dream Recovery](progress/2026-06-16-sqlite-lock-hardening-and-stale-dream-recovery.md)
+- [Dream Tokens Optimization TODO](dream-tokens-optimization-todo.md)
 - [Integration Management Agent Guide](skills/integration-management-agent.md)
 - [Dream Pipeline v2 Runbook](runbooks/dream-pipeline-v2.md)
 - [Integration Management Runbook](runbooks/integration-management.md)
 - [Monitor Operator Workflows](runbooks/monitor-operator-workflows.md)
+- [Test Strategy And Validation Status](runbooks/test-strategy-and-validation-status.md)
 - [Runner And Harness Guide](setup/RUNNER_HARNESSES.md)
 - [Instance Isolation / Workspace Binding Epic](epics/instance-isolation-and-workspace-binding-plan.md)
 

@@ -385,10 +385,14 @@ def check_fresh_install_smoke() -> CheckResult:
         target = Path(tmp) / "target"
         link_dir = Path(tmp) / "bin"
         home_root = Path(tmp) / "home"
-        memory_root = home_root / ".agent-context-engine" / "instances" / "default" / "memory"
+        instance_name = "smoke"
+        memory_root = home_root / ".agent-context-engine" / "memory"
         env = os.environ.copy()
         env["HOME"] = str(home_root)
+        env.setdefault("AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD", "1")
+        env.setdefault("AGENT_MEMORY_TEST_SKIP_MONITOR_START", "1")
         env.setdefault("AGENT_MEMORY_TEST_SKIP_MONITOR_OPEN", "1")
+        env.setdefault("AGENT_MEMORY_TEST_SKIP_RUNTIME_BOOTSTRAP", "1")
         install = subprocess.run(
             [
                 sys.executable,
@@ -397,7 +401,7 @@ def check_fresh_install_smoke() -> CheckResult:
                 "--target",
                 str(target),
                 "--instance-name",
-                "smoke",
+                instance_name,
                 "--link-codex-ace",
                 "--link-claude-ace",
                 "--link-agy-ace",
@@ -498,7 +502,9 @@ def main() -> int:
     parser.add_argument("--skip-runtime-db", action="store_true", help="Skip checks that require an existing populated local memory database")
     parser.add_argument("--skip-monitoring-contract-gate", action="store_true")
     parser.add_argument("--include-retrieval-evals", action="store_true")
+    parser.add_argument("--include-install-integration-tests", action="store_true")
     parser.add_argument("--unit-suite-timeout", type=int, default=int(os.environ.get("AGENT_MEMORY_CHECK_UNIT_SUITE_TIMEOUT", "600")))
+    parser.add_argument("--install-integration-timeout", type=int, default=int(os.environ.get("AGENT_MEMORY_CHECK_INSTALL_INTEGRATION_TIMEOUT", "1800")))
     args = parser.parse_args()
 
     checks: list[CheckResult] = []
@@ -511,7 +517,31 @@ def main() -> int:
     checks.append(check_test_coverage_matrix())
     checks.append(check_fresh_install_smoke())
     if not args.skip_tests:
-        checks.append(run_command("unit-suite", [sys.executable, str(TEST_FILE)], timeout=max(60, int(args.unit_suite_timeout))))
+        checks.append(
+            run_command(
+                "unit-suite",
+                [sys.executable, str(TEST_FILE)],
+                timeout=max(60, int(args.unit_suite_timeout)),
+                env={"AGENT_MEMORY_SKIP_INSTALL_INTEGRATION_TESTS": "1"},
+            )
+        )
+        if args.include_install_integration_tests:
+            checks.append(
+                run_command(
+                    "install-integration-suite",
+                    [sys.executable, str(TEST_FILE)],
+                    timeout=max(60, int(args.install_integration_timeout)),
+                    env={"AGENT_MEMORY_ONLY_INSTALL_INTEGRATION_TESTS": "1"},
+                )
+            )
+        else:
+            checks.append(
+                CheckResult(
+                    "install-integration-suite",
+                    True,
+                    "skipped: run `./scripts/check --skip-runtime-db --include-install-integration-tests`",
+                )
+            )
     if not args.skip_doctor:
         checks.append(check_doctor_for_current_root())
     if not args.skip_runtime_db:

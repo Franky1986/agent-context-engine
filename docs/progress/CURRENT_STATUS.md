@@ -1,7 +1,7 @@
 # Current Status
 
 ## Date
-2026-06-22
+2026-06-25
 
 ## Public Snapshot
 
@@ -15,9 +15,15 @@ workflows. The current public slice includes:
 - instance profiles with wrapper naming, monitor defaults, and LaunchAgent
   defaults,
 - explicit workspace bindings for `codex`, `claude`, and `cursor`,
+- origin client + dream runner visibility in session list rows,
 - storage-root decoupling through `memory_root`,
 - guided installation discovery with explicit user confirmation before
   mutation.
+
+Versioned release snapshot:
+
+- Backend / product: `0.2.7`
+- Monitor: `0.6.5`
 
 ## Installation State
 
@@ -37,6 +43,10 @@ The current install flow now supports:
 - `antigravity`, `gemini`, and `opencode` are global-only bridge flows.
 - missing or stale workspace bindings are surfaced in diagnostics and the
   monitor instead of being treated as silently valid.
+- Cursor activation now persists configured background runner and project launch
+  context for hook capture and dream routing.
+- Session list rows now show both origin client and dream runner, plus effective
+  workdir (`last_workdir`) for session-level provenance.
 
 ## Known Follow-Up Areas
 

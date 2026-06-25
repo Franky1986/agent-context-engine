@@ -15,7 +15,7 @@ from ..services import (
     apply_semantic_guardrails,
     build_semantic_prompt,
     deterministic_semantic_payload,
-    extract_json,
+    extract_json_with_diagnostics,
     invoke_runner,
     load_reused_stage_json,
     plain_event_window,
@@ -179,13 +179,18 @@ def run_semantic_stage(
             semantic_schema_version=SEMANTIC_SCHEMA_VERSION,
             reconciliation_schema_version=RECONCILIATION_SCHEMA_VERSION,
             json_dumps_fn=stage_runtime.json_dumps,
+            allow_empty_output=True,
         )
         semantic_fallback_reason: str | None = None
         try:
-            semantic_payload = extract_json(semantic_text)
+            semantic_payload, json_diagnostics = extract_json_with_diagnostics(semantic_text)
             semantic_payload["dream_run_id"] = context.dream_run_id
             semantic_payload["session_id"] = context.session_id
             semantic_payload["source_event_range"] = {"start_seq": context.event_from, "end_seq": context.event_to}
+            semantic_meta = {
+                **semantic_meta,
+                "json_parse": json_diagnostics,
+            }
         except Exception as exc:  # noqa: BLE001
             semantic_fallback_reason = str(exc)
             semantic_payload = deterministic_semantic_payload(
@@ -202,6 +207,8 @@ def run_semantic_stage(
                 **semantic_meta,
                 "fallback_to_deterministic_semantic": True,
                 "fallback_reason": semantic_fallback_reason,
+                "json_parse_error_code": getattr(exc, "code", None),
+                "json_parse": getattr(exc, "diagnostics", {"strategy": "failed"}),
             }
     semantic_payload = apply_semantic_guardrails(semantic_payload, events=events)
     low_signal_window = bool(semantic_payload.pop("_low_signal_window", False))

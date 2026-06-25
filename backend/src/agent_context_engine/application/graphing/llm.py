@@ -10,6 +10,7 @@ from time import monotonic
 from typing import Any
 
 from ...adapters.runners.codex import codex_subprocess_env
+from ..dreaming.v2_refactor.json_output import extract_json_with_diagnostics
 from ...infrastructure.config import ROOT, json_dumps, safe_slug, utc_now
 from ...infrastructure.db import connect as db_connect
 from ...infrastructure.text import read_text_limited
@@ -76,19 +77,9 @@ OPERATIONAL_RELATION_TYPES = {
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, flags=re.S)
-    if fence_match:
-        stripped = fence_match.group(1).strip()
-    if not stripped.startswith("{"):
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise RuntimeError("LLM graph output did not contain a JSON object")
-        stripped = stripped[start : end + 1]
     try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError as exc:
+        parsed, _diagnostics = extract_json_with_diagnostics(text)
+    except Exception as exc:
         raise RuntimeError(f"LLM graph output is not valid JSON: {exc}") from exc
     if not isinstance(parsed, dict):
         raise RuntimeError("LLM graph output must be a JSON object")
@@ -689,39 +680,45 @@ def llm_graph_run(
             capture_output=True,
             timeout=timeout,
             cwd=str(ROOT),
-            env=codex_subprocess_env(extra={"AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)}),
-        )
+                env=codex_subprocess_env(
+                    extra={
+                        "AGENT_MEMORY_DREAM": "1",
+                        "AGENT_MEMORY_INTERNAL_RUN": "1",
+                        "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT),
+                    }
+                ),
+            )
         tool_event_detected = codex_stdout_has_tool_events(proc.stdout)
         raw_text = read_text_limited(response_path, 5_000_000) if response_path.exists() else proc.stdout
         if not response_path.exists():
             response_path.write_text(raw_text, encoding="utf-8")
     elif runner == "claude":
         command = claude_graph_command(resolved_model)
-        proc = subprocess.run(command, input=prompt, text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
+        proc = subprocess.run(command, input=prompt, text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
         tool_event_detected = False
         raw_text = proc.stdout
         response_path.write_text(raw_text, encoding="utf-8")
     elif runner == "cursor":
         command = cursor_graph_command(resolved_model)
-        proc = subprocess.run(command + [prompt], text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
+        proc = subprocess.run(command + [prompt], text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
         tool_event_detected = False
         raw_text = cursor_stdout_text(proc.stdout)
         response_path.write_text(raw_text, encoding="utf-8")
     elif runner == "antigravity":
         command = antigravity_graph_command(resolved_model)
-        proc = subprocess.run(command + [prompt], text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
+        proc = subprocess.run(command + [prompt], text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
         tool_event_detected = False
         raw_text = proc.stdout
         response_path.write_text(raw_text, encoding="utf-8")
     elif runner == "gemini":
         command = gemini_graph_command(resolved_model)
-        proc = subprocess.run(command + [prompt], text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
+        proc = subprocess.run(command + [prompt], text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
         tool_event_detected = False
         raw_text = proc.stdout
         response_path.write_text(raw_text, encoding="utf-8")
     elif runner == "opencode":
         command = opencode_graph_command(resolved_model)
-        proc = subprocess.run(command + [prompt], text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
+        proc = subprocess.run(command + [prompt], text=True, capture_output=True, timeout=timeout, cwd=str(ROOT), env={**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_MEMORY_INTERNAL_RUN": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)})
         tool_event_detected = False
         raw_text = opencode_stdout_text(proc.stdout)
         response_path.write_text(raw_text, encoding="utf-8")

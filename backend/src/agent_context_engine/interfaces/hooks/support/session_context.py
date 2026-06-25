@@ -4,7 +4,9 @@ import json
 import os
 from typing import Any
 
-from ....application.dreaming.runners import cursor_agent_auth_status
+from pathlib import Path
+
+from ....application.integrations import cursor_project_background_runner_status
 from ....infrastructure.config import ROOT, json_dumps, session_short, sh_quote
 from ....application.personal import PERSONAL_ROOT, parse_frontmatter, personal_files, startup_safe_personal_context
 from ....application.firewall import active_firewall_override, firewall_status
@@ -367,8 +369,9 @@ def cursor_recent_auth_failure_context(
 ) -> str:
     if client_type != "cursor":
         return ""
-    ready, _detail = cursor_agent_auth_status()
-    if ready:
+    background = cursor_project_background_runner_status(Path(current_folder or ROOT), expected_memory_root=ROOT)
+    runner = str(background.get("headless_runner") or "").strip()
+    if not runner:
         return ""
     params: list[Any] = [session_id]
     scope_sql = "dr.session_id = ?"
@@ -390,14 +393,23 @@ def cursor_recent_auth_failure_context(
             select dr.dream_run_id, dr.session_id, dr.finished_at, dr.error_message
             from dream_runs dr
             join sessions s on s.session_id = dr.session_id
-            where dr.runner = 'cursor'
+            where dr.runner = ?
               and dr.status = 'failed'
-              and lower(coalesce(dr.error_message, '')) like '%authentication required%'
+              and (
+                lower(coalesce(dr.error_message, '')) like '%authentication required%'
+                or lower(coalesce(dr.error_message, '')) like '%not logged in%'
+                or lower(coalesce(dr.error_message, '')) like '%not ready%'
+                or lower(coalesce(dr.error_message, '')) like '% login%'
+                or lower(coalesce(dr.error_message, '')) like '%run /login%'
+                or lower(coalesce(dr.error_message, '')) like '%please run /login%'
+                or lower(coalesce(dr.error_message, '')) like '%run agent login%'
+                or lower(coalesce(dr.error_message, '')) like '%cursor_api_key%'
+              )
               and not exists (
                 select 1
                 from dream_runs later
                 where later.session_id = dr.session_id
-                  and later.runner = 'cursor'
+                  and later.runner = ?
                   and later.status = 'succeeded'
                   and datetime(coalesce(later.finished_at, later.started_at)) > datetime(coalesce(dr.finished_at, dr.started_at))
               )
@@ -405,35 +417,64 @@ def cursor_recent_auth_failure_context(
             order by coalesce(dr.finished_at, dr.started_at) desc
             limit ?
             """,
-            tuple(params),
+            tuple([runner, runner, *params]),
         )
     )
+    if not rows and background["headless_runner_ready"]:
+        return ""
     if not rows:
         return ""
+    login_command = str(background.get("background_runner_login_command") or f"{runner} login").strip()
     return (
-        "Recent Cursor dream runs already failed with authentication errors in the background environment. "
-        "Run `cursor-agent login` so it works outside the IDE as well, or set `CURSOR_API_KEY`."
+        f"Recent Cursor background runs already failed with authentication errors for `{runner}`. "
+        f"Run `{login_command}` so it works in headless background workflows as well."
     )
 
 
-def cursor_dream_auth_context(client_type: str | None) -> str:
+def _cursor_background_candidates_hint(background: dict[str, Any]) -> str:
+    candidates = background.get("background_runner_candidates")
+    if not isinstance(candidates, list):
+        return ""
+    hints: list[str] = []
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        runner = str(item.get("runner") or "").strip()
+        if runner not in {"codex", "claude"}:
+            continue
+        status = str(item.get("auth_status") or item.get("readiness_status") or "").strip()
+        if status == "ready":
+            continue
+        login_command = str(item.get("login_command") or "").strip()
+        if status == "auth_required" and login_command:
+            hints.append(f"{runner}: run `{login_command}`")
+        elif status == "missing_executable":
+            hints.append(f"{runner}: install the CLI")
+    if len(hints) < 2:
+        return ""
+    return " Checked background candidates: " + "; ".join(hints) + "."
+
+
+def cursor_dream_auth_context(client_type: str | None, *, current_folder: str = "") -> str:
     if client_type != "cursor":
         return ""
-    ready, detail = cursor_agent_auth_status()
-    if ready:
+    background = cursor_project_background_runner_status(Path(current_folder or ROOT), expected_memory_root=ROOT)
+    if background["headless_runner_ready"]:
         return ""
+    runner = str(background.get("headless_runner") or "").strip()
+    detail = str(background.get("background_runner_auth_detail") or background.get("background_runner_detail") or "").strip()
     suffix = f" Current status: {one_line(detail, 180)}" if detail else ""
-    lowered = str(detail or "").lower()
-    if "executable is missing" in lowered or "not found" in lowered:
+    candidates_hint = _cursor_background_candidates_hint(background)
+    if background["background_runner_status"] == "auth_required" and runner:
         return (
-            "Cursor dream runner is not ready. Install `cursor-agent` first, then run `cursor-agent login` "
-            "before expecting automatic dream processing in Cursor sessions."
-            f"{suffix}"
+            f"Cursor background runner `{runner}` is not ready. "
+            f"Run `{background.get('background_runner_login_command') or f'{runner} login'}` before expecting automatic firewall classification, dreaming, and query expansion in Cursor sessions."
+            f"{candidates_hint}{suffix}"
         )
     return (
-        "Cursor dream runner is not ready. Run `cursor-agent login` or set `CURSOR_API_KEY` "
-        "before expecting automatic dream processing in Cursor sessions."
-        f"{suffix}"
+        "Cursor background LLM workflows are not ready. "
+        "Install and authenticate `codex` or `claude` before expecting automatic firewall classification, dreaming, and query expansion in Cursor sessions."
+        f"{candidates_hint}{suffix}"
     )
 
 
@@ -447,7 +488,7 @@ def cursor_dream_auth_block_message(
     prompt: str | None = None,
     login_trigger: str = "",
 ) -> str:
-    context = cursor_dream_auth_context(client_type)
+    context = cursor_dream_auth_context(client_type, current_folder=current_folder)
     if not context:
         context = cursor_recent_auth_failure_context(
             conn,
@@ -458,6 +499,9 @@ def cursor_dream_auth_block_message(
         )
     if not context:
         return ""
+    background = cursor_project_background_runner_status(Path(current_folder or ROOT), expected_memory_root=ROOT)
+    runner = str(background.get("headless_runner") or "").strip()
+    login_command = str(background.get("background_runner_login_command") or (f"{runner} login" if runner else "")).strip()
     prompt_text = str(prompt or "").strip().lower()
     login_intent = any(
         marker in prompt_text
@@ -472,49 +516,15 @@ def cursor_dream_auth_block_message(
         )
     )
     if login_intent:
-        if login_trigger == "started":
-            login_lead = (
-                "I just started `cursor-agent login` for this machine. "
-                "Complete the Cursor authentication flow that opens outside the IDE, then continue in this same chat. "
-            )
-        elif login_trigger == "recently_triggered":
-            login_lead = (
-                "The Cursor login flow was already triggered for this session a moment ago. "
-                "Finish that authentication flow, then continue in this same chat. "
-            )
-        else:
-            login_lead = ""
         return (
-            f"{login_lead}{context} "
-            "If the login flow did not open, run `cursor-agent login` in a local terminal, finish the auth flow, then verify it with `cursor-agent status`. "
-            "If `cursor-agent` is missing, install the Cursor CLI first so the `cursor-agent` command exists. "
+            f"{context} "
+            f"Run `{login_command or 'codex login or claude login'}` in a local terminal, finish the auth flow, and then continue in this same chat. "
+            "If the requested background runner is missing, install it first. "
             "After that, continue in this same chat with your original Agent Context Engine question. "
             "You can disable the Cursor hooks in Cursor Settings > Hooks, but then Agent Context Engine will not work in this project."
         )
-    if login_trigger == "started":
-        login_lead = (
-            "Agent Context Engine just started `cursor-agent login` for this machine. "
-            "Complete the Cursor authentication flow that opens outside the IDE, then continue in this same chat. "
-        )
-    elif login_trigger == "recently_triggered":
-        login_lead = (
-            "The Cursor login flow was already triggered for this session a moment ago. "
-            "Finish that authentication flow, then continue in this same chat. "
-        )
-    elif login_trigger == "missing_executable":
-        login_lead = (
-            "The login flow could not be started because `cursor-agent` is missing on this machine. "
-            "Install the Cursor CLI first, then continue in this same chat. "
-        )
-    elif login_trigger == "start_failed":
-        login_lead = (
-            "Agent Context Engine tried to start `cursor-agent login` automatically but the local process could not be launched. "
-            "Run `cursor-agent login` in a local terminal, then continue in this same chat. "
-        )
-    else:
-        login_lead = ""
     return (
-        f"{login_lead}{context} "
+        f"{context} "
         "You can disable the Cursor hooks in Cursor Settings > Hooks, but then Agent Context Engine will not work in this project."
     )
 
@@ -567,7 +577,7 @@ def memory_hooks_status_context(
         if dream_context:
             lines.append(dream_context)
     if include_cursor_auth_notice:
-        cursor_context = cursor_dream_auth_context(client_type)
+        cursor_context = cursor_dream_auth_context(client_type, current_folder=current_folder)
         if cursor_context:
             lines.append(cursor_context)
     return "\n\n".join(line for line in lines if line.strip())

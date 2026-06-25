@@ -9,6 +9,169 @@ This repository currently has one public baseline commit:
 
 The entries below document the changes added since that initial public release.
 
+## Monitor 0.6.5
+
+### Changed
+
+- updated session visibility and integration metadata runbook docs for operator workflows
+
+## Backend 0.2.7
+
+### Changed
+
+- added agentic documentation/version/changelog maintenance workflow with the `/docsupdate` editor entrypoint
+
+## Backend 0.2.6
+
+### Changed
+
+- Added explicit persistence of Cursor background-runner choice in project bindings during
+  activation and reuses that configured runner for dream routing and status reporting.
+- Cursor hook wrapper generation now writes stable launch context (`AGENT_MEMORY_LAUNCH_CWD`)
+  so project-aware behavior no longer regresses to installation-root context.
+- Dream runner readiness checks now distinguish between CLI availability and usable auth for
+  `claude` and `codex`, including explicit guidance for the correct auth checks.
+- Query-expansion fallback now emits deterministic plan metadata even when the normal classifier
+  path is blocked.
+
+### Fixed
+
+- Resolved `NameError` in generated Cursor hook adapters caused by shell variable interpolation
+  in the shared template (`AGENT_MEMORY_DREAM`/`AGENT_MEMORY_INTERNAL_RUN`).
+- Hardened dream stage parsing to include structured parse-failure metadata and stable fallback
+  behavior instead of failing silently.
+
+## Backend 0.2.5
+
+### Changed
+
+- Cursor project activation now stores a stable workspace launch hint in generated hook
+  environments to keep origin-client and headless-runner resolution aligned with the
+  real project path.
+- Cursor binding persistence now keeps the requested background runner (`codex` or
+  `claude`) in the project record and surfaces it through activation, status, and dream
+  routing.
+
+### Fixed
+
+- Cursor dream sessions no longer drift to the default runner when a project-specific
+  binding exists, including repeated start events from the same project path.
+- Cursor activation now rejects headless workflows only when runner CLI auth state is missing,
+  and the status reporting now reflects that readiness gate consistently.
+
+## Monitor 0.6.4
+
+### Changed
+
+- Session list now visually separates origin client and background dream runner, and it renders
+  the explicit effective workdir (`last_workdir`) to show where the session actually ran.
+- Session detail now exposes richer deterministic/semantic quickpeek sections and explicit
+  workdir metadata for follow-up debugging.
+
+### Fixed
+
+- Session table no longer hides runner provenance when background and origin differ.
+- Hook/monitor session surfaces keep project workdir and runner badges aligned after repeated
+  project activation and status refresh.
+
+## Monitor 0.6.3
+
+### Changed
+
+- Session list metadata now renders the originating client as an inline badge and adds a
+  separate dream-runner badge when the background runner differs from the session origin.
+- Session list now prefers `last_workdir` over root install `cwd` for started-path display so
+  operators can immediately see the actual project context.
+
+### Fixed
+
+- Session list no longer suppresses active-origin context for Cursor sessions that run with
+  a project-bound background runner.
+
+## Backend 0.2.4
+
+### Changed
+
+- Cursor project activation now supports explicit background-runner pinning via
+  `cursor-enable --background-runner <codex|claude>` instead of only using
+  best-available auto-selection.
+
+### Fixed
+
+- Cursor workspace bindings now persist the selected background runner so
+  hook-time session capture, status reporting, and later dream-runner
+  resolution all use the same pinned runner.
+- Cursor activation now treats a logged-out `codex` or `claude` CLI as not
+  ready instead of accepting mere binary presence and failing later during
+  dreams or firewall-driven background work.
+
+## Backend 0.2.3
+
+### Changed
+
+- Cursor project activation now requires a separate headless LLM runner
+  (`codex` or `claude`) for firewall classification, dreaming, query
+  expansion, and other background workflows. Cursor is treated as IDE-side
+  hook/session capture rather than the default headless backend.
+- Cursor session startup now prefers the available Codex/Claude headless runner
+  for dream processing instead of defaulting same-runner background work to
+  `cursor`.
+
+### Fixed
+
+- Cursor project activation no longer reports a misleading ready state on
+  machines that have Cursor hooks but no valid headless LLM runner.
+
+## Backend 0.2.2
+
+### Added
+
+- Deterministic `--isolated` install mode with target-local runtime storage by
+  default, instance-specific wrapper naming, and no takeover of shared
+  `agent-context-engine` / `ace` commands.
+- Auditable Dream-v2 JSON parse diagnostics including explicit
+  `json_parse_error_code` metadata on deterministic semantic and
+  reconciliation fallbacks.
+
+### Changed
+
+- Project activation commands now use `--installation-root` as the public flag
+  for selecting the owning Agent Context Engine checkout. The older
+  `--memory-root` spelling remains accepted there as a compatibility alias but
+  is no longer documented as the primary interface.
+- Install discovery now ignores foreign repo-local defaults from another
+  checkout when proposing runtime storage and wrapper naming for a fresh or
+  isolated installation.
+- Integration runbooks now require agents to verify project activation with
+  real status commands instead of treating `--help` output as verification.
+
+### Fixed
+
+- Cursor workspace bindings now retain the activating installation root, so
+  project status checks validate against the correct ACE instance instead of
+  incorrectly treating enabled projects as `inactive_missing_target`.
+- Cursor project activation status now resolves the bound CLI path more
+  defensively across installed and repo-local layouts.
+- Structured JSON stages in Dream-v2, monitor query planning, and LLM graph
+  parsing now tolerate blank, fenced, and mixed-text outputs more safely and
+  fall back conservatively when parsing fails.
+
+## Monitor 0.6.2
+
+### Changed
+
+- Integration cards now count activated project hooks by effective
+  `hooks_enabled` state instead of only by a narrow string comparison on
+  `hooks_state`.
+- Monitor-facing integration semantics and operator guidance now align with the
+  new `--installation-root` activation contract and the isolated-install
+  workflow.
+
+### Fixed
+
+- Cursor project cards no longer show false `0 of 1 enabled` summaries when
+  the project binding points at the correct isolated installation.
+
 ## Backend 0.2.1
 
 ### Changed

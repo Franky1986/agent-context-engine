@@ -343,7 +343,7 @@ export function IntegrationsPanel({ language = 'en', showHeading = true }: Integ
   function projectHookTotals(item: IntegrationStatusItem) {
     const projects = Array.isArray(item.activated_projects) ? item.activated_projects : [];
     const total = projects.length;
-    const enabled = projects.filter((project) => project?.hooks_state === 'enabled').length;
+    const enabled = projects.filter((project) => Boolean(project?.hooks_enabled) || project?.hooks_state === 'enabled').length;
     return { total, enabled };
   }
 

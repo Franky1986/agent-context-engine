@@ -127,7 +127,8 @@ def spawn_hook_queue_kick(reason: str = "hook") -> None:
         return
     if env.get("AGENT_MEMORY_DREAM") or env.get("AGENT_MEMORY_SCHEDULER") or env.get("AGENT_MEMORY_HOOK_QUEUE_WORKER"):
         return
-    worker = hook_queue_status().get("worker") or {}
+    queue = hook_queue_status()
+    worker = queue.get("worker") or {}
     if worker.get("running") and not worker.get("stale"):
         return
     try:
@@ -140,7 +141,8 @@ def spawn_hook_queue_kick(reason: str = "hook") -> None:
     if marker.exists():
         try:
             age = now.timestamp() - marker.stat().st_mtime
-            if age < debounce_seconds:
+            queued_events = int(queue.get("queued_events") or 0)
+            if age < debounce_seconds and queued_events <= 0:
                 return
         except OSError:
             pass

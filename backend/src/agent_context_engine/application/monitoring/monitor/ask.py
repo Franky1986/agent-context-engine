@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ....adapters.runners.codex import codex_subprocess_env
+from ...dreaming.v2_refactor.json_output import extract_json_with_diagnostics
 from ...retrieval import query_terms, search_memory_chunks, significant_terms
 from ....infrastructure.config import ANTIGRAVITY_DREAM_MODEL, CLAUDE_DREAM_MODEL, CODEX_DREAM_MODEL, CURSOR_DREAM_MODEL, GEMINI_DREAM_MODEL, OPENCODE_DREAM_MODEL, ROOT, json_dumps
 from ....infrastructure.db import connect
@@ -31,16 +32,10 @@ def deterministic_query_plan(question: str) -> dict[str, Any]:
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = stripped.strip("`")
-        if stripped.startswith("json"):
-            stripped = stripped[4:].strip()
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start < 0 or end < start:
-        raise ValueError("query planner returned no JSON object")
-    return json.loads(stripped[start : end + 1])
+    parsed, _diagnostics = extract_json_with_diagnostics(text)
+    if not isinstance(parsed, dict):
+        raise ValueError("query planner returned JSON that is not an object")
+    return parsed
 
 
 def build_query_plan_prompt(question: str) -> str:
@@ -200,7 +195,12 @@ def query_plan_schema() -> dict[str, Any]:
 
 
 def run_monitor_llm(runner: str, model: str | None, prompt: str, timeout: int, *, output_schema: dict[str, Any] | None = None) -> str:
-    env = {**os.environ, "AGENT_MEMORY_DREAM": "1", "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT)}
+    env = {
+        **os.environ,
+        "AGENT_MEMORY_DREAM": "1",
+        "AGENT_MEMORY_INTERNAL_RUN": "1",
+        "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT),
+    }
     if runner == "codex":
         if not shutil.which("codex"):
             raise RuntimeError("codex executable not found")

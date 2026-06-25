@@ -12,7 +12,6 @@ from ...adapters.runners.claude import claude_session_title, claude_transcript_p
 from ...adapters.runners.codex import codex_thread_name, detect_client_version, sync_transcript_metrics
 from ...adapters.runners.session_metadata import refresh_session_row_metadata, resolve_native_session_metadata
 from ...application.classifier import deterministic_classifier
-from ...application.dreaming.runners import trigger_cursor_agent_login
 from ...infrastructure.config import DB_PATH, MEMORY_DIR, ROOT, detect_project, json_dumps, safe_slug, sh_quote, utc_now
 from ...infrastructure.locks import acquire_lock, release_lock
 from ...adapters.runners.cursor import normalize_cursor_payload, sync_cursor_payload_metrics
@@ -31,12 +30,12 @@ from .support.queue import (
     write_hook_worker_status,
 )
 from .support.risk_gate import apply_consumed_command_approval, apply_policy_allowlist, apply_session_workdir_approval, apply_user_prompt_approval, blocking_reason, command_policy_allowlist_match, consume_recent_command_approval, firewall_add_command_for_blocked_tool, pending_approvals_context, pending_approvals_count, pending_approvals_summary_context, pending_firewall_rule_suggestion_context, recent_taint_context, session_approved_workdir_match, should_show_pending_approvals, should_suggest_firewall_add_for_blocked_tool
-from .support.session_context import cursor_dream_auth_block_message, hook_context_output, memory_hooks_status_context, payload_workdir, recent_sessions_context
+from .support.session_context import hook_context_output, memory_hooks_status_context, payload_workdir, recent_sessions_context
 from ...application.hook_effects import spawn_hook_queue_kick, spawn_initial_prompt_dream, spawn_scheduler_kick, spawn_stop_dream
 from ...application.firewall_rules import active_firewall_intent_summaries, active_llm_firewall_contexts, apply_direct_user_firewall_commands, apply_firewall_rule_match, firewall_policy_summary, match_firewall_rules, redact_control_plane_prompt, session_target_workdirs
 from ...application.hooks_state import hooks_enabled_for, prompt_contains_only_hook_control
 from ...application.instance_profile import resolve_runner_wrapper_name
-from ...application.integrations import workspace_binding_status
+from ...application.integrations import cursor_project_background_runner_status, workspace_binding_status
 from ...application.risk import RiskDecision, apply_taint_to_decision, extract_command_from_tool_input, is_non_overridable_block, record_risk_event, scan_tool_input, shell_command_hash, tool_action_class
 from ...application.toolrefs import tool_output_event_summary, upsert_tool_call_and_output
 
@@ -216,6 +215,16 @@ def _hook_workspace_root(payload: dict[str, Any]) -> Path | None:
     return None
 
 
+def _workspace_has_managed_hook_config(client: str, root: Path) -> bool:
+    if client == "codex":
+        return (root / ".codex" / "hooks.json").exists()
+    if client == "claude":
+        return (root / ".claude" / "settings.json").exists()
+    if client == "cursor":
+        return (root / ".cursor" / "rules" / "everyChat.mdc").exists() or (root / ".cursor" / "hooks.json").exists()
+    return False
+
+
 def hooks_runtime_enabled_for(client: str, payload: dict[str, Any], *, root: Path = ROOT) -> bool:
     if not hooks_enabled_for(client, root=root):
         return False
@@ -225,6 +234,9 @@ def hooks_runtime_enabled_for(client: str, payload: dict[str, Any], *, root: Pat
     if workspace_root is None:
         return False
     if workspace_root.resolve() == root.resolve():
+        binding = workspace_binding_status(client, root=workspace_root, expected_memory_root=root)
+        if _workspace_has_managed_hook_config(client, workspace_root) and str(binding.get("hook_binding_state") or "") != "bound":
+            return False
         return True
     payload_cwd = normalized_path(str(payload.get("cwd") or os.environ.get("PWD") or ""))
     root_cwd = normalized_path(str(root))
@@ -245,37 +257,12 @@ def _build_user_prompt_context(
     current_folder: str,
     original_prompt: str | None,
 ) -> tuple[int, str, str]:
-    cursor_startup_block = ""
     prompt_attempt_count = _prompt_attempt_count(conn, session_id, 10**9) + 1
-    should_check_cursor_startup = (
+    include_cursor_auth_notice = (
         client == "cursor"
         and not _is_user_control_prompt(original_prompt)
         and (prompt_attempt_count <= 2 or _is_cursor_login_help_prompt(original_prompt))
     )
-    if should_check_cursor_startup:
-        cursor_startup_block = cursor_dream_auth_block_message(
-            conn,
-            session_id=session_id,
-            client_type=client,
-            project_id=project_id,
-            current_folder=current_folder,
-            prompt=original_prompt,
-            login_trigger="",
-        )
-        if cursor_startup_block and client == "cursor":
-            login_trigger = trigger_cursor_agent_login(session_id)
-            cursor_startup_block = cursor_dream_auth_block_message(
-                conn,
-                session_id=session_id,
-                client_type=client,
-                project_id=project_id,
-                current_folder=current_folder,
-                prompt=original_prompt,
-                login_trigger=login_trigger,
-            )
-    if cursor_startup_block:
-        return 2, "", cursor_startup_block
-    include_cursor_auth_notice = client == "cursor" and prompt_attempt_count <= 2
     prompt_context = memory_hooks_status_context(
         conn,
         session_id=session_id,
@@ -583,6 +570,12 @@ def _queue_hook_capture(
     if native_metadata.native_resume_command:
         native_resume = native_metadata.native_resume_command
     session_brief = native_metadata.session_brief
+    preferred_dream_runner = client
+    if client == "cursor":
+        workspace_root = _hook_workspace_root(payload) or Path(workdir or start_cwd or cwd)
+        preferred_dream_runner = (
+            cursor_project_background_runner_status(workspace_root, expected_memory_root=ROOT)["headless_runner"] or client
+        )
     reservation = reserve_queue_slot(
         client=client,
         payload=payload,
@@ -596,6 +589,7 @@ def _queue_hook_capture(
         client_version=client_version,
         thread_name=thread_name,
         session_brief=session_brief,
+        preferred_dream_runner=preferred_dream_runner,
         native_resume_command=native_resume,
         session_id=session_id,
     )
@@ -747,6 +741,8 @@ def _queue_hook_capture(
 
 def log_hook(args: argparse.Namespace) -> int:
     payload = load_payload()
+    if args.client == "cursor":
+        payload = normalize_cursor_payload(payload)
     if not hooks_runtime_enabled_for(args.client, payload):
         return 0
     mode = _log_mode(args, args.client, payload)
@@ -833,6 +829,11 @@ def log_payload(
         native_resume = native_metadata.native_resume_command
     session_brief = native_metadata.session_brief
     preferred_dream_runner = client
+    if client == "cursor":
+        workspace_root = _hook_workspace_root(payload) or Path(workdir or start_cwd or cwd)
+        preferred_dream_runner = (
+            cursor_project_background_runner_status(workspace_root, expected_memory_root=ROOT)["headless_runner"] or client
+        )
     pretool_decision = None
     classifier_recorded_risk = False
     risk_event_id = ""
@@ -1033,81 +1034,53 @@ def log_payload(
         else:
             tool_output_id = None
         if name in {"UserPromptSubmit", "userPromptSubmit", "beforeSubmitPrompt"}:
-            cursor_startup_block = ""
-            if client == "cursor" and not _is_user_control_prompt(original_prompt):
+            if client == "cursor":
                 prompt_attempt_count = _prompt_attempt_count(conn, session_id, seq)
-                should_check_cursor_startup = (
-                    prompt_attempt_count <= 2
-                    or _is_cursor_login_help_prompt(original_prompt)
-                )
-            else:
-                should_check_cursor_startup = False
-            if should_check_cursor_startup:
-                cursor_startup_block = cursor_dream_auth_block_message(
-                    conn,
-                    session_id=session_id,
-                    client_type=client,
-                    project_id=project_id,
-                    current_folder=workdir or start_cwd or cwd,
-                    prompt=original_prompt,
-                    login_trigger="",
-                )
-                if cursor_startup_block and client == "cursor":
-                    login_trigger = trigger_cursor_agent_login(session_id)
-                    cursor_startup_block = cursor_dream_auth_block_message(
-                        conn,
-                        session_id=session_id,
-                        client_type=client,
-                        project_id=project_id,
-                        current_folder=workdir or start_cwd or cwd,
-                        prompt=original_prompt,
-                        login_trigger=login_trigger,
+                include_cursor_auth_notice = (
+                    not _is_user_control_prompt(original_prompt)
+                    and (
+                        prompt_attempt_count <= 2
+                        or _is_cursor_login_help_prompt(original_prompt)
                     )
-            if cursor_startup_block:
-                exit_code = 2
-                block_reason = cursor_startup_block
-                prompt_context = ""
+                )
             else:
                 include_cursor_auth_notice = False
-                if client == "cursor":
-                    prompt_attempt_count = _prompt_attempt_count(conn, session_id, seq)
-                    include_cursor_auth_notice = prompt_attempt_count <= 2
-                prompt_context = memory_hooks_status_context(
-                    conn,
-                    session_id=session_id,
-                    current_folder=workdir or start_cwd or cwd,
-                    client_type=client,
-                    agent_name=thread_name,
-                    thread_name=thread_name,
-                    project_id=project_id,
-                    include_cursor_auth_notice=include_cursor_auth_notice,
-                )
-                control_plane_messages = apply_direct_user_firewall_commands(
-                    conn,
-                    original_prompt,
-                    session_id=session_id,
-                    event_seq=seq,
-                )
-                if not payload.get("agent_memory_user_prompt_approval_applied"):
-                    approval_context = apply_user_prompt_approval(conn, session_id, original_prompt, event_seq=seq)
-                    if approval_context:
-                        prompt_context = _join_hook_context_blocks(prompt_context, approval_context)
-                if control_plane_messages:
-                    prompt_context = _join_hook_context_blocks(prompt_context, "\n".join(control_plane_messages))
-                firewall_suggestion = pending_firewall_rule_suggestion_context(conn, session_id, original_prompt)
-                if firewall_suggestion:
-                    prompt_context = _join_hook_context_blocks(prompt_context, firewall_suggestion)
-                if should_show_pending_approvals(original_prompt):
-                    remaining_approvals = pending_approvals_summary_context(conn, session_id)
-                    if remaining_approvals:
-                        prompt_context = _join_hook_context_blocks(prompt_context, remaining_approvals)
-                elif prompt_context:
-                    remaining = pending_approvals_count(conn, session_id)
-                    if remaining:
-                        prompt_context = _join_hook_context_blocks(
-                            prompt_context,
-                            pending_approvals_summary_context(conn, session_id),
-                        )
+            prompt_context = memory_hooks_status_context(
+                conn,
+                session_id=session_id,
+                current_folder=workdir or start_cwd or cwd,
+                client_type=client,
+                agent_name=thread_name,
+                thread_name=thread_name,
+                project_id=project_id,
+                include_cursor_auth_notice=include_cursor_auth_notice,
+            )
+            control_plane_messages = apply_direct_user_firewall_commands(
+                conn,
+                original_prompt,
+                session_id=session_id,
+                event_seq=seq,
+            )
+            if not payload.get("agent_memory_user_prompt_approval_applied"):
+                approval_context = apply_user_prompt_approval(conn, session_id, original_prompt, event_seq=seq)
+                if approval_context:
+                    prompt_context = _join_hook_context_blocks(prompt_context, approval_context)
+            if control_plane_messages:
+                prompt_context = _join_hook_context_blocks(prompt_context, "\n".join(control_plane_messages))
+            firewall_suggestion = pending_firewall_rule_suggestion_context(conn, session_id, original_prompt)
+            if firewall_suggestion:
+                prompt_context = _join_hook_context_blocks(prompt_context, firewall_suggestion)
+            if should_show_pending_approvals(original_prompt):
+                remaining_approvals = pending_approvals_summary_context(conn, session_id)
+                if remaining_approvals:
+                    prompt_context = _join_hook_context_blocks(prompt_context, remaining_approvals)
+            elif prompt_context:
+                remaining = pending_approvals_count(conn, session_id)
+                if remaining:
+                    prompt_context = _join_hook_context_blocks(
+                        prompt_context,
+                        pending_approvals_summary_context(conn, session_id),
+                    )
         classifier_run_id = None
         if pretool_decision:
             command = extract_command_from_tool_input(payload.get("tool_input"))

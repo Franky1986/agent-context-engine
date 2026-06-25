@@ -77,6 +77,26 @@ Each integration item must expose separable status axes:
 12. Public activation/status commands shown to operators should prefer the
     installed `agent-context-engine` command when it resolves to the active
     installation; repo-local script paths are compatibility fallbacks only.
+13. Cursor project activation status must validate bindings against the
+    activating installation root, not against the target project path.
+14. Project activation registries must retain the installation root that wrote
+    the binding so later status checks remain correct across multiple installs.
+15. All Cursor activation paths must write the same hardened hook adapter
+    contract: normalized PATH lookup for `cursor-agent`, hook-state honoring,
+    and message propagation for auth and policy blocks.
+16. Cursor project activation is not fully ready without a separate headless
+    LLM runner. `codex` or `claude` must back Cursor firewall classification,
+    dreaming, query expansion, and other background workflows.
+17. For Cursor activation, delegated headless-runner readiness means both
+    executable presence and usable auth state. A merely installed but logged-out
+    `codex` or `claude` CLI is not "ready".
+18. When Cursor activation explicitly requests `codex` or `claude`, that
+    choice must be persisted in the workspace binding and later reused by hook
+    capture, status reporting, and dream-runner selection instead of falling
+    back to best-available auto-detection.
+19. Cursor hook generation must pass an explicit project launch CWD into the hook
+    runtime environment so workspace-dependent behaviors (including runner
+    resolution) do not fall back to the installation root.
 
 ## Client Families
 

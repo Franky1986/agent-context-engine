@@ -10,7 +10,7 @@ from .prompting import (
     write_prompt_manifest,
 )
 from .candidate_search import search_candidates
-from .dream_runner import extract_json, invoke_runner, mock_llm_output
+from .dream_runner import DreamRunnerJsonError, extract_json, extract_json_with_diagnostics, invoke_runner, mock_llm_output
 from .operational_extraction import extract_operational_facts
 from .persistence import apply_persistence, build_graph_dream_artifacts, sync_semantic_projection
 from .normalization import insert_semantic_proposals
@@ -49,6 +49,8 @@ __all__ = [
     "search_candidates",
     "apply_persistence",
     "extract_json",
+    "extract_json_with_diagnostics",
+    "DreamRunnerJsonError",
     "invoke_runner",
     "mock_llm_output",
     "insert_semantic_proposals",

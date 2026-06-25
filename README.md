@@ -16,12 +16,11 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE),
 [NOTICE](NOTICE), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Created and maintained by [Frank Richter](https://www.linkedin.com/in/frank-richter-24657078/).
-Developed with Codex.
 
 Current public versions:
 
-- Backend / product: `0.2.1`
-- Monitor: `0.6.1`
+- Backend / product: `0.2.7`
+- Monitor: `0.6.5`
 
 See [CHANGELOG.md](CHANGELOG.md) for release history since the initial public release.
 
@@ -182,13 +181,13 @@ With wrapper link flags, it can also create:
 ~/.local/bin/opencode-ace -> <target>/scripts/opencode-ace
 ```
 
-For a second independent installation on the same Mac, use an instance name or
-explicit command prefix so existing global commands are not replaced:
+For a second independent installation on the same Mac, use the deterministic
+isolated mode so existing global commands are not replaced:
 
 ```sh
 python3 scripts/agent_context_engine.py install \
   --target /path/to/second-agent-context-engine-root \
-  --instance-name client-a \
+  --isolated \
   --link-codex-ace \
   --link-claude-ace \
   --link-agy-ace \
@@ -196,11 +195,15 @@ python3 scripts/agent_context_engine.py install \
   --link-opencode-ace
 ```
 
-This creates prefixed wrapper names such as `client-a-codex-ace`,
-`client-a-claude-ace`, `client-a-agy-ace`, `client-a-gemini-ace`, and
-`client-a-opencode-ace` in `~/.local/bin/`. The local CLI remains scoped to
-that root:
-`/path/to/second-agent-context-engine-root/scripts/agent-context-engine`.
+`--isolated` defaults to:
+
+- target-local runtime storage under `<target>/memory`
+- an auto-derived instance name and prefixed wrapper names
+- no takeover of shared `agent-context-engine`, `ace`, or unprefixed `*-ace`
+  commands
+
+It creates prefixed wrapper names in `~/.local/bin/`. The local CLI remains
+scoped to that root: `/path/to/second-agent-context-engine-root/scripts/agent-context-engine`.
 
 When an agent is driving installation from a restricted environment, do not
 over-interpret pre-approval health checks against an existing central install.
@@ -417,8 +420,24 @@ copying the skill there:
 ```sh
 agent-context-engine cursor-enable \
   --target /path/to/project \
-  --memory-root /path/to/agent-context-engine-root
+  --installation-root /path/to/agent-context-engine-root
 ```
+
+To pin Claude instead of the default auto-selected headless runner:
+
+```sh
+agent-context-engine cursor-enable \
+  --target /path/to/project \
+  --installation-root /path/to/agent-context-engine-root \
+  --background-runner claude
+```
+
+Cursor activation requires `codex` or `claude` on the machine for background
+LLM workflows. Cursor itself provides IDE-side hooks and session capture, while
+Codex or Claude handles firewall classification, dreaming, query expansion, and
+other headless processing. If `--background-runner` is used, the requested
+runner must be installed and authenticated; Agent Context Engine does not fall
+back silently to the other runner.
 
 This creates or merges:
 
@@ -582,10 +601,9 @@ later review:
 - Classifier prompts wrap payloads in generated nonce markers and explicitly
   treat payload text as untrusted evidence. Invalid or schema-breaking
   classifier output becomes deterministic quarantine.
-- Cursor classifier auth failures are treated as runner-readiness degradation,
-  not as content-derived risk. The classifier falls back to deterministic
-  policy, may trigger `cursor-agent login`, and should not taint later local
-  actions just because the headless Cursor environment was logged out.
+- Cursor project activation requires `codex` or `claude` for background LLM
+  workflows. Missing background-runner readiness is treated as operational
+  degradation, not as content-derived risk.
 - Pre-action classifier prompts explicitly state that tool commands are expected
   inputs. Command-shaped text is not prompt injection by itself; the classifier
   must judge concrete impact such as read, write, network, delete, execute,
@@ -835,9 +853,24 @@ Run from the target repository root:
 python3 -m unittest discover -s tests -v
 ```
 
+The repository check keeps heavy installation integration tests separate from
+the normal unit suite:
+
+```sh
+./scripts/check --skip-runtime-db
+./scripts/check --skip-runtime-db --include-install-integration-tests
+```
+
+The first command runs the standard checks and unit suite while skipping
+installation/activation integration tests. The second command includes the
+separate `install-integration-suite` bucket for install, activation,
+LaunchAgent, wrapper, and storage-root regression coverage.
+
 The tests use temporary memory roots and cover:
 
 - late-event and missing-window repair for summary windows
+- installation, activation, wrapper, LaunchAgent, and storage-root workflows
+  in the separate install integration bucket
 - hook logging, deterministic handover, deterministic dream, and context retrieval
 - Claude Code transcript event import, deduplication, chronology, and metrics
 - deterministic graph facts, graph patches, evidence, and schema validation

@@ -16,6 +16,8 @@ and candidate matching behind graph application adapters.
 
 ## Responsibilities
 - Validate generated graph patches before persistence.
+- Tolerate fenced, prefixed, or trailing-text JSON responses from runners as
+  long as a single valid JSON object can be extracted deterministically.
 - Keep deterministic fallback paths available for graph extraction.
 - Preserve evidence links and confidence data.
 
@@ -29,7 +31,8 @@ and candidate matching behind graph application adapters.
 - Graph schema and domain constraints.
 
 ## Failure Modes
-- Invalid LLM JSON returns an invalid-output status.
+- Blank or structurally invalid LLM output returns an invalid-output status with
+  a reviewable parser error instead of silently materializing partial data.
 - Schema violations produce reviewable errors instead of partial writes.
 - Duplicate/ambiguous candidates remain candidates until reconciled.
 

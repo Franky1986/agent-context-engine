@@ -10,10 +10,11 @@ runner integrations. Use it when the task is about:
 - changing or recommending mini/default models
 - preparing new runner/client integrations
 
-The public management CLI contract is `agent-context-engine` from `PATH`.
-Repo-local `./scripts/agent-context-engine` and `./scripts/ace` remain
-compatibility fallbacks, but integrations, hooks, and generated session-start
-guidance should point at the global command.
+The public management CLI contract is `agent-context-engine` from `PATH` when
+that command resolves to the active installation. For isolated installs or any
+other case where `agent-context-engine` points somewhere else, use the active
+installation command prefix from session-start guidance instead of silently
+switching to the wrong global command.
 
 For agent-facing execution rules, pair this runbook with:
 
@@ -412,12 +413,42 @@ Project activation:
 agent-context-engine cursor-enable --target <project-path>
 ```
 
+To pin a specific background runner instead of using auto-selection:
+
+```sh
+agent-context-engine cursor-enable --target <project-path> --background-runner claude
+```
+
+Operational rules for activation:
+
+- if the requested target path does not exist, do not silently rewrite it to a
+  different sibling path after multiple guesses; confirm the exact target
+  before writing
+- for isolated installs, use the active installation command prefix rather than
+  assuming the global `agent-context-engine` command points at that instance
+- after `cursor-enable`, verify with `cursor-status --target <project-path>` or
+  by inspecting the generated binding and hook files; `--help` output is not a
+  verification step
+
 After activation:
 
 - open the target project in Cursor
 - work there normally
 - Agent Context Engine hooks act inside that project
-- headless flows still require `cursor-agent` on the machine
+- required background LLM workflows use `codex` or `claude`, not `cursor-agent`
+- if neither `codex` nor `claude` is installed, `cursor-enable` should fail
+  instead of leaving a misleading partial-ready Cursor setup
+- if `--background-runner claude` or `--background-runner codex` is used, the
+  requested runner must be installed and authenticated; do not silently fall
+  back to the other runner
+- `codex` and `claude` both have explicit CLI auth contracts, but they differ:
+  use `codex login status` for Codex and `claude auth status` for Claude Code.
+  Do not invent a fake `claude status` contract; point users to
+  `claude auth login` when Claude is not authenticated.
+- if `cursor-enable --target ...` points at a path that does not exist, stop
+  immediately and correct the target path; do not create a new folder under the
+  installation root, and do not continue by trying `opencode-enable`,
+  `gemini-enable`, or other unrelated client activation commands
 
 ## Hook Management Rules
 

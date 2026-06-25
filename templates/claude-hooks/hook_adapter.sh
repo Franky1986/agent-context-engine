@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Skip hook when running inside a dream subprocess to avoid recursive logging.
-if [ "${AGENT_MEMORY_DREAM:-0}" = "1" ]; then
+# Skip hook when running inside an internal Agent Context Engine subprocess to
+# avoid recursive logging and fake user-visible sessions.
+if [ "${AGENT_MEMORY_DREAM:-0}" = "1" ] || [ "${AGENT_MEMORY_INTERNAL_RUN:-0}" = "1" ]; then
   exit 0
 fi
 

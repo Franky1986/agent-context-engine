@@ -92,6 +92,7 @@ def reserve_queue_slot(
     client_version: str | None,
     thread_name: str | None,
     session_brief: str | None,
+    preferred_dream_runner: str | None,
     native_resume_command: str | None,
     session_id: str,
 ) -> dict[str, Any]:
@@ -131,7 +132,7 @@ def reserve_queue_slot(
                     recorded_at,
                     reserved_seq,
                     native_resume_command,
-                    client,
+                    preferred_dream_runner or client,
                 ),
             )
         else:
@@ -166,7 +167,7 @@ def reserve_queue_slot(
                     recorded_at,
                     started_at,
                     reserved_seq,
-                    client,
+                    preferred_dream_runner or client,
                     session_id,
                 ),
             )

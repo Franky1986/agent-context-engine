@@ -12,73 +12,46 @@ This workflow keeps source-of-truth version references and release metadata alig
 - nearest `*.spec.md` updates that match the changed behavior (spec scope must be part of the same PR)
 - public version mentions in README and progress/runbook snapshots
 - spec index in `docs/index.md`
-- top-of-log changelog scaffold entries
+- changelog scaffold entries
 
 ## Required inputs
 
-- choose the target versions (`x.y.z`), or request patch/minor/major bumps
-- provide at least one changelog note per touched component where possible
+- choose target versions (`x.y.z`) or request patch/minor/major bumps
+- decide concise changelog notes for backend and monitor before final pass
 
 ## Fast agent command
 
-Use this short command during cleanup releases after cross-cutting behavior changes:
+Use this workflow after release-relevant behavior updates:
 
-```sh
-# CLI-first operator command (recommended in this repo)
-agent-context-engine docsupdate \
-  --bump-backend patch \
-  --bump-monitor patch \
-  --changelog-note "backend: ..." \
-  --changelog-note "monitor: ..."
+- Run through the `/docsupdate` editor entry for the active client.
+- Keep this document as the source of truth and run the concrete release sync steps from your preferred maintenance path.
 
-# direct script fallback, if you prefer repository scripts
-./scripts/docsupdate \
-  --bump-backend patch \
-  --bump-monitor patch 
-```
-
-In chat clients that support a custom slash binding, map this to:
+In chat clients that support slash mapping, expose the same runbook via:
 
 - `/docsupdate`
 - `docs/commands/docsupdate/README.md` (source of truth)
-- `.agents/skills/docsupdate/SKILL.md` (Codex primary path where supported)
 - `.codex/commands/docsupdate.md`
 - `.claude/commands/docsupdate.md`
 - `.cursor/commands/docsupdate.md`
 - `.opencode/commands/docsupdate.md`
 
-`/docsupdate` runs:
+`/docsupdate` is the shared maintenance entry point. The runtime steps are defined in:
 
-```sh
-agent-context-engine docsupdate \
-  --bump-backend patch \
-  --bump-monitor patch \
-  --changelog-note "backend: ..." \
-  --changelog-note "monitor: ..."
-```
-
-If `/docsupdate` is not surfaced in one client, run `/use docsupdate` or `/skills`
-then invoke `docsupdate` from the returned skill list.
+- `docs/commands/docsupdate/README.md`
 
 ## Recommended command flow
 
-```sh
-# Bump both components and update all docs/changelog artifacts
-./scripts/release-doc-sync \
-  --bump-backend patch \
-  --bump-monitor patch \
-  --changelog-note "backend: fixed cursor session runner provenance in session and dream routing"
-  --changelog-note "monitor: fixed session/provenance visibility in active/closed states"
-```
+Follow the flow in `docs/commands/docsupdate/README.md` to:
 
-If you do not want the release note scaffolding yet:
+- align backend + monitor versions,
+- refresh release snapshots and spec references,
+- add changelog notes,
+- refresh doc index checks.
 
-```sh
-./scripts/release-doc-sync --bump-backend patch --bump-monitor patch --skip-index
-```
+If changelog wording is still pending, use the draft path described in the README.
 
-`--skip-index` is useful for staged manual edits where the `.spec.md` index is updated
-later by another pass.
+`--skip-index` is useful for staged manual edits where notes and changelog wording
+are intentionally deferred.
 
 ## Post conditions
 
@@ -94,5 +67,4 @@ later by another pass.
 ## Notes
 
 - This helper does not run runtime tests.
-- Use the generated changelog entries as a scaffold and refine text immediately
-  after the run.
+- Use generated changelog entries as a scaffold and refine text before finalizing the release note.

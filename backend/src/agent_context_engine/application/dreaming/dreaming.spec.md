@@ -46,6 +46,9 @@ memory artifacts and graph-ready proposals.
   be treated as normal durable evidence.
 - Stale runner CLI flags must fail as auditable runner errors rather than being
   silently retried through undocumented alternate modes.
+- Structured JSON stages must not fail hard only because a runner returned
+  blank, fenced, or mixed-text JSON output; the parse failure must stay
+  auditable and fall back conservatively where the stage contract allows it.
 
 ## Observability / Audit
 - Stage status must show what was planned, sent, generated, validated, and
@@ -64,6 +67,9 @@ memory artifacts and graph-ready proposals.
   conversation window over paraphrase from dream summaries.
 - Antigravity-backed dream stages use the current non-interactive
   `agy --print` command contract.
+- Semantic extraction and reconciliation use the same resilient JSON parsing
+  contract across all supported runners and fall back deterministically when
+  parsing fails.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`

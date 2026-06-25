@@ -39,6 +39,16 @@ function compact(value: unknown, fallback: string, limit = 180) {
   return textValue.length > limit ? `${textValue.slice(0, limit - 3)}...` : textValue;
 }
 
+function sessionRunner(session: SessionListItem) {
+  const raw = record(session);
+  return label(raw.dream_runner_used ?? raw.preferred_dream_runner, '').trim().toLowerCase();
+}
+
+function sessionWorkdir(session: SessionListItem) {
+  const raw = record(session);
+  return label(raw.last_workdir ?? session.cwd, '').trim();
+}
+
 export function SessionsPanel({
   initialData,
   selectedSessionId,
@@ -188,6 +198,10 @@ export function SessionsPanel({
           ) : sessions.length ? (
             sessions.map((session, index) => {
               const riskSummary = record(record(session).risk_summary);
+              const originClient = label(session.client_type, '').trim().toLowerCase();
+              const dreamRunner = sessionRunner(session);
+              const workdir = sessionWorkdir(session);
+              const showDreamRunnerBadge = Boolean(dreamRunner) && dreamRunner !== originClient;
               const openCount = Number(riskSummary.open_count ?? 0);
               const blockedCount = Number(riskSummary.blocked_count ?? 0);
               const pendingApprovalCount = Number(riskSummary.pending_approval_count ?? 0);
@@ -203,7 +217,12 @@ export function SessionsPanel({
                   >
                     <span className="session-name-cell">
                       <strong>{label(session.thread_name ?? session.session_id, t(language, 'sessions.untitled'))}</strong>
-                      <small>{label(session.project_id)} · {label(session.client_type)} · {label(session.session_id)}</small>
+                      <small className="session-meta-line">
+                        <span>{label(session.project_id)}</span>
+                        {originClient ? <span className="session-client-badge session-client-badge-origin">{originClient}</span> : null}
+                        {showDreamRunnerBadge ? <span className="session-client-badge session-client-badge-dream">{t(language, 'sessions.preview.dreamRunner')}: {dreamRunner}</span> : null}
+                        <span>{label(session.session_id)}</span>
+                      </small>
                       <small className="session-preview">
                         {t(language, 'sessions.preview.latestActivity')}: {compact(session.latest_activity_summary ?? session.summary_preview, t(language, 'sessions.preview.latestActivityFallback'))}
                       </small>
@@ -239,7 +258,7 @@ export function SessionsPanel({
                     </span>
                     <span>
                       <strong>{label(session.started_at_local ?? session.started_at)}</strong>
-                      <small>{label(session.cwd)}</small>
+                      <small>{label(workdir || session.cwd)}</small>
                     </span>
                     <span>
                       <strong>{label(session.last_event_at_local ?? session.last_event_at)}</strong>

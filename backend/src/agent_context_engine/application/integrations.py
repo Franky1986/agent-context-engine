@@ -9,8 +9,9 @@ import subprocess
 from typing import Any
 
 from ..adapters.runners.cursor import CURSOR_EVENTS, cursor_hook_entry, cursor_paths, enable_cursor_hooks, is_agent_memory_cursor_hook, load_cursor_hooks, write_cursor_hooks
+from .dreaming.runners import runner_auth_status
 from .hooks_state import hook_runner_status
-from ..infrastructure.config import ANTIGRAVITY_DREAM_MODEL, OPENCODE_DREAM_MODEL, ROOT, SCRIPT_PATH, SKILL_ROOT, sh_quote
+from ..infrastructure.config import ANTIGRAVITY_DREAM_MODEL, CLAUDE_DREAM_MODEL, CODEX_DREAM_MODEL, OPENCODE_DREAM_MODEL, ROOT, SCRIPT_PATH, SKILL_ROOT, sh_quote
 from .instance_profile import agent_memory_cli_for_root, load_installation_profile, preferred_agent_memory_cli_for_root, resolve_runner_wrapper_name, resolve_wrapper_command_name
 
 
@@ -41,7 +42,14 @@ def workspace_binding_path(client: str, *, root: Path = ROOT) -> Path | None:
     return None
 
 
-def write_workspace_binding(client: str, *, root: Path = ROOT, memory_root: Path = ROOT, written_by: str = "install") -> Path | None:
+def write_workspace_binding(
+    client: str,
+    *,
+    root: Path = ROOT,
+    memory_root: Path = ROOT,
+    written_by: str = "install",
+    background_runner: str | None = None,
+) -> Path | None:
     binding_path = workspace_binding_path(client, root=root)
     if binding_path is None:
         return None
@@ -50,11 +58,14 @@ def write_workspace_binding(client: str, *, root: Path = ROOT, memory_root: Path
         "version": 1,
         "client": client,
         "instance_id": str(profile.get("instance_id") or memory_root.name),
+        "installation_root": str(memory_root.resolve()),
         "memory_root": str(memory_root.resolve()),
-        "agent_memory_cli": str((memory_root / agent_memory_cli_for_root(memory_root).replace("./", "")).resolve()),
+        "agent_memory_cli": str(_agent_memory_cli_absolute_path(memory_root)),
         "written_at": _utc_timestamp(),
         "written_by": written_by,
     }
+    if client == "cursor" and background_runner:
+        payload["background_runner"] = str(background_runner).strip().lower()
     binding_path.parent.mkdir(parents=True, exist_ok=True)
     binding_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return binding_path
@@ -68,6 +79,7 @@ def workspace_binding_status(client: str, *, root: Path = ROOT, expected_memory_
             "hook_binding_state": "not_applicable",
             "hook_binding_target_root": "",
             "hook_binding_target_instance": "",
+            "hook_binding_background_runner": "",
             "hook_binding_target_exists": False,
             "hook_binding_target_cli_exists": False,
             "hook_binding_last_error": "",
@@ -79,6 +91,7 @@ def workspace_binding_status(client: str, *, root: Path = ROOT, expected_memory_
             "hook_binding_state": "missing",
             "hook_binding_target_root": "",
             "hook_binding_target_instance": "",
+            "hook_binding_background_runner": "",
             "hook_binding_target_exists": False,
             "hook_binding_target_cli_exists": False,
             "hook_binding_last_error": "",
@@ -91,13 +104,15 @@ def workspace_binding_status(client: str, *, root: Path = ROOT, expected_memory_
             "hook_binding_state": "invalid_json",
             "hook_binding_target_root": "",
             "hook_binding_target_instance": "",
+            "hook_binding_background_runner": "",
             "hook_binding_target_exists": False,
             "hook_binding_target_cli_exists": False,
             "hook_binding_last_error": str(exc),
         }
-    target_root_text = str(payload.get("memory_root") or "").strip()
+    target_root_text = str(payload.get("installation_root") or payload.get("memory_root") or "").strip()
     instance_id = str(payload.get("instance_id") or "").strip()
     cli_text = str(payload.get("agent_memory_cli") or "").strip()
+    background_runner = str(payload.get("background_runner") or "").strip().lower()
     try:
         target_root = Path(target_root_text).expanduser().resolve() if target_root_text else None
     except OSError as exc:
@@ -106,6 +121,7 @@ def workspace_binding_status(client: str, *, root: Path = ROOT, expected_memory_
             "hook_binding_state": "invalid_json",
             "hook_binding_target_root": target_root_text,
             "hook_binding_target_instance": instance_id,
+            "hook_binding_background_runner": background_runner,
             "hook_binding_target_exists": False,
             "hook_binding_target_cli_exists": False,
             "hook_binding_last_error": str(exc),
@@ -126,6 +142,7 @@ def workspace_binding_status(client: str, *, root: Path = ROOT, expected_memory_
         "hook_binding_state": state,
         "hook_binding_target_root": str(target_root) if target_root else target_root_text,
         "hook_binding_target_instance": instance_id,
+        "hook_binding_background_runner": background_runner,
         "hook_binding_target_exists": target_exists,
         "hook_binding_target_cli_exists": target_cli_exists,
         "hook_binding_last_error": "",
@@ -160,8 +177,37 @@ def _cursor_hook_wrapper(memory_root: Path) -> str:
 set -euo pipefail
 ROOT={sh_quote(str(memory_root.resolve()))}
 SCRIPT={sh_quote(str(Path(SCRIPT_PATH).resolve()))}
+WORKSPACE_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 HOOKS_STATE="$ROOT/memory/local/hooks-state.json"
 AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${{AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}}"
+AGENT_MEMORY_LAUNCH_CWD="${{AGENT_MEMORY_LAUNCH_CWD:-$WORKSPACE_ROOT}}"
+export AGENT_MEMORY_LAUNCH_CWD
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+TMP="$(mktemp)"
+OUT="$(mktemp)"
+ERR="$(mktemp)"
+trap 'rm -f "$TMP" "$OUT" "$ERR"' EXIT
+cat > "$TMP"
+
+EVENT="$(python3 - "$TMP" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8", errors="replace") as handle:
+        data = json.load(handle)
+except Exception:
+    data = {{}}
+for key in ("hook_event_name", "event_name", "hookName", "hook_name", "event", "type"):
+    if data.get(key):
+        print(data[key])
+        break
+PY
+)"
+
+if [ "${{AGENT_MEMORY_DREAM:-0}}" = "1" ] || [ "${{AGENT_MEMORY_INTERNAL_RUN:-0}}" = "1" ]; then
+  printf '{{}}\\n'
+  exit 0
+fi
+
 if ! python3 - "$HOOKS_STATE" cursor <<'PY'
 import json
 import sys
@@ -186,10 +232,97 @@ if runner_state is False:
 raise SystemExit(0)
 PY
 then
+  case "$EVENT" in
+    beforeSubmitPrompt)
+      printf '{{"continue":true}}\\n'
+      ;;
+    beforeShellExecution|beforeMCPExecution|beforeReadFile)
+      printf '{{"permission":"allow"}}\\n'
+      ;;
+    *)
+      printf '{{}}\\n'
+      ;;
+  esac
   exit 0
 fi
+
+set +e
 cd "$ROOT"
-exec env AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="$AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC" python3 "$SCRIPT" log-hook --client cursor --detect-version
+env AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="$AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC" python3 "$SCRIPT" log-hook --client cursor --detect-version \\
+  < "$TMP" \\
+  > "$OUT" \\
+  2> "$ERR"
+CODE=$?
+set -e
+
+python3 - "$OUT" "$ERR" "$CODE" "$EVENT" <<'PY'
+import json
+import sys
+
+stdout_path, stderr_path, code_text, event = sys.argv[1:5]
+try:
+    stdout = open(stdout_path, "r", encoding="utf-8", errors="replace").read()
+except Exception:
+    stdout = ""
+try:
+    stderr = open(stderr_path, "r", encoding="utf-8", errors="replace").read()
+except Exception:
+    stderr = ""
+code = int(code_text or "0")
+
+def context_message() -> str:
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            value = json.loads(line)
+        except Exception:
+            continue
+        context = value.get("hookSpecificOutput", {{}}).get("additionalContext", "")
+        if context:
+            return str(context)
+    return ""
+
+def block_message() -> str:
+    text = stderr.strip()
+    if text:
+        return text[-6000:]
+    return "Agent Context Engine blocked this tool use by policy. Open agent-monitor or run `./scripts/agent-context-engine risk list --limit 10` for details."
+
+def with_message(response: dict, message: str, *, for_agent: bool = True) -> dict:
+    if not message:
+        return response
+    response["message"] = message
+    response["user_message"] = message
+    response["userMessage"] = message
+    if for_agent:
+        response["agent_message"] = message
+        response["agentMessage"] = message
+        response["followup_message"] = message
+    return response
+
+if event == "beforeSubmitPrompt":
+    if code == 2:
+        print(json.dumps(with_message({{"continue": False}}, block_message()), ensure_ascii=False))
+        sys.exit(2)
+    message = context_message()
+    if message:
+        print(json.dumps(with_message({{"continue": True}}, message), ensure_ascii=False))
+    else:
+        print(json.dumps({{"continue": True}}, ensure_ascii=False))
+elif event in {{"beforeShellExecution", "beforeMCPExecution", "beforeReadFile"}}:
+    if code == 2:
+        print(json.dumps(with_message({{"permission": "deny"}}, block_message()), ensure_ascii=False))
+        sys.exit(2)
+    print(json.dumps({{"permission": "allow"}}, ensure_ascii=False))
+else:
+    if code == 2:
+        print(json.dumps(with_message({{}}, block_message()), ensure_ascii=False))
+    else:
+        message = context_message()
+        print(json.dumps(with_message({{}}, message), ensure_ascii=False) if message else "{{}}")
+PY
 """
 
 
@@ -199,6 +332,91 @@ def _global_wrapper_status(command_name: str) -> dict[str, Any]:
         "global_command_name": command_name,
         "global_command_available": resolved is not None,
         "global_command_path": resolved or "",
+    }
+
+
+def _headless_runner_candidate_status(runner: str) -> dict[str, Any]:
+    executable = shutil.which(runner)
+    login_command = "claude auth login" if runner == "claude" else f"{runner} login"
+    if not executable:
+        return {
+            "runner": runner,
+            "path": "",
+            "installed": False,
+            "auth_ready": False,
+            "auth_status": "missing_executable",
+            "readiness_status": "missing_executable",
+            "detail": f"{runner} executable is missing.",
+            "login_command": login_command,
+        }
+    auth_ready, detail = runner_auth_status(runner)
+    return {
+        "runner": runner,
+        "path": executable,
+        "installed": True,
+        "auth_ready": auth_ready,
+        "auth_status": "ready" if auth_ready else "auth_required",
+        "readiness_status": "ready" if auth_ready else "auth_required",
+        "detail": detail,
+        "login_command": login_command,
+    }
+
+
+def cursor_background_runner_status(*, preferred_runner: str | None = None) -> dict[str, Any]:
+    candidates = [_headless_runner_candidate_status("codex"), _headless_runner_candidate_status("claude")]
+    candidates_by_runner = {str(item["runner"]): item for item in candidates}
+    requested_runner = str(preferred_runner or "").strip().lower()
+    if requested_runner:
+        selected = candidates_by_runner.get(requested_runner)
+    else:
+        selected = next((item for item in candidates if item["auth_ready"]), None)
+        if selected is None:
+            selected = next((item for item in candidates if item["installed"]), None)
+    selected_runner = str(selected["runner"]) if selected else ""
+    selected_path = str(selected["path"]) if selected else ""
+    selected_model = ""
+    if selected_runner == "codex":
+        selected_model = CODEX_DREAM_MODEL
+    elif selected_runner == "claude":
+        selected_model = CLAUDE_DREAM_MODEL
+    ready = bool(selected and selected["auth_ready"])
+    status = "ready" if ready else str(selected["readiness_status"]) if selected else "missing_headless_runner"
+    detail = ""
+    if ready and selected_runner:
+        detail = f"using `{selected_runner}` for background LLM workflows"
+    elif selected_runner and selected.get("installed"):
+        detail = f"run `{selected['login_command']}` so `{selected_runner}` can handle background LLM workflows"
+    elif selected_runner:
+        detail = f"install `{selected_runner}` for required background LLM workflows"
+    else:
+        detail = "install `codex` or `claude` for required background LLM workflows"
+    return {
+        "headless_runner": selected_runner,
+        "headless_runner_path": selected_path or "",
+        "headless_runner_ready": ready,
+        "headless_runner_candidates": ["codex", "claude"],
+        "headless_runner_auth_status": str(selected["auth_status"]) if selected else "missing_executable",
+        "background_runner_ready": ready,
+        "background_runner_status": status,
+        "background_runner_detail": detail,
+        "background_runner_login_command": str(selected["login_command"]) if selected and not ready else "",
+        "background_runner_auth_detail": str(selected["detail"]) if selected else "",
+        "background_runner_candidates": candidates,
+        "background_runner_requested": requested_runner,
+        "background_runner_explicit": bool(requested_runner),
+        "selected_model": selected_model,
+        "recommended_model": selected_model,
+        "recommended_small_model": selected_model,
+    }
+
+
+def cursor_project_background_runner_status(root: Path, *, expected_memory_root: Path | None = None) -> dict[str, Any]:
+    binding_status = workspace_binding_status("cursor", root=root, expected_memory_root=expected_memory_root)
+    configured_runner = str(binding_status.get("hook_binding_background_runner") or "").strip().lower()
+    return {
+        **cursor_background_runner_status(preferred_runner=configured_runner or None),
+        "configured_background_runner": configured_runner,
+        **binding_status,
     }
 
 
@@ -305,6 +523,17 @@ def _agent_memory_script_for_root(memory_root: Path) -> str:
     if (memory_root / "scripts" / "agent_context_engine.py").exists():
         return "scripts/agent_context_engine.py"
     return "docs/skills/agent-context-engine/scripts/agent_context_engine.py"
+
+
+def _agent_memory_cli_absolute_path(memory_root: Path) -> Path:
+    cli_command = agent_memory_cli_for_root(memory_root)
+    candidate = (memory_root / cli_command.replace("./", "")).resolve()
+    if candidate.exists():
+        return candidate
+    local_script = (memory_root / "scripts" / "agent_context_engine.py").resolve()
+    if local_script.exists():
+        return local_script
+    return Path(SCRIPT_PATH).resolve()
 
 
 def _agent_memory_script_absolute_path(memory_root: Path) -> Path:
@@ -473,6 +702,7 @@ def register_integration_project(client: str, target: Path, *, memory_root: Path
                 **entry,
                 "path": target_path,
                 "name": target.name or target_path,
+                "installation_root": str(memory_root.expanduser().resolve()),
                 "updated_at": _utc_timestamp(),
             }
             updated = True
@@ -482,6 +712,7 @@ def register_integration_project(client: str, target: Path, *, memory_root: Path
             {
                 "path": target_path,
                 "name": target.name or target_path,
+                "installation_root": str(memory_root.expanduser().resolve()),
                 "updated_at": _utc_timestamp(),
             }
         )
@@ -496,7 +727,7 @@ def unregister_integration_project(client: str, target: Path, *, memory_root: Pa
     register_integration_project(client, target, memory_root=memory_root)
 
 
-def _project_activation_entry(client: str, target_path: str) -> dict[str, Any]:
+def _project_activation_entry(client: str, target_path: str, *, installation_root: Path | None = None) -> dict[str, Any]:
     target = Path(target_path).expanduser()
     resolved = target.resolve()
     item: dict[str, Any] = {
@@ -504,11 +735,13 @@ def _project_activation_entry(client: str, target_path: str) -> dict[str, Any]:
         "name": resolved.name or str(resolved),
         "exists": resolved.exists(),
     }
+    if installation_root is not None:
+        item["installation_root"] = str(installation_root.resolve())
     if not resolved.exists():
         item["hooks_state"] = "project_missing"
         return item
     if client == "cursor":
-        status = _cursor_status_with_hooks(root=resolved)
+        status = _cursor_status_with_hooks(root=resolved, installation_root=installation_root)
     elif client == "antigravity":
         status = _antigravity_hook_status(root=resolved)
     elif client == "opencode":
@@ -532,27 +765,36 @@ def integration_projects_status(client: str, *, memory_root: Path = ROOT, curren
     client = str(client or "").strip().lower()
     payload = _load_integration_projects_registry(memory_root)
     raw_entries = payload.get("clients", {}).get(client, [])
-    paths: list[str] = []
+    entries_with_install_roots: list[tuple[str, str]] = []
     if isinstance(raw_entries, list):
         for entry in raw_entries:
             if isinstance(entry, dict):
                 path = str(entry.get("path") or "").strip()
                 if path:
-                    paths.append(path)
+                    installation_root = str(entry.get("installation_root") or "").strip()
+                    entries_with_install_roots.append((path, installation_root))
     if current_root is not None and client in {"cursor"}:
         current_path = str(current_root.expanduser().resolve())
         if client == "cursor":
-            current_status = _cursor_status_with_hooks(root=current_root)
-        if bool(current_status.get("prepared")) and current_path not in paths:
-            paths.insert(0, current_path)
-    ordered_paths: list[str] = []
+            current_status = _cursor_status_with_hooks(root=current_root, installation_root=current_root)
+        if bool(current_status.get("prepared")) and current_path not in {path for path, _installation_root in entries_with_install_roots}:
+            entries_with_install_roots.insert(0, (current_path, str(current_root.expanduser().resolve())))
+    ordered_entries: list[tuple[str, str]] = []
     seen: set[str] = set()
-    for path in paths:
+    default_installation_root = str((current_root or memory_root).expanduser().resolve())
+    for path, installation_root in entries_with_install_roots:
         if path in seen:
             continue
         seen.add(path)
-        ordered_paths.append(path)
-    entries = [_project_activation_entry(client, path) for path in ordered_paths]
+        ordered_entries.append((path, installation_root or default_installation_root))
+    entries = [
+        _project_activation_entry(
+            client,
+            path,
+            installation_root=Path(installation_root).expanduser().resolve() if installation_root else None,
+        )
+        for path, installation_root in ordered_entries
+    ]
     return {"activated_projects": entries, "activated_project_count": len(entries)}
 
 
@@ -949,7 +1191,7 @@ def _antigravity_hook_status(*, root: Path = ROOT) -> dict[str, Any]:
     }
 
 
-def _cursor_status_with_hooks(*, root: Path = ROOT) -> dict[str, Any]:
+def _cursor_status_with_hooks(*, root: Path = ROOT, installation_root: Path | None = None) -> dict[str, Any]:
     hooks_path, script_path = cursor_paths(root)
     disabled_path = root / ".cursor" / "hooks_deactivated.json"
     active_events: list[str] = []
@@ -971,7 +1213,8 @@ def _cursor_status_with_hooks(*, root: Path = ROOT) -> dict[str, Any]:
         local_hooks_state = "configured_without_agent_memory"
     else:
         local_hooks_state = "not_prepared"
-    binding_status = workspace_binding_status("cursor", root=root, expected_memory_root=root)
+    expected_root = installation_root or root
+    binding_status = workspace_binding_status("cursor", root=root, expected_memory_root=expected_root)
     hooks_state, hooks_enabled = _effective_binding_hooks_state(local_hooks_state, str(binding_status["hook_binding_state"]))
     return {
         "prepared": script_path.exists() or hooks_path.exists() or disabled_path.exists(),
@@ -985,13 +1228,15 @@ def _cursor_status_with_hooks(*, root: Path = ROOT) -> dict[str, Any]:
         "hook_script_path": str(script_path),
         "expected_hook_events": list(CURSOR_EVENTS),
         "active_hook_events": sorted(active_events),
+        "hook_binding_expected_root": str(expected_root.resolve()),
         **binding_status,
     }
 
 
-def _enable_cursor_project_hooks(*, root: Path = ROOT, memory_root: Path = ROOT) -> None:
+def _enable_cursor_project_hooks(*, root: Path = ROOT, memory_root: Path = ROOT, background_runner: str | None = None) -> None:
     disabled_path = root / ".cursor" / "hooks_deactivated.json"
     active_path, script_path = cursor_paths(root)
+    preserved_runner = str(workspace_binding_status("cursor", root=root).get("hook_binding_background_runner") or "").strip().lower()
     if not active_path.exists() and disabled_path.exists():
         active_path.parent.mkdir(parents=True, exist_ok=True)
         disabled_path.replace(active_path)
@@ -999,7 +1244,13 @@ def _enable_cursor_project_hooks(*, root: Path = ROOT, memory_root: Path = ROOT)
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(_cursor_hook_wrapper(memory_root), encoding="utf-8")
     script_path.chmod(0o755)
-    write_workspace_binding("cursor", root=root, memory_root=memory_root, written_by="cursor-enable")
+    write_workspace_binding(
+        "cursor",
+        root=root,
+        memory_root=memory_root,
+        written_by="cursor-enable",
+        background_runner=background_runner or preserved_runner or None,
+    )
 
 
 def _disable_cursor_project_hooks(*, root: Path = ROOT) -> None:
@@ -1247,7 +1498,7 @@ import {{ join }} from "node:path"
 import {{ spawn, spawnSync }} from "node:child_process"
 
 export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
-  if (process.env.AGENT_MEMORY_DREAM === "1") {{
+  if (process.env.AGENT_MEMORY_DREAM === "1" || process.env.AGENT_MEMORY_INTERNAL_RUN === "1") {{
     return {{}}
   }}
 
@@ -1683,6 +1934,9 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
     codex_hooks = _shell_hook_status("codex", root=root)
     claude_hooks = _shell_hook_status("claude", root=root)
     cursor_hooks = _cursor_status_with_hooks(root=root)
+    codex_candidate = _headless_runner_candidate_status("codex")
+    claude_candidate = _headless_runner_candidate_status("claude")
+    cursor_background = cursor_background_runner_status()
     codex_wrapper = _shell_wrapper_state(
         executable_name="codex",
         wrapper_command="./scripts/codex-ace",
@@ -1704,9 +1958,9 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
             "ingress_transport": "shell_hook",
             "runner": "codex",
             "provider": "openai",
-            "ready": shutil.which("codex") is not None,
-            "auth_status": "unknown",
-            "readiness_status": "installed" if shutil.which("codex") else "missing_executable",
+            "ready": codex_candidate["auth_ready"],
+            "auth_status": codex_candidate["auth_status"],
+            "readiness_status": codex_candidate["readiness_status"],
             "selected_model": os.environ.get("AGENT_MEMORY_CODEX_DREAM_MODEL", "gpt-5.4-mini"),
             "selected_small_model": os.environ.get("AGENT_MEMORY_CODEX_DREAM_MODEL", "gpt-5.4-mini"),
             "models": [],
@@ -1731,9 +1985,9 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
             "ingress_transport": "shell_hook",
             "runner": "claude",
             "provider": "anthropic",
-            "ready": shutil.which("claude") is not None,
-            "auth_status": "unknown",
-            "readiness_status": "installed" if shutil.which("claude") else "missing_executable",
+            "ready": claude_candidate["auth_ready"],
+            "auth_status": claude_candidate["auth_status"],
+            "readiness_status": claude_candidate["readiness_status"],
             "selected_model": os.environ.get("AGENT_MEMORY_CLAUDE_DREAM_MODEL", "claude-haiku-4-5-20251001"),
             "selected_small_model": os.environ.get("AGENT_MEMORY_CLAUDE_DREAM_MODEL", "claude-haiku-4-5-20251001"),
             "models": [],
@@ -1756,18 +2010,23 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
             "client": "cursor",
             "label": "Cursor",
             "ingress_transport": "shell_hook",
-            "runner": "cursor",
-            "provider": "cursor",
-            "ready": shutil.which("cursor-agent") is not None,
-            "auth_status": "runtime_managed",
-            "readiness_status": "installed" if shutil.which("cursor-agent") else "missing_executable",
-            "selected_model": os.environ.get("AGENT_MEMORY_CURSOR_DREAM_MODEL", "gpt-5.4-mini-medium"),
-            "selected_small_model": os.environ.get("AGENT_MEMORY_CURSOR_DREAM_MODEL", "gpt-5.4-mini-medium"),
+            "runner": cursor_background["headless_runner"] or "none",
+            "provider": cursor_background["headless_runner"] or "none",
+            "ready": cursor_background["headless_runner_ready"],
+            "auth_status": "delegated_headless_runner",
+            "readiness_status": cursor_background["background_runner_status"],
+            "selected_model": cursor_background["selected_model"],
+            "selected_small_model": cursor_background["selected_model"],
             "models": [],
-            "recommended_model": os.environ.get("AGENT_MEMORY_CURSOR_DREAM_MODEL", "gpt-5.4-mini-medium"),
-            "recommended_small_model": os.environ.get("AGENT_MEMORY_CURSOR_DREAM_MODEL", "gpt-5.4-mini-medium"),
+            "recommended_model": cursor_background["recommended_model"],
+            "recommended_small_model": cursor_background["recommended_small_model"],
             "usage_mode": "project_activation",
-            "usage_hint": "Run the activation command once per project from the Agent Context Engine root. Afterwards open that project in Cursor and work there normally.",
+            "usage_hint": (
+                f"Run the activation command once per project from the Agent Context Engine root. "
+                f"Cursor captures editor sessions, while `{cursor_background['headless_runner']}` handles required background LLM workflows."
+                if cursor_background["headless_runner_ready"]
+                else "Cursor project activation requires `codex` or `claude` for required background LLM workflows such as firewall classification, dreaming, and query expansion."
+            ),
             "working_root": str(root.resolve()),
             "activation_command": _root_prefixed(f"{_agent_memory_cli_display(root)} cursor-enable --target <project-path>", root=root),
             "global_command_name": "",
@@ -1778,6 +2037,7 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
             "wrapper_path_exists": False,
             "wrapper_state": "project_activation",
             "wrapper_ready": True,
+            **cursor_background,
             **cursor_hooks,
             **integration_projects_status("cursor", memory_root=root, current_root=root),
         }, client="cursor", root=root),
@@ -1806,7 +2066,14 @@ def integration_summary(*, root: Path = ROOT, probe_gemini: bool = False) -> dic
     }
 
 
-def manage_integration_hooks(*, client: str, action: str, root: Path = ROOT, target_root: Path | None = None) -> dict[str, Any]:
+def manage_integration_hooks(
+    *,
+    client: str,
+    action: str,
+    root: Path = ROOT,
+    target_root: Path | None = None,
+    background_runner: str | None = None,
+) -> dict[str, Any]:
     client = str(client or "").strip().lower()
     action = str(action or "").strip().lower()
     selected_root = Path(target_root).expanduser().resolve() if target_root is not None else root
@@ -1827,7 +2094,7 @@ def manage_integration_hooks(*, client: str, action: str, root: Path = ROOT, tar
                 unregister_integration_project(client, selected_root, memory_root=root)
         elif client == "cursor":
             if action == "enable":
-                _enable_cursor_project_hooks(root=selected_root, memory_root=root)
+                _enable_cursor_project_hooks(root=selected_root, memory_root=root, background_runner=background_runner)
                 register_integration_project(client, selected_root, memory_root=root)
             else:
                 _disable_cursor_project_hooks(root=selected_root)

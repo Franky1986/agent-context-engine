@@ -547,6 +547,18 @@ export function SessionDetailPanel({
       </div>
       {error ? <p className="panel-error">{error}</p> : null}
 
+      <div className="session-cta-row">
+        <button className="session-cta-button" disabled={!onOpenDreamList} onClick={() => onOpenDreamList?.()} type="button">
+          {t(language, 'sessionDetail.openSessionDreams')}
+        </button>
+        <button className="session-cta-button" disabled={!onOpenSessionKnowledge} onClick={() => onOpenSessionKnowledge?.()} type="button">
+          {t(language, 'sessionDetail.openKnowledge')}
+        </button>
+        <button className="session-cta-button" disabled={!onOpenControl} onClick={() => onOpenControl?.()} type="button">
+          {t(language, 'sessionDetail.openControl')}
+        </button>
+      </div>
+
       <div className="session-meta-grid session-meta-grid-primary">
         <span><strong>{t(language, 'sessionDetail.client')}</strong>{text(session.client_type)}</span>
         <span><strong>{t(language, 'sessionDetail.project')}</strong>{text(session.project_id)}</span>
@@ -596,18 +608,6 @@ export function SessionDetailPanel({
             <span>{text(latestDreamItem.started_at_local ?? latestDreamItem.started_at ?? session.last_dream_at, t(language, 'sessionDetail.notStarted'))}</span>
           </div>
         </article>
-      </div>
-
-      <div className="session-cta-row">
-        <button className="session-cta-button" disabled={!onOpenDreamList} onClick={() => onOpenDreamList?.()} type="button">
-          {t(language, 'sessionDetail.openSessionDreams')}
-        </button>
-        <button className="session-cta-button" disabled={!onOpenSessionKnowledge} onClick={() => onOpenSessionKnowledge?.()} type="button">
-          {t(language, 'sessionDetail.openKnowledge')}
-        </button>
-        <button className="session-cta-button" disabled={!onOpenControl} onClick={() => onOpenControl?.()} type="button">
-          {t(language, 'sessionDetail.openControl')}
-        </button>
       </div>
 
       <div className="session-kpi-grid">

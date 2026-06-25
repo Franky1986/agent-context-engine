@@ -12,6 +12,7 @@ from ..infrastructure.config import ROOT, session_short
 from ..infrastructure.db import connect
 from ..adapters.runners.cursor import CURSOR_EVENTS, cursor_status
 from ..adapters.launchagent import DEFAULT_ENV_FILE, DEFAULT_LABEL, launch_agent_path
+from .integrations import cursor_project_background_runner_status
 from .instance_profile import (
     DEFAULT_MONITOR_HOST,
     DEFAULT_MONITOR_PORT,
@@ -46,7 +47,7 @@ HEADLESS_INSTALL_GUIDANCE = {
     "claude": {
         "label": "Claude Code CLI",
         "install_command": "npm install -g @anthropic-ai/claude-code",
-        "login_command": "claude login",
+        "login_command": "claude auth login",
         "detail": (
             "Claude Desktop is separate from the Claude Code CLI. "
             "Dreaming, monitor ask, the Agent Context Engine wrapper, and other headless flows require the CLI."
@@ -55,14 +56,13 @@ HEADLESS_INSTALL_GUIDANCE = {
         "npm_package": "@anthropic-ai/claude-code",
     },
     "cursor": {
-        "label": "Cursor CLI",
-        "install_command": "Install the Cursor CLI so the `cursor-agent` command exists, then run `cursor-agent login`.",
-        "login_command": "cursor-agent login",
+        "label": "Cursor background runner",
+        "install_command": "Install Codex CLI or Claude Code CLI, then use one of them as the background LLM runner for Cursor projects.",
+        "login_command": "codex login or claude auth login",
         "detail": (
-            "Cursor IDE project hooks are separate from the headless Cursor CLI. "
-            "Headless Cursor flows require `cursor-agent` on the machine."
+            "Cursor IDE project hooks capture sessions inside Cursor, but firewall classification, dreaming, query expansion, and other background LLM workflows require `codex` or `claude` on the machine."
         ),
-        "auto_installable": False,
+        "auto_installable": True,
         "npm_package": "",
     },
 }
@@ -84,11 +84,18 @@ def local_time(value: object) -> str:
 def run_cursor_status(target: str | Path | None = None) -> tuple[list[str], int]:
     root = Path(target).expanduser().resolve() if target else ROOT
     status = cursor_status(root)
+    background = cursor_project_background_runner_status(root, expected_memory_root=ROOT)
     lines: list[str] = [
         f"hooks config: {'ok' if status['hooks_exists'] else 'missing'} {status['hooks_path']}",
         f"hook wrapper: {'ok' if status['script_exists'] else 'missing'} {status['script_path']}",
         f"active events: {len(status['active_events'])}/{len(CURSOR_EVENTS)}",
+        f"background runner: {background['headless_runner'] or '-'}",
+        f"background readiness: {background['background_runner_status']}",
     ]
+    if background.get("configured_background_runner"):
+        lines.append(f"configured background runner: {background['configured_background_runner']}")
+    if background.get("background_runner_login_command"):
+        lines.append(f"background login hint: {background['background_runner_login_command']}")
     for event in status["active_events"]:
         lines.append(f"  - {event}")
 
@@ -109,7 +116,7 @@ def run_cursor_status(target: str | Path | None = None) -> tuple[list[str], int]
             f"latest: {session_short(latest['session_id'])} {latest['project_id'] or 'unknown'} "
             f"{latest['status']} events={latest['last_event_seq']} last={local_time(latest['last_event_at'])}"
         )
-    return lines, 0
+    return lines, 0 if background["headless_runner_ready"] else 1
 
 
 def backend_project_root(root: Path = ROOT) -> Path:

@@ -41,6 +41,95 @@ def runner_available(runner: str) -> bool:
     return shutil.which(runner) is not None
 
 
+def _looks_unauthenticated(detail: str) -> bool:
+    lowered = detail.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "not logged in",
+            "not authenticated",
+            "authentication required",
+            "please run /login",
+            "please run login",
+            "run 'agent login' first",
+            "run agent login first",
+            "run `codex login`",
+            "run codex login",
+            "run `claude login`",
+            "run claude login",
+            "run `claude auth login`",
+            "run claude auth login",
+            "set cursor_api_key",
+            "api key not found",
+            "missing api key",
+        )
+    )
+
+
+def codex_auth_status() -> tuple[bool, str]:
+    executable = shutil.which("codex")
+    if not executable:
+        return False, "codex executable is missing."
+    try:
+        proc = subprocess.run(
+            [executable, "login", "status"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+            cwd=str(ROOT),
+            env={
+                **os.environ,
+                "AGENT_MEMORY_INTERNAL_RUN": "1",
+                "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT),
+            },
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"codex login status failed: {exc}"
+    detail = (proc.stderr or proc.stdout or "").strip()
+    if _looks_unauthenticated(detail):
+        return False, detail
+    if proc.returncode == 0:
+        return True, detail
+    return False, detail or f"codex login status exited with code {proc.returncode}"
+
+
+def claude_auth_status() -> tuple[bool, str]:
+    executable = shutil.which("claude")
+    if not executable:
+        return False, "claude executable is missing."
+    try:
+        proc = subprocess.run(
+            [executable, "auth", "status"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+            cwd=str(ROOT),
+            env={
+                **os.environ,
+                "AGENT_MEMORY_INTERNAL_RUN": "1",
+                "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT),
+            },
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"claude auth status failed: {exc}"
+    stdout = (proc.stdout or "").strip()
+    detail = (proc.stderr or stdout or "").strip()
+    if stdout:
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            if bool(payload.get("loggedIn")):
+                return True, stdout
+            return False, stdout or "Claude Code CLI is not logged in. Run `claude auth login` to authenticate."
+    if _looks_unauthenticated(detail):
+        return False, detail
+    if proc.returncode == 0:
+        return True, detail
+    return False, detail or f"claude auth status exited with code {proc.returncode}"
+
+
 def cursor_agent_auth_status() -> tuple[bool, str]:
     executable = shutil.which("cursor-agent")
     if not executable:
@@ -52,13 +141,32 @@ def cursor_agent_auth_status() -> tuple[bool, str]:
             capture_output=True,
             timeout=5,
             cwd=str(ROOT),
+            env={
+                **os.environ,
+                "AGENT_MEMORY_INTERNAL_RUN": "1",
+                "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT),
+            },
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"cursor-agent status failed: {exc}"
     detail = (proc.stderr or proc.stdout or "").strip()
+    if proc.returncode == 0 and _looks_unauthenticated(detail):
+        return False, detail
     if proc.returncode == 0:
         return True, detail
     return False, detail or f"cursor-agent status exited with code {proc.returncode}"
+
+
+def runner_auth_status(runner: str) -> tuple[bool, str]:
+    if runner == "codex":
+        return codex_auth_status()
+    if runner == "claude":
+        return claude_auth_status()
+    if runner == "cursor":
+        return cursor_agent_auth_status()
+    if not runner_available(runner):
+        return False, f"{runner} executable is missing."
+    return True, ""
 
 
 def trigger_cursor_agent_login(session_id: str, *, cool_down_seconds: int = 300) -> str:
@@ -90,6 +198,7 @@ def trigger_cursor_agent_login(session_id: str, *, cool_down_seconds: int = 300)
                 close_fds=True,
                 env={
                     **os.environ,
+                    "AGENT_MEMORY_INTERNAL_RUN": "1",
                     "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT),
                 },
             )

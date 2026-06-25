@@ -1,6 +1,6 @@
 # Agent Context Engine Test Strategy And Validation Status
 
-Last updated: 2026-06-24
+Last updated: 2026-06-25
 
 This document defines a deterministic test order for Agent Context Engine and
 tracks which parts have already been verified in recent installation,
@@ -34,6 +34,17 @@ For every phase:
 - define one expected state
 - introduce one failure source at a time
 - finish with a small documented pass/fail result
+
+`./scripts/check --skip-runtime-db` intentionally runs the normal unit suite
+without the heavy installation integration bucket. Run install, activation,
+wrapper, LaunchAgent, and storage-root regression tests explicitly with:
+
+```sh
+./scripts/check --skip-runtime-db --include-install-integration-tests
+```
+
+The separated check reports `install-integration-suite` independently so a
+slow install path cannot be mistaken for a generic unit-suite hang.
 
 ## Recommended Test Environment
 
@@ -346,6 +357,19 @@ Example:
 13. Takeover install
 14. Isolated install
 
+## 2026-06-25 Update Snapshot
+
+- backend version `0.2.7`
+- monitor version `0.6.5`
+- cursor activation now persists configured background runner and launch workdir on hook
+  generation
+- session list and session detail now expose both origin client and background dream
+  runner separately
+- dream metadata hardening now records parse-failure signals (`AGENT_MEMORY_JSON_*`)
+  for reconciliation and semantic parsing errors
+- install/install-discovery and integration flows are now documented as multi-scenario:
+  takeover, isolated, and cursor-specific activation with explicit `--background-runner`
+
 ## Recommended Depth
 
 Separate three levels:
@@ -366,10 +390,12 @@ Most important regressions:
 
 Change set under test:
 
-- backend version `0.2.2`
-- frontend version `0.6.2`
+- backend version `0.2.7`
+- monitor version `0.6.5`
 - installation and integration command surface updated around `--installation-root`
 - isolated install flow updated around deterministic local memory and wrapper behavior
+- installation integration tests are now a separate `install-integration-suite`
+  in `./scripts/check`
 - dream JSON extraction and fallback hardening already included in this branch
 
 Status legend:
@@ -395,9 +421,11 @@ Status legend:
 ### C. Wrappers And Integrations
 
 - [x] `cursor-enable --target ... --installation-root ...` wrote installation-root-aware bindings for `pr-llm-service`.
-- [x] generated Cursor hook files point to `agent-context-engine-test29-isolated` rather than a stale installation.
+- [x] generated Cursor hook files now carry the effective launch workdir so routing resolves against the actual project path.
 - [x] `cursor-status --target /Users/frankrichter/projects/pr-llm-service` reported active hooks and one recorded session.
 - [x] `/api/integrations` for `test29` reported one activated Cursor project with `hooks_state=enabled` and `hooks_enabled=true`.
+- [x] session list now shows `cursor` as origin client with separate dream runner metadata, and prefers `last_workdir` in session table paths.
+- [x] session rows now render explicit origin/dream badges for quick provenance checks.
 - [ ] full runner matrix for `codex-ace`, `claude-ace`, `agy-ace`, `gemini-ace`, and `opencode-ace` from dedicated project roots is still open.
 
 ### D. Hook Capture

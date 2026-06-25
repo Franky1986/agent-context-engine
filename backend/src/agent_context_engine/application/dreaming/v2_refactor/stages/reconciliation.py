@@ -12,7 +12,7 @@ from ..services import (
     budget,
     build_reconciliation_prompt,
     deterministic_reconciliation_payload,
-    extract_json,
+    extract_json_with_diagnostics,
     invoke_runner,
     load_reused_stage_json,
     remap_reconciliation_payload_for_rerun,
@@ -160,10 +160,33 @@ def run_reconciliation_stage(
             semantic_schema_version=stage_runtime.SEMANTIC_SCHEMA_VERSION,
             reconciliation_schema_version=RECONCILIATION_SCHEMA_VERSION,
             json_dumps_fn=stage_runtime.json_dumps,
+            allow_empty_output=True,
         )
-        reconciliation_payload = extract_json(reconciliation_text)
-        reconciliation_payload["dream_run_id"] = context.dream_run_id
-        reconciliation_payload["session_id"] = context.session_id
+        reconciliation_fallback_reason: str | None = None
+        try:
+            reconciliation_payload, json_diagnostics = extract_json_with_diagnostics(reconciliation_text)
+            reconciliation_payload["dream_run_id"] = context.dream_run_id
+            reconciliation_payload["session_id"] = context.session_id
+            reconciliation_meta = {
+                **(reconciliation_meta if isinstance(reconciliation_meta, dict) else {}),
+                "json_parse": json_diagnostics,
+            }
+        except Exception as exc:  # noqa: BLE001
+            reconciliation_fallback_reason = str(exc)
+            reconciliation_payload = deterministic_reconciliation_payload(
+                semantic_payload,
+                candidates,
+                dream_run_id=context.dream_run_id,
+                session_id=context.session_id,
+                safe_slug_fn=stage_runtime.safe_slug,
+            )
+            reconciliation_meta = {
+                **(reconciliation_meta if isinstance(reconciliation_meta, dict) else {}),
+                "fallback_to_deterministic_reconciliation": True,
+                "fallback_reason": reconciliation_fallback_reason,
+                "json_parse_error_code": getattr(exc, "code", None),
+                "json_parse": getattr(exc, "diagnostics", {"strategy": "failed"}),
+            }
 
     reconciliation_payload = apply_reconciliation_guardrails(
         reconciliation_payload,
@@ -198,6 +221,9 @@ def run_reconciliation_stage(
             semantic_payload=semantic_payload,
         )
         reconciliation_validation["fallback_to_deterministic_reconciliation"] = True
+    if reconciliation_meta.get("fallback_to_deterministic_reconciliation"):
+        reconciliation_validation["fallback_to_deterministic_reconciliation"] = True
+        reconciliation_validation["fallback_reason"] = reconciliation_meta.get("fallback_reason")
 
     decisions_path = stage_runtime.write_json(run_dir / stage_dir / "decisions.json", reconciliation_payload)
     stage_runtime.write_json(run_dir / stage_dir / "validation.json", reconciliation_validation)

@@ -35,7 +35,13 @@ from .commands.installation import (
     cmd_opencode_status,
     cmd_repair_installation,
 )
-from .commands.maintenance import GRAPH_PRUNE_KINDS, cmd_graph_prune, cmd_prune_event_logs, cmd_prune_logs, cmd_purge_tool_outputs
+from .commands.maintenance import (
+    GRAPH_PRUNE_KINDS,
+    cmd_graph_prune,
+    cmd_purge_tool_outputs,
+    cmd_prune_event_logs,
+    cmd_prune_logs,
+)
 from .commands.retrieval import cmd_retrieve, cmd_retrieval_run, cmd_retrieval_runs
 from .commands.risk import (
     cmd_quarantine_list,
@@ -269,7 +275,9 @@ def build_parser() -> argparse.ArgumentParser:
     integration_hooks.add_argument("--client", required=True, choices=["codex", "claude", "cursor", "antigravity", "gemini", "opencode"])
     integration_hooks.add_argument("--action", required=True, choices=["enable", "disable"])
     integration_hooks.add_argument("--target")
-    integration_hooks.add_argument("--memory-root")
+    integration_hooks.add_argument("--installation-root", help="Agent Context Engine installation root; defaults to this installation root")
+    integration_hooks.add_argument("--background-runner", choices=["codex", "claude"], help="Pin Cursor background LLM workflows to a specific headless runner")
+    integration_hooks.add_argument("--memory-root", help=argparse.SUPPRESS)
     integration_hooks.set_defaults(func=cmd_integration_hooks)
 
     gemini_status = sub.add_parser("gemini-status")
@@ -279,12 +287,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     gemini_enable = sub.add_parser("gemini-enable")
     gemini_enable.add_argument("--target", help="Project folder where .gemini/settings.json should be written")
-    gemini_enable.add_argument("--memory-root", help="Central Agent Context Engine memory root; defaults to this installation root")
+    gemini_enable.add_argument("--installation-root", help="Agent Context Engine installation root; defaults to this installation root")
+    gemini_enable.add_argument("--memory-root", help=argparse.SUPPRESS)
     gemini_enable.set_defaults(func=cmd_gemini_enable)
 
     antigravity_enable = sub.add_parser("antigravity-enable")
     antigravity_enable.add_argument("--target", help="Project folder where .agents/hooks.json should be written")
-    antigravity_enable.add_argument("--memory-root", help="Central Agent Context Engine root; defaults to this installation root")
+    antigravity_enable.add_argument("--installation-root", help="Agent Context Engine installation root; defaults to this installation root")
+    antigravity_enable.add_argument("--memory-root", help=argparse.SUPPRESS)
     antigravity_enable.set_defaults(func=cmd_antigravity_enable)
 
     antigravity_status = sub.add_parser("antigravity-status")
@@ -293,7 +303,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     opencode_enable = sub.add_parser("opencode-enable")
     opencode_enable.add_argument("--target")
-    opencode_enable.add_argument("--memory-root")
+    opencode_enable.add_argument("--installation-root", help="Agent Context Engine installation root; defaults to this installation root")
+    opencode_enable.add_argument("--memory-root", help=argparse.SUPPRESS)
     opencode_enable.add_argument("--model")
     opencode_enable.add_argument("--small-model")
     opencode_enable.set_defaults(func=cmd_opencode_enable)
@@ -652,6 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
     install_discovery = sub.add_parser("install-discovery")
     install_discovery.add_argument("--target")
     install_discovery.add_argument("--memory-root")
+    install_discovery.add_argument("--isolated", action="store_true", help="Generate an isolated install plan with instance-specific naming and runtime storage")
     install_discovery.add_argument("--language", choices=["en", "de"])
     install_discovery.add_argument("--json", action="store_true")
     install_discovery.add_argument("--plan-json")
@@ -717,7 +729,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     cursor_enable = sub.add_parser("cursor-enable")
     cursor_enable.add_argument("--target", help="Project folder where .cursor/hooks.json should be written")
-    cursor_enable.add_argument("--memory-root", help="Central Agent Context Engine root; defaults to this installation root")
+    cursor_enable.add_argument("--installation-root", help="Agent Context Engine installation root; defaults to this installation root")
+    cursor_enable.add_argument("--background-runner", choices=["codex", "claude"], help="Pin Cursor background LLM workflows to a specific headless runner")
+    cursor_enable.add_argument("--memory-root", help=argparse.SUPPRESS)
     cursor_enable.set_defaults(func=cmd_cursor_enable)
 
     cursor_disable = sub.add_parser("cursor-disable")
@@ -731,6 +745,7 @@ def build_parser() -> argparse.ArgumentParser:
     install = sub.add_parser("install")
     install.add_argument("--target")
     install.add_argument("--memory-root", help="Persistent runtime storage root. Defaults to ~/.agent-context-engine/memory")
+    install.add_argument("--isolated", action="store_true", help="Install as an isolated instance: target-local memory root, no shared CLI takeover, instance-specific global wrapper names")
     install.add_argument("--storage-schema-version", type=int, help=argparse.SUPPRESS)
     install.add_argument("--instance-name", help="Optional instance name used for prefixed global command links")
     install.add_argument("--command-prefix", help="Optional prefix for global command links, e.g. personal-")

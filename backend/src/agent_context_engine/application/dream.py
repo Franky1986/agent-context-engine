@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Sequence, Tuple
 
 from ..infrastructure.config import ROOT, json_dumps, safe_slug, utc_now
-from .dreaming.runners import cursor_agent_auth_status, model_for_runner, runner_available, runner_for_session
+from .dreaming.runners import model_for_runner, runner_auth_status, runner_available, runner_for_session
 
 
 def _runner_requested_implicitly(requested_runner: str | None, *, map_deterministic_to_session: bool) -> bool:
@@ -19,22 +19,32 @@ def _runner_requested_implicitly(requested_runner: str | None, *, map_determinis
 
 
 def _runner_auth_ready(conn: sqlite3.Connection | None, runner: str) -> bool:
-    if runner != "cursor":
+    if runner not in {"cursor", "codex", "claude"}:
         return True
-    auth_ready, _detail = cursor_agent_auth_status()
+    auth_ready, _detail = runner_auth_status(runner)
     if auth_ready:
         return True
     return False
 
 
 def _runner_readiness_error(runner: str) -> str:
-    if runner != "cursor":
+    if runner not in {"cursor", "codex", "claude"}:
         return f"{runner} dream runner is not ready"
-    _ready, detail = cursor_agent_auth_status()
+    _ready, detail = runner_auth_status(runner)
     lowered = str(detail or "").lower()
-    if "executable is missing" in lowered or "not found" in lowered:
-        return "cursor dream runner is not ready; install `cursor-agent` first, then run `cursor-agent login`"
-    return "cursor dream runner is not ready; run `cursor-agent login` or set `CURSOR_API_KEY`"
+    if runner == "cursor":
+        if "executable is missing" in lowered or "not found" in lowered:
+            return "cursor dream runner is not ready; install `cursor-agent` first, then run `cursor-agent login`"
+        return "cursor dream runner is not ready; run `cursor-agent login` or set `CURSOR_API_KEY`"
+    if runner == "codex":
+        if "executable is missing" in lowered or "not found" in lowered:
+            return "codex dream runner is not ready; install `codex` first, then run `codex login`"
+        return "codex dream runner is not ready; run `codex login`"
+    if runner == "claude":
+        if "executable is missing" in lowered or "not found" in lowered:
+            return "claude dream runner is not ready; install `claude` first, then run `claude auth login`"
+        return "claude dream runner is not ready; run `claude auth login`"
+    return f"{runner} dream runner is not ready"
 
 
 def next_undreamed_range(conn: sqlite3.Connection, session_id: str, last_event_seq: int) -> tuple[int, int] | None:

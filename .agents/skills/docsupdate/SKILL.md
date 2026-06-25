@@ -1,32 +1,24 @@
 ---
 name: docsupdate
-description: Run repository documentation/version/changelog sync workflow.
-aliases:
-  - doup
-  - docs-update
+description: Run the repository documentation/version/changelog sync workflow via the shared editor entrypoints.
 ---
-# docsupdate
 
-Use this when repository-level documentation/version/changelog sync is requested.
+Use this skill to execute the docs maintenance workflow after behavior/surface updates.
 
-Canonical command:
+The executable source of truth is:
 
-```sh
-./scripts/docsupdate \
-  --bump-backend patch \
-  --bump-monitor patch \
-  --changelog-note "backend: ..." \
-  --changelog-note "monitor: ..."
-```
+- `docs/commands/docsupdate/README.md`
 
-If your Codex build does not expose `/docsupdate` in the slash menu, use:
+Preferred invocation surfaces:
 
-```text
-/use docsupdate
-```
+- `.codex/commands/docsupdate.md`
+- `.claude/commands/docsupdate.md`
+- `.cursor/commands/docsupdate.md`
+- `.opencode/commands/docsupdate.md`
 
-or invoke the skill directly:
+Keep this workflow limited to maintenance pass steps:
 
-```text
-$docsupdate
-```
+- verify versioned surfaces are aligned,
+- update nearest `*.spec.md` files,
+- refresh changelog + metadata snapshots,
+- run docs index refresh as documented.

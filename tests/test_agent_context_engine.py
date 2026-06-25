@@ -61,6 +61,8 @@ def run_cli(
         "AGENT_MEMORY_TEST_SKIP_MONITOR_START": "1",
         "AGENT_MEMORY_TEST_SKIP_MONITOR_OPEN": "1",
         "AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD": "1",
+        "AGENT_MEMORY_TEST_SKIP_RUNTIME_BOOTSTRAP": "1",
+        "AGENT_MEMORY_TEST_SKIP_POST_INSTALL_CHECKS": "1",
         **(extra_env or {}),
     }
     input_text = json.dumps(stdin) if stdin is not None else None
@@ -87,6 +89,15 @@ def run_cli(
     return result
 
 
+def install_fake_headless_runner(root: Path, runner: str = "codex") -> str:
+    fake_bin = root / "bin"
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    fake_runner = fake_bin / runner
+    fake_runner.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    os.chmod(fake_runner, 0o755)
+    return str(fake_bin)
+
+
 
 
 
@@ -103,7 +114,47 @@ def default_install_root(home_root: Path) -> Path:
     return (home_root / ".agent-context-engine" / "install").resolve()
 
 
-class AgentContextEngineWindowTests(unittest.TestCase):
+INSTALL_INTEGRATION_TEST_PREFIXES = (
+    "test_install",
+    "test_check_installation",
+    "test_attach_memory_root",
+    "test_repair_installation",
+    "test_monitor_installation",
+    "test_monitor_storage_inspect",
+    "test_final_install",
+    "test_wrapper_conflicts",
+    "test_global_wrapper",
+    "test_launchagent",
+    "test_cursor_enable",
+    "test_cursor_disable",
+    "test_cursor_commands_fail",
+    "test_opencode_enable",
+    "test_antigravity_enable",
+    "test_gemini_enable",
+    "test_codex_runtime_home",
+    "test_missing_workspace_binding",
+    "test_log_hook_skips_when_workspace_binding",
+    "test_dream_v2_succeeds_with_external_memory_root",
+)
+
+
+def is_install_integration_test(test_name: str) -> bool:
+    lowered = test_name.lower()
+    return any(lowered.startswith(prefix) for prefix in INSTALL_INTEGRATION_TEST_PREFIXES)
+
+
+class AgentContextEngineTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        test_name = getattr(self, "_testMethodName", "")
+        install_integration = is_install_integration_test(test_name)
+        if os.environ.get("AGENT_MEMORY_ONLY_INSTALL_INTEGRATION_TESTS") in {"1", "true", "True", "yes"} and not install_integration:
+            self.skipTest("not an installation integration test")
+        if os.environ.get("AGENT_MEMORY_SKIP_INSTALL_INTEGRATION_TESTS") in {"1", "true", "True", "yes"} and install_integration:
+            self.skipTest("installation integration tests are run separately")
+
+
+class AgentContextEngineWindowTests(AgentContextEngineTestCase):
     def test_hook_support_modules_keep_facade_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1251,6 +1302,191 @@ class AgentContextEngineWindowTests(unittest.TestCase):
             self.assertEqual(payload["schema_version"], "semantic_proposals.v2")
             self.assertEqual(payload["entities"], [])
 
+    def test_dream_pipeline_v2_extract_json_tolerates_fenced_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.dreaming.v2_refactor.services.dream_runner import extract_json_with_diagnostics
+
+            payload, diagnostics = extract_json_with_diagnostics(
+                '```json\n{"schema_version":"semantic_proposals.v2","entities":[],"relations":[],"schema_proposals":[]}\n```'
+            )
+            self.assertEqual(payload["schema_version"], "semantic_proposals.v2")
+            self.assertTrue(diagnostics["fenced"])
+
+    def test_dream_pipeline_v2_extract_json_reports_blank_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.dreaming.v2_refactor.services.dream_runner import DreamRunnerJsonError, extract_json_with_diagnostics
+
+            with self.assertRaises(DreamRunnerJsonError) as ctx:
+                extract_json_with_diagnostics("   \n")
+            self.assertEqual(ctx.exception.code, "blank_json_output")
+
+    def test_dream_pipeline_v2_semantic_stage_falls_back_on_blank_json_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            am = load_agent_memory(root)
+            from agent_context_engine.application.dreaming.v2_refactor.context import DreamV2Context, DreamV2RunArtifacts, DreamV2StageContext
+            from agent_context_engine.application.dreaming.v2_refactor.stages import semantic as semantic_stage
+
+            conn = am.connect()
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                """
+                insert into sessions (
+                  session_id, client_type, project_id, cwd, started_at,
+                  last_event_at, status, last_event_seq
+                ) values (?, 'antigravity', 'demo', ?, '2026-06-24T10:00:00+00:00',
+                          '2026-06-24T10:00:00+00:00', 'stopped', 2)
+                """,
+                ("semantic-fallback-session", str(root)),
+            )
+            conn.execute(
+                """
+                insert into dream_runs (
+                  dream_run_id, session_id, client_type, runner, runner_model,
+                  started_at, status, input_event_seq_from, input_event_seq_to,
+                  input_event_count, pipeline_version, pipeline_status, created_by
+                ) values (
+                  'dream-semantic-fallback', 'semantic-fallback-session', 'antigravity', 'antigravity', 'gemini-3.1-flash-lite',
+                  '2026-06-24T10:00:00+00:00', 'running', 1, 2,
+                  2, 2, 'running', 'unit_test'
+                )
+                """
+            )
+            conn.commit()
+
+            run_dir = root / "memory" / "dreams" / "dream-semantic-fallback"
+            context = DreamV2Context(
+                conn=conn,
+                dream_run_id="dream-semantic-fallback",
+                session_id="semantic-fallback-session",
+                event_from=1,
+                event_to=2,
+                run_dir=run_dir,
+                dry_run=False,
+                clock=None,
+                file_system=None,
+                db_provider=None,
+                run_artifacts=DreamV2RunArtifacts(run_dir=run_dir),
+            )
+            stage_context = DreamV2StageContext(stage_name="semantic_extraction", stage_order=2, stage_run_id="unused")
+
+            with mock.patch.object(semantic_stage, "invoke_runner", return_value=("", {"token_usage": {"input_tokens": 1, "output_tokens": 0, "total_tokens": 1}})):
+                result = semantic_stage.run_semantic_stage(
+                    conn=conn,
+                    context=context,
+                    stage_context=stage_context,
+                    current={"session_id": "semantic-fallback-session", "project_id": "demo", "client_type": "antigravity"},
+                    events=[],
+                    narrative_response="Session discussed a concrete follow-up task.",
+                    semantic_context={},
+                    runner="antigravity",
+                    runner_model="gemini-3.1-flash-lite",
+                    reuse_from_dream_run_id=None,
+                    runner_timeout=30,
+                    args=None,
+                )
+
+            self.assertTrue(result["semantic_meta"]["fallback_to_deterministic_semantic"])
+            self.assertEqual(result["semantic_meta"]["json_parse_error_code"], "blank_json_output")
+            self.assertEqual(result["semantic_meta"]["json_parse"]["input_chars"], 0)
+            self.assertTrue(result["semantic_validation"]["fallback_to_deterministic_semantic"])
+
+    def test_dream_pipeline_v2_reconciliation_stage_falls_back_on_blank_json_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            am = load_agent_memory(root)
+            from agent_context_engine.application.dreaming.v2_refactor.context import DreamV2Context, DreamV2RunArtifacts, DreamV2StageContext
+            from agent_context_engine.application.dreaming.v2_refactor.stages import reconciliation as reconciliation_stage
+
+            conn = am.connect()
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                """
+                insert into sessions (
+                  session_id, client_type, project_id, cwd, started_at,
+                  last_event_at, status, last_event_seq
+                ) values (?, 'antigravity', 'demo', ?, '2026-06-24T10:00:00+00:00',
+                          '2026-06-24T10:00:00+00:00', 'stopped', 2)
+                """,
+                ("reconciliation-fallback-session", str(root)),
+            )
+            conn.execute(
+                """
+                insert into dream_runs (
+                  dream_run_id, session_id, client_type, runner, runner_model,
+                  started_at, status, input_event_seq_from, input_event_seq_to,
+                  input_event_count, pipeline_version, pipeline_status, created_by
+                ) values (
+                  'dream-reconciliation-fallback', 'reconciliation-fallback-session', 'antigravity', 'antigravity', 'gemini-3.1-flash-lite',
+                  '2026-06-24T10:00:00+00:00', 'running', 1, 2,
+                  2, 2, 'running', 'unit_test'
+                )
+                """
+            )
+            conn.commit()
+
+            run_dir = root / "memory" / "dreams" / "dream-reconciliation-fallback"
+            context = DreamV2Context(
+                conn=conn,
+                dream_run_id="dream-reconciliation-fallback",
+                session_id="reconciliation-fallback-session",
+                event_from=1,
+                event_to=2,
+                run_dir=run_dir,
+                dry_run=False,
+                clock=None,
+                file_system=None,
+                db_provider=None,
+                run_artifacts=DreamV2RunArtifacts(run_dir=run_dir),
+            )
+            stage_context = DreamV2StageContext(stage_name="reconciliation", stage_order=4, stage_run_id="unused")
+            semantic_payload = {
+                "schema_version": "semantic_proposals.v2",
+                "dream_run_id": "dream-reconciliation-fallback",
+                "session_id": "reconciliation-fallback-session",
+                "source_event_range": {"start_seq": 1, "end_seq": 2},
+                "entities": [
+                    {
+                        "proposal_id": "task-follow-up",
+                        "type": "task",
+                        "name": "Follow-up task",
+                        "aliases": [],
+                        "summary": "A concrete follow-up task was discussed.",
+                        "properties": {},
+                        "confidence": 0.82,
+                        "evidence": [{"source": "conversation", "event_seq": 1, "quote": "follow-up task"}],
+                        "review_required": False,
+                        "review_reason": None,
+                    }
+                ],
+                "relations": [],
+                "schema_proposals": [],
+            }
+
+            with mock.patch.object(reconciliation_stage, "invoke_runner", return_value=("", {"token_usage": {"input_tokens": 1, "output_tokens": 0, "total_tokens": 1}})):
+                result = reconciliation_stage.run_reconciliation_stage(
+                    conn=conn,
+                    context=context,
+                    stage_context=stage_context,
+                    semantic_payload=semantic_payload,
+                    candidates={"entities": [], "relations": []},
+                    runner="antigravity",
+                    runner_model="gemini-3.1-flash-lite",
+                    semantic_id_map=None,
+                    reuse_from_dream_run_id=None,
+                    runner_timeout=30,
+                    args=None,
+                )
+
+            self.assertTrue(result["reconciliation_meta"]["fallback_to_deterministic_reconciliation"])
+            self.assertEqual(result["reconciliation_meta"]["json_parse_error_code"], "blank_json_output")
+            self.assertEqual(result["reconciliation_meta"]["json_parse"]["input_chars"], 0)
+            self.assertTrue(result["reconciliation_validation"]["fallback_to_deterministic_reconciliation"])
+
     def test_dream_pipeline_v2_deterministic_semantic_payload_for_simple_prompt_is_valid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2166,6 +2402,42 @@ class AgentContextEngineWindowTests(unittest.TestCase):
             self.assertEqual(audit["hook_mode"], "context")
             conn.close()
 
+    def test_cursor_queue_capture_persists_headless_runner_preference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake_bin = install_fake_headless_runner(root)
+            result = run_cli(
+                root,
+                "log-hook",
+                "--client",
+                "cursor",
+                stdin={
+                    "hookName": "beforeSubmitPrompt",
+                    "conversation_id": "cursor-queued-1",
+                    "workspacePath": str(root),
+                    "userPrompt": "Summarize this project.",
+                },
+                extra_env={
+                    "PATH": fake_bin + os.pathsep + os.environ.get("PATH", ""),
+                    "AGENT_MEMORY_TEST_AUTO_REPLAY": "0",
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            am = load_agent_memory(root)
+            conn = am.connect()
+            session = conn.execute(
+                "select preferred_dream_runner, last_event_seq, last_reserved_event_seq from sessions where session_id = ?",
+                ("cursor-queued-1",),
+            ).fetchone()
+            self.assertIsNotNone(session)
+            self.assertEqual(session["preferred_dream_runner"], "codex")
+            self.assertEqual(session["last_event_seq"], 0)
+            self.assertEqual(session["last_reserved_event_seq"], 1)
+            queued = sorted((root / "memory" / "events" / "queue" / "cursor").glob("*.json"))
+            self.assertEqual(len(queued), 1)
+            conn.close()
+
     def test_replay_hook_queue_processes_reserved_sequence_and_records_worker_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2216,6 +2488,38 @@ class AgentContextEngineWindowTests(unittest.TestCase):
             worker = json.loads((root / "memory" / "status" / "hook-queue-worker.json").read_text(encoding="utf-8"))
             self.assertFalse(worker["worker"]["running"])
             self.assertTrue(worker["worker"]["last_exit_at"])
+
+    def test_hook_queue_kick_ignores_debounce_when_events_are_queued(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application import hook_effects
+
+            queue_dir = root / "memory" / "events" / "queue" / "codex"
+            queue_dir.mkdir(parents=True, exist_ok=True)
+            (queue_dir / "queued-stop.json").write_text(
+                json.dumps({"client_type": "codex", "event_name": "Stop"}) + "\n",
+                encoding="utf-8",
+            )
+            hook_effects.LOCK_DIR.mkdir(parents=True, exist_ok=True)
+            (hook_effects.LOCK_DIR / "hook-queue-kick-last.json").write_text("{}", encoding="utf-8")
+
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "AGENT_MEMORY_AUTO_WORKER_ON_HOOK": "1",
+                        "AGENT_MEMORY_HOOK_QUEUE_DEBOUNCE_SECONDS": "30",
+                        "AGENT_MEMORY_DREAM": "",
+                        "AGENT_MEMORY_SCHEDULER": "",
+                        "AGENT_MEMORY_HOOK_QUEUE_WORKER": "",
+                    },
+                ),
+                mock.patch.object(hook_effects.subprocess, "Popen") as popen,
+            ):
+                hook_effects.spawn_hook_queue_kick("Stop")
+
+            popen.assert_called_once()
 
     def test_replay_hook_queue_sorts_by_persisted_metadata_not_filename(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2620,7 +2924,7 @@ class AgentContextEngineWindowTests(unittest.TestCase):
             self.assertIn("late first", (root / row["output_path"]).read_text(encoding="utf-8"))
 
 
-class AgentContextEngineEndToEndTests(unittest.TestCase):
+class AgentContextEngineEndToEndTests(AgentContextEngineTestCase):
     def test_risk_schema_and_cli_scan_dangerous_shell_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -4481,27 +4785,25 @@ exit 99
                 if name == "agent_memory" or name.startswith("agent_context_engine."):
                     del sys.modules[name]
 
-    def test_cursor_first_prompt_blocks_when_cursor_dream_runner_not_ready(self) -> None:
+    def test_cursor_first_prompt_warns_when_background_runner_auth_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fake_bin = root / "bin"
             fake_bin.mkdir()
             fake_cursor = fake_bin / "cursor-agent"
-            login_marker = root / "cursor-login-triggered.txt"
-            fake_cursor.write_text(
+            fake_codex = fake_bin / "codex"
+            fake_cursor.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_codex.write_text(
                 "#!/bin/sh\n"
-                "if [ \"$1\" = \"status\" ]; then\n"
-                "  echo 'ERROR: SecItemCopyMatching failed -50' >&2\n"
-                "  exit 1\n"
-                "fi\n"
-                "if [ \"$1\" = \"login\" ]; then\n"
-                f"  printf 'login-started\\n' > '{login_marker}'\n"
+                "if [ \"$1\" = \"login\" ] && [ \"$2\" = \"status\" ]; then\n"
+                "  echo 'Not logged in'\n"
                 "  exit 0\n"
                 "fi\n"
                 "exit 0\n",
                 encoding="utf-8",
             )
             os.chmod(fake_cursor, 0o755)
+            os.chmod(fake_codex, 0o755)
             load_agent_memory(root)
             result = run_cli(
                 root,
@@ -4516,12 +4818,69 @@ exit 99
                 },
                 extra_env={"PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", "")},
             )
-            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-            self.assertIn("cursor-agent login", result.stderr)
-            self.assertIn("started `cursor-agent login`", result.stderr)
-            self.assertIn("Cursor Settings > Hooks", result.stderr)
-            self.assertIn("Agent Memory will not work in this project", result.stderr)
-            self.assertTrue(login_marker.exists())
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            output = result.stdout + result.stderr
+            self.assertIn("codex login", output)
+            self.assertIn("claude auth login", output)
+            self.assertIn("Cursor background runner `codex` is not ready", output)
+            self.assertIn("Agent Context Engine active", output)
+
+    def test_cursor_enable_rejects_runner_that_is_installed_but_not_authenticated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_codex = fake_bin / "codex"
+            fake_codex.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = \"login\" ] && [ \"$2\" = \"status\" ]; then\n"
+                "  echo 'Not logged in'\n"
+                "  exit 0\n"
+                "fi\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            os.chmod(fake_codex, 0o755)
+            load_agent_memory(root)
+            target = root / "cursor-project"
+            target.mkdir(parents=True, exist_ok=True)
+            result = run_cli(
+                root,
+                "cursor-enable",
+                "--target",
+                str(target),
+                "--background-runner",
+                "codex",
+                extra_env={"PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", "")},
+            )
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("detected runner `codex`, but it is not authenticated", result.stderr)
+            self.assertIn("run `codex login` first", result.stderr)
+
+    def test_claude_auth_status_uses_json_auth_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_claude = fake_bin / "claude"
+            fake_claude.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n"
+                "  echo '{\"loggedIn\": true, \"authMethod\": \"oauth\", \"apiProvider\": \"firstParty\"}'\n"
+                "  exit 0\n"
+                "fi\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            os.chmod(fake_claude, 0o755)
+
+            load_agent_memory(root)
+            from agent_context_engine.application.dreaming.runners import claude_auth_status
+
+            with mock.patch.dict(os.environ, {"PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", "")}, clear=False):
+                ready, detail = claude_auth_status()
+            self.assertTrue(ready)
+            self.assertIn("\"loggedIn\": true", detail)
 
     def test_cursor_first_prompt_allows_user_control_prompts_even_when_cursor_runner_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4547,12 +4906,13 @@ exit 99
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_cursor_second_prompt_still_blocks_after_first_prompt_created_stop_event(self) -> None:
+    def test_cursor_second_prompt_still_warns_after_first_prompt_created_stop_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fake_bin = root / "bin"
             fake_bin.mkdir()
             fake_cursor = fake_bin / "cursor-agent"
+            fake_codex = fake_bin / "codex"
             fake_cursor.write_text(
                 "#!/bin/sh\n"
                 "if [ \"$1\" = \"status\" ]; then\n"
@@ -4565,7 +4925,17 @@ exit 99
                 "exit 0\n",
                 encoding="utf-8",
             )
+            fake_codex.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = \"login\" ] && [ \"$2\" = \"status\" ]; then\n"
+                "  echo 'Not logged in'\n"
+                "  exit 0\n"
+                "fi\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
             os.chmod(fake_cursor, 0o755)
+            os.chmod(fake_codex, 0o755)
             load_agent_memory(root)
             first = run_cli(
                 root,
@@ -4580,7 +4950,8 @@ exit 99
                 },
                 extra_env={"PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", "")},
             )
-            self.assertEqual(first.returncode, 2, first.stdout + first.stderr)
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            self.assertIn("Cursor background runner `codex` is not ready", first.stdout + first.stderr)
             stop = run_cli(
                 root,
                 "log-hook",
@@ -4607,9 +4978,9 @@ exit 99
                 },
                 extra_env={"PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", "")},
             )
-            self.assertEqual(second.returncode, 2, second.stdout + second.stderr)
-            self.assertIn("already triggered for this session", second.stderr)
-            self.assertIn("cursor-agent status", second.stderr)
+            self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+            self.assertIn("Cursor background runner `codex` is not ready", second.stdout + second.stderr)
+            self.assertIn("codex login", second.stdout + second.stderr)
 
     def test_cursor_shell_events_normalize_to_bash_for_readonly_sequences(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4651,12 +5022,16 @@ exit 99
             fake_agent_script.parent.mkdir(parents=True, exist_ok=True)
             fake_agent_script.write_text("#!/usr/bin/env python3\nprint('{}')\n", encoding="utf-8")
             fake_agent_script.chmod(0o755)
-            enable = run_cli(root, "cursor-enable")
+            fake_bin = install_fake_headless_runner(root)
+            enable = run_cli(root, "cursor-enable", extra_env={"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")})
             self.assertEqual(enable.returncode, 0, enable.stderr)
             script_text = (root / ".cursor" / "hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
             self.assertIn('AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}"', script_text)
             self.assertIn("HOOKS_STATE", script_text)
             self.assertIn('python3 - "$HOOKS_STATE" cursor', script_text)
+            self.assertIn('export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"', script_text)
+            self.assertIn('response["userMessage"] = message', script_text)
+            self.assertIn('response["agentMessage"] = message', script_text)
 
     def test_simple_read_only_shell_commands_are_allowlisted_from_llm_classifier(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -8040,8 +8415,15 @@ The session reconciled stale queue state and resumed pending dreams.
                 )
 
             with mock.patch(
-                "agent_context_engine.interfaces.hooks.support.session_context.cursor_agent_auth_status",
-                return_value=(False, "ERROR: Authentication required"),
+                "agent_context_engine.interfaces.hooks.support.session_context.cursor_project_background_runner_status",
+                return_value={
+                    "headless_runner_ready": False,
+                    "background_runner_status": "auth_required",
+                    "headless_runner": "codex",
+                    "background_runner_login_command": "codex login",
+                    "background_runner_auth_detail": "ERROR: Authentication required",
+                    "background_runner_detail": "run `codex login` so `codex` can handle background LLM workflows",
+                },
             ):
                 context = memory_hooks_status_context(
                     conn,
@@ -8051,9 +8433,8 @@ The session reconciled stale queue state and resumed pending dreams.
                     project_id="demoProject",
                     include_cursor_auth_notice=True,
                 )
-            self.assertIn("Cursor dream runner is not ready", context)
-            self.assertIn("cursor-agent login", context)
-            self.assertIn("CURSOR_API_KEY", context)
+            self.assertIn("Cursor background runner `codex` is not ready", context)
+            self.assertIn("codex login", context)
 
     def test_cursor_dream_auth_block_message_ignores_recent_failures_after_successful_auth(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -8096,8 +8477,15 @@ The session reconciled stale queue state and resumed pending dreams.
                     """
                 )
             with mock.patch(
-                "agent_context_engine.interfaces.hooks.support.session_context.cursor_agent_auth_status",
-                return_value=(True, "All set"),
+                "agent_context_engine.interfaces.hooks.support.session_context.cursor_project_background_runner_status",
+                return_value={
+                    "headless_runner_ready": True,
+                    "background_runner_status": "ready",
+                    "headless_runner": "codex",
+                    "background_runner_login_command": "",
+                    "background_runner_auth_detail": "All set",
+                    "background_runner_detail": "using `codex` for background LLM workflows",
+                },
             ):
                 message = cursor_dream_auth_block_message(
                     conn,
@@ -8107,6 +8495,68 @@ The session reconciled stale queue state and resumed pending dreams.
                     current_folder=str(project),
                 )
             self.assertEqual(message, "")
+
+    def test_cursor_recent_auth_failure_context_still_surfaces_for_claude_after_provisional_ready_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            am = load_agent_memory(root)
+            from agent_context_engine.interfaces.hooks.support.session_context import cursor_recent_auth_failure_context
+
+            project = root / "projects" / "demoProject"
+            project.mkdir(parents=True)
+            conn = am.connect()
+            with conn:
+                conn.execute(
+                    """
+                    insert into sessions (
+                      session_id, client_type, project_id, cwd, last_workdir,
+                      started_at, last_event_at, status, last_event_seq,
+                      preferred_dream_runner
+                    ) values (
+                      'cursor-claude-auth-session', 'cursor', 'demoProject', ?, ?,
+                      '2026-06-01T12:00:00+00:00', '2026-06-01T12:10:00+00:00',
+                      'stopped', 4, 'claude'
+                    )
+                    """,
+                    (str(project), str(project)),
+                )
+                conn.execute(
+                    """
+                    insert into dream_runs (
+                      dream_run_id, session_id, client_type, runner, runner_model,
+                      started_at, finished_at, status, input_event_seq_from,
+                      input_event_seq_to, input_event_count, error_message, created_by
+                    ) values (
+                      'cursor-claude-auth-failed-dream', 'cursor-claude-auth-session', 'cursor',
+                      'claude', 'claude-haiku',
+                      '2026-06-01T12:06:00+00:00', '2026-06-01T12:06:05+00:00',
+                      'failed', 1, 3, 3,
+                      'claude dream failed with exit code 1: Not logged in. Please run /login',
+                      'unit_test'
+                    )
+                    """
+                )
+
+            with mock.patch(
+                "agent_context_engine.interfaces.hooks.support.session_context.cursor_project_background_runner_status",
+                return_value={
+                    "headless_runner_ready": True,
+                    "background_runner_status": "ready",
+                    "headless_runner": "claude",
+                    "background_runner_login_command": "claude login (interactive Claude Code flow)",
+                    "background_runner_auth_detail": "Claude CLI installed",
+                    "background_runner_detail": "using `claude` for background LLM workflows",
+                },
+            ):
+                context = cursor_recent_auth_failure_context(
+                    conn,
+                    session_id="cursor-claude-auth-session",
+                    client_type="cursor",
+                    project_id="demoProject",
+                    current_folder=str(project),
+                )
+            self.assertIn("Recent Cursor background runs already failed with authentication errors for `claude`", context)
+            self.assertIn("claude login", context)
 
     def test_hook_context_suppresses_dream_failure_after_later_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -8982,9 +9432,11 @@ The session reconciled stale queue state and resumed pending dreams.
             codex_script = (root / ".codex" / "hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
             claude_script = (root / ".claude" / "hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
             self.assertIn("HOOKS_STATE", codex_script)
+            self.assertIn("AGENT_MEMORY_INTERNAL_RUN", codex_script)
             self.assertIn("python3 - \"$HOOKS_STATE\" codex", codex_script)
             self.assertIn("TMPERR", claude_script)
             self.assertIn("HOOKS_STATE", claude_script)
+            self.assertIn("AGENT_MEMORY_INTERNAL_RUN", claude_script)
             self.assertIn("python3 - \"$HOOKS_STATE\" claude", claude_script)
             antigravity_hooks = json.loads((root / ".agents" / "hooks.json").read_text(encoding="utf-8"))
             self.assertIn("agent-memory", antigravity_hooks)
@@ -9472,6 +9924,33 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertFalse(summary["recommended_install_launchagent"])
             self.assertEqual(summary["recommended_monitor_port"], 8788)
 
+    def test_install_discovery_ignores_foreign_repo_local_defaults_for_new_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            source_root = temp_root / "agent-memory"
+            public_root = temp_root / "agent-context-engine-test28-isolated"
+            foreign_root = temp_root / "agent-context-engine-test26-isolated"
+            (source_root / "backend" / "src" / "agent_memory").mkdir(parents=True, exist_ok=True)
+            (public_root / "scripts").mkdir(parents=True, exist_ok=True)
+            (public_root / "scripts" / "agent_context_engine.py").write_text("# placeholder\n", encoding="utf-8")
+            (foreign_root / "scripts").mkdir(parents=True, exist_ok=True)
+            (foreign_root / "scripts" / "agent-context-engine").write_text("#!/bin/sh\n", encoding="utf-8")
+            load_agent_memory(public_root)
+            from agent_context_engine.application.instance_profile import save_user_config
+            save_user_config(
+                {
+                    "default_memory_root": str((foreign_root / "memory").resolve()),
+                    "default_wrapper_prefix": "agent-context-engine-test26-isolated-",
+                },
+                home=test_home_root(public_root),
+            )
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary
+
+            summary = _discovery_summary(start=public_root, language_hint="en")
+            self.assertEqual(summary["recommended_memory_root"], str(default_install_memory_root(test_home_root(public_root))))
+            self.assertEqual(summary["recommended_memory_root_source"], "default_home_root")
+            self.assertEqual(summary["recommended_wrapper_prefix"], "")
+
     def test_install_discovery_avoids_monitor_port_used_by_known_installation_for_fresh_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_root = Path(tmp)
@@ -9764,6 +10243,29 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(summary["reply_language"], "de")
             self.assertEqual(summary["reply_language_source"], "checkout_installation")
 
+    def test_install_discovery_prefers_environment_language_over_existing_checkout_installation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install = run_cli(
+                root,
+                "install",
+                "--target",
+                str(root),
+                "--language",
+                "de",
+                "--no-install-launchagent",
+            )
+            self.assertEqual(install.returncode, 0, install.stderr)
+
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary
+
+            with mock.patch.dict(os.environ, {"LANG": "en_US.UTF-8"}, clear=False):
+                summary = _discovery_summary(start=root)
+
+            self.assertEqual(summary["reply_language"], "en")
+            self.assertEqual(summary["reply_language_source"], "environment")
+
     def test_install_discovery_keeps_existing_installation_monitor_port_when_same_target_is_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -9849,6 +10351,31 @@ The session reconciled stale queue state and resumed pending dreams.
 
             self.assertEqual(summary["reply_language"], "en")
             self.assertEqual(summary["reply_language_source"], "user_config_default_language")
+            self.assertIn("Language warning:", rendered)
+
+    def test_install_discovery_warns_when_english_comes_from_checkout_language(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install = run_cli(
+                root,
+                "install",
+                "--target",
+                str(root),
+                "--language",
+                "en",
+                "--no-install-launchagent",
+            )
+            self.assertEqual(install.returncode, 0, install.stderr)
+
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary, _render_install_discovery
+
+            with mock.patch.dict(os.environ, {"LANG": ""}, clear=False):
+                summary = _discovery_summary(start=root)
+            rendered = _render_install_discovery(summary, language="en")
+
+            self.assertEqual(summary["reply_language"], "en")
+            self.assertEqual(summary["reply_language_source"], "checkout_installation")
             self.assertIn("Language warning:", rendered)
 
     def test_install_refuses_public_to_source_cross_checkout_without_force(self) -> None:
@@ -10139,11 +10666,12 @@ The session reconciled stale queue state and resumed pending dreams.
                 "--codex-workspace-root",
                 str(root),
                 "--no-install-launchagent",
+                timeout=60,
             )
             self.assertEqual(install.returncode, 0, install.stderr)
 
             (root / ".codex" / "agent-memory-binding.json").unlink()
-            status = run_cli(root, "check-installation", "--target", str(root))
+            status = run_cli(root, "check-installation", "--target", str(root), timeout=60)
             self.assertEqual(status.returncode, 0, status.stderr)
             self.assertIn("monitor default: 203.0.113.1:8899 (conflict)", status.stdout)
             self.assertIn("codex workspace binding", status.stdout)
@@ -10600,6 +11128,9 @@ The session reconciled stale queue state and resumed pending dreams.
     def test_cursor_enable_disable_and_payload_normalization(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            fake_bin = install_fake_headless_runner(root)
+            install_fake_headless_runner(root, "claude")
+            env = {"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")}
             fake_agent_script = root / "scripts" / "agent_context_engine.py"
             fake_agent_script.parent.mkdir(parents=True, exist_ok=True)
             fake_agent_script.write_text(
@@ -10610,7 +11141,7 @@ The session reconciled stale queue state and resumed pending dreams.
                 encoding="utf-8",
             )
             fake_agent_script.chmod(0o755)
-            enable = run_cli(root, "cursor-enable")
+            enable = run_cli(root, "cursor-enable", extra_env=env)
             self.assertEqual(enable.returncode, 0, enable.stderr)
             hooks_path = root / ".cursor" / "hooks.json"
             script_path = root / ".cursor" / "hooks" / "hook_adapter.sh"
@@ -10622,16 +11153,30 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(hooks["hooks"]["beforeSubmitPrompt"][0]["command"], "./.cursor/hooks/hook_adapter.sh")
             self.assertIn(f"ROOT='{root.resolve()}'", script_path.read_text(encoding="utf-8"))
             self.assertIn(str(SCRIPT.resolve()), script_path.read_text(encoding="utf-8"))
+            self.assertIn("AGENT_MEMORY_INTERNAL_RUN", script_path.read_text(encoding="utf-8"))
 
-            status = run_cli(root, "cursor-status")
+            status = run_cli(root, "cursor-status", extra_env=env)
             self.assertEqual(status.returncode, 0, status.stderr)
             self.assertIn("active events:", status.stdout)
 
             target = root / "other-project"
-            target_enable = run_cli(root, "cursor-enable", "--target", str(target), "--memory-root", str(root))
+            target.mkdir(parents=True, exist_ok=True)
+            target_enable = run_cli(
+                root,
+                "cursor-enable",
+                "--target",
+                str(target),
+                "--installation-root",
+                str(root),
+                "--background-runner",
+                "claude",
+                extra_env=env,
+            )
             self.assertEqual(target_enable.returncode, 0, target_enable.stderr)
             target_script = target / ".cursor" / "hooks" / "hook_adapter.sh"
             self.assertTrue(target_script.exists())
+            target_binding = json.loads((target / ".cursor" / "agent-memory-binding.json").read_text(encoding="utf-8"))
+            self.assertEqual(target_binding["background_runner"], "claude")
             self.assertIn("AGENTS.md", (target / ".cursor" / "rules" / "everyChat.mdc").read_text(encoding="utf-8"))
             self.assertIn(f"ROOT='{root.resolve()}'", target_script.read_text(encoding="utf-8"))
             target_agents = (target / "AGENTS.md").read_text(encoding="utf-8")
@@ -10643,10 +11188,12 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn(f"cd '{root.resolve()}' && ./docs/skills/agent-context-engine/scripts/agent-context-engine", target_hook_entry)
             self.assertIn("Do not inspect `~/.cursor/projects/...`", target_hook_entry)
             self.assertIn("use `last` first and stop there", target_hook_entry)
-            self.assertIn("--language en", target_hook_entry)
-            target_status = run_cli(root, "cursor-status", "--target", str(target))
+            self.assertIn("monitor --runner codex --replace-existing", target_hook_entry)
+            target_status = run_cli(root, "cursor-status", "--target", str(target), extra_env=env)
             self.assertEqual(target_status.returncode, 0, target_status.stderr)
             self.assertIn("active events: 9/9", target_status.stdout)
+            self.assertIn("background runner: claude", target_status.stdout)
+            self.assertIn("configured background runner: claude", target_status.stdout)
 
             payload = {
                 "hookName": "beforeSubmitPrompt",
@@ -10655,14 +11202,13 @@ The session reconciled stale queue state and resumed pending dreams.
                 "userPrompt": "Bitte lade Agent Memory.",
                 "title": "Cursor Memory Test",
             }
-            logged = run_cli(root, "log-hook", "--client", "cursor", stdin=payload)
-            self.assertEqual(logged.returncode, 2, logged.stderr)
-            self.assertIn("cursor-agent login", logged.stderr)
+            logged = run_cli(root, "log-hook", "--client", "cursor", stdin=payload, extra_env=env)
+            self.assertEqual(logged.returncode, 0, logged.stderr)
             am = load_agent_memory(root)
             conn = am.connect()
             row = conn.execute("select * from sessions where session_id='cursor-conv-1'").fetchone()
             self.assertEqual(row["client_type"], "cursor")
-            self.assertEqual(row["preferred_dream_runner"], "cursor")
+            self.assertEqual(row["preferred_dream_runner"], "codex")
             self.assertIn("cursor-agent --resume 'cursor-conv-1'", row["native_resume_command"])
             event = conn.execute("select * from events where session_id='cursor-conv-1'").fetchone()
             self.assertEqual(event["event_name"], "beforeSubmitPrompt")
@@ -10678,7 +11224,7 @@ The session reconciled stale queue state and resumed pending dreams.
                 "output_tokens": 42,
                 "text": "Antwort",
             }
-            usage_logged = run_cli(root, "log-hook", "--client", "cursor", stdin=usage_payload)
+            usage_logged = run_cli(root, "log-hook", "--client", "cursor", stdin=usage_payload, extra_env=env)
             self.assertEqual(usage_logged.returncode, 0, usage_logged.stderr)
             usage = conn.execute("select * from token_usage where session_id='cursor-conv-1'").fetchone()
             self.assertEqual(usage["turn_id"], "cursor-turn-1")
@@ -10688,6 +11234,23 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(usage["total_tokens"], 1042)
             turn = conn.execute("select * from turn_metrics where session_id='cursor-conv-1'").fetchone()
             self.assertEqual(turn["last_agent_message"], "Antwort")
+            target_logged = run_cli(
+                root,
+                "log-hook",
+                "--client",
+                "cursor",
+                stdin={
+                    "hookName": "beforeSubmitPrompt",
+                    "conversation_id": "cursor-conv-2",
+                    "workspacePath": str(target),
+                    "userPrompt": "Bitte fasse das Projekt zusammen.",
+                    "title": "Cursor Memory Target Test",
+                },
+                extra_env=env,
+            )
+            self.assertEqual(target_logged.returncode, 0, target_logged.stderr)
+            target_row = conn.execute("select * from sessions where session_id='cursor-conv-2'").fetchone()
+            self.assertEqual(target_row["preferred_dream_runner"], "claude")
 
             disable = run_cli(root, "cursor-disable")
             self.assertEqual(disable.returncode, 0, disable.stderr)
@@ -10695,9 +11258,51 @@ The session reconciled stale queue state and resumed pending dreams.
                 disabled_hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
                 self.assertNotIn("beforeSubmitPrompt", disabled_hooks["hooks"])
 
+    def test_cursor_commands_fail_for_missing_target_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake_bin = install_fake_headless_runner(root)
+            install_fake_headless_runner(root, "claude")
+            env = {"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")}
+            missing = root / "does-not-exist"
+
+            enable = run_cli(
+                root,
+                "cursor-enable",
+                "--target",
+                str(missing),
+                "--background-runner",
+                "claude",
+                extra_env=env,
+            )
+            self.assertEqual(enable.returncode, 1)
+            self.assertIn("Cursor project target does not exist", enable.stderr)
+            self.assertIn("do not rely on a relative path that resolves under the installation root", enable.stderr)
+
+            status = run_cli(root, "cursor-status", "--target", str(missing), extra_env=env)
+            self.assertEqual(status.returncode, 1)
+            self.assertIn("Cursor project target does not exist", status.stderr)
+
+            integration = run_cli(
+                root,
+                "integration-hooks",
+                "--client",
+                "cursor",
+                "--action",
+                "enable",
+                "--target",
+                str(missing),
+                "--background-runner",
+                "claude",
+                extra_env=env,
+            )
+            self.assertEqual(integration.returncode, 1)
+            self.assertIn("Cursor project target does not exist", integration.stderr)
+
     def test_cursor_enable_propagates_installed_preferred_language(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            fake_bin = install_fake_headless_runner(root)
             fake_agent_script = root / "scripts" / "agent_context_engine.py"
             fake_agent_script.parent.mkdir(parents=True, exist_ok=True)
             fake_agent_script.write_text("#!/usr/bin/env python3\nprint('{}')\n", encoding="utf-8")
@@ -10707,7 +11312,8 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(install.returncode, 0, install.stderr)
 
             target = root / "de-project"
-            enable = run_cli(root, "cursor-enable", "--target", str(target), "--memory-root", str(root))
+            target.mkdir(parents=True, exist_ok=True)
+            enable = run_cli(root, "cursor-enable", "--target", str(target), "--installation-root", str(root), extra_env={"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")})
             self.assertEqual(enable.returncode, 0, enable.stderr)
 
             target_agents = (target / "AGENTS.md").read_text(encoding="utf-8")
@@ -11418,12 +12024,14 @@ print("{}")
             target = root / "external-cursor-project"
             target.mkdir(parents=True, exist_ok=True)
             load_agent_memory(root)
-            enable = run_cli(root, "cursor-enable", "--target", str(target), "--memory-root", str(root))
+            fake_bin = install_fake_headless_runner(root)
+            enable = run_cli(root, "cursor-enable", "--target", str(target), "--installation-root", str(root), extra_env={"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")})
             self.assertEqual(enable.returncode, 0, enable.stderr)
 
             from agent_context_engine.application import integrations
 
-            summary = integrations.integration_summary(root=root, probe_gemini=False)
+            with mock.patch.dict(os.environ, {"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")}, clear=False):
+                summary = integrations.integration_summary(root=root, probe_gemini=False)
             cursor_item = next(item for item in summary["items"] if item["client"] == "cursor")
             self.assertEqual(cursor_item["activated_project_count"], 1)
             self.assertEqual(cursor_item["activated_projects"][0]["path"], str(target.resolve()))
@@ -11435,7 +12043,9 @@ print("{}")
             target = root / "external-cursor-project"
             target.mkdir(parents=True, exist_ok=True)
             load_agent_memory(root)
-            enable = run_cli(root, "cursor-enable", "--target", str(target), "--memory-root", str(root))
+            fake_bin = install_fake_headless_runner(root)
+            env = {"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")}
+            enable = run_cli(root, "cursor-enable", "--target", str(target), "--installation-root", str(root), extra_env=env)
             self.assertEqual(enable.returncode, 0, enable.stderr)
 
             disable = run_cli(root, "cursor-disable", "--target", str(target))
@@ -11443,7 +12053,8 @@ print("{}")
 
             from agent_context_engine.application import integrations
 
-            summary = integrations.integration_summary(root=root, probe_gemini=False)
+            with mock.patch.dict(os.environ, {"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")}, clear=False):
+                summary = integrations.integration_summary(root=root, probe_gemini=False)
             cursor_item = next(item for item in summary["items"] if item["client"] == "cursor")
             self.assertEqual(cursor_item["activated_project_count"], 1)
             self.assertEqual(cursor_item["activated_projects"][0]["path"], str(target.resolve()))
@@ -11453,17 +12064,39 @@ print("{}")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             load_agent_memory(root)
+            fake_bin = install_fake_headless_runner(root)
+            env = {"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")}
 
-            run_cli(root, "cursor-enable", "--target", str(root), "--memory-root", str(root))
+            run_cli(root, "cursor-enable", "--target", str(root), "--installation-root", str(root), extra_env=env)
             run_cli(root, "cursor-disable", "--target", str(root))
 
             from agent_context_engine.application import integrations
 
-            summary = integrations.integration_summary(root=root, probe_gemini=False)
+            with mock.patch.dict(os.environ, {"PATH": fake_bin + os.pathsep + os.environ.get("PATH", "")}, clear=False):
+                summary = integrations.integration_summary(root=root, probe_gemini=False)
             cursor_item = next(item for item in summary["items"] if item["client"] == "cursor")
             self.assertEqual(cursor_item["activated_project_count"], 1)
             self.assertEqual(cursor_item["activated_projects"][0]["path"], str(root.resolve()))
             self.assertEqual(cursor_item["activated_projects"][0]["hooks_state"], "disabled")
+
+    def test_cursor_enable_requires_codex_or_claude(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "cursor-project"
+            target.mkdir(parents=True, exist_ok=True)
+            load_agent_memory(root)
+            result = run_cli(
+                root,
+                "cursor-enable",
+                "--target",
+                str(target),
+                "--installation-root",
+                str(root),
+                extra_env={"PATH": ""},
+            )
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("requires a background headless LLM runner", result.stderr)
+            self.assertFalse((target / ".cursor" / "hooks.json").exists())
 
     def test_integration_projects_preserve_added_order_and_keep_current_root_first(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -11660,7 +12293,7 @@ print("{}")
                     (str(root), "2026-05-12T09:00:00+00:00", "2026-05-12T09:00:00+00:00"),
                 )
             session = conn.execute("select * from sessions where session_id='cursor-runner-policy'").fetchone()
-            with mock.patch.object(dream_module, "cursor_agent_auth_status", return_value=(False, "auth missing")):
+            with mock.patch.object(dream_module, "runner_auth_status", return_value=(False, "auth missing")):
                 with self.assertRaises(RuntimeError) as caught:
                     dream_module.resolve_dream_runner(
                         session,
@@ -11672,6 +12305,39 @@ print("{}")
                     )
             self.assertIn("cursor dream runner is not ready", str(caught.exception))
             self.assertIn("cursor-agent login", str(caught.exception))
+
+    def test_v2_resolve_codex_runner_raises_clear_error_when_auth_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            am = load_agent_memory(root)
+            import agent_context_engine.application.dream as dream_module
+
+            conn = am.connect()
+            with conn:
+                conn.execute(
+                    """
+                    insert into sessions (
+                      session_id, client_type, preferred_dream_runner, project_id, cwd,
+                      started_at, last_event_at, status, last_event_seq
+                    ) values (
+                      'codex-runner-policy', 'cursor', 'codex', 'demoProject', ?, ?, ?, 'stopped', 0
+                    )
+                    """,
+                    (str(root), "2026-05-12T09:00:00+00:00", "2026-05-12T09:00:00+00:00"),
+                )
+            session = conn.execute("select * from sessions where session_id='codex-runner-policy'").fetchone()
+            with mock.patch.object(dream_module, "runner_auth_status", return_value=(False, "not logged in")):
+                with self.assertRaises(RuntimeError) as caught:
+                    dream_module.resolve_dream_runner(
+                        session,
+                        "same-as-session",
+                        None,
+                        conn=conn,
+                        map_deterministic_to_session=True,
+                        allow_standalone_deterministic=False,
+                    )
+            self.assertIn("codex dream runner is not ready", str(caught.exception))
+            self.assertIn("codex login", str(caught.exception))
 
     def test_v2_resolve_cursor_runner_raises_clear_error_when_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -11693,7 +12359,7 @@ print("{}")
                     (str(root), "2026-05-12T09:00:00+00:00", "2026-05-12T09:00:00+00:00"),
                 )
             session = conn.execute("select * from sessions where session_id='cursor-only-runner-policy'").fetchone()
-            with mock.patch.object(dream_module, "cursor_agent_auth_status", return_value=(False, "cursor-agent executable is missing.")):
+            with mock.patch.object(dream_module, "runner_auth_status", return_value=(False, "cursor-agent executable is missing.")):
                 with self.assertRaises(RuntimeError) as caught:
                     dream_module.resolve_dream_runner(
                         session,
@@ -11860,6 +12526,8 @@ print("{}")
 
             parsed = extract_json_object('text\n```json\n{"schema_version":"agent-memory-graph-v1","entities":[],"relations":[]}\n```\n')
             self.assertEqual(parsed["schema_version"], GRAPH_SCHEMA_VERSION)
+            parsed_mixed = extract_json_object('preface\n{"schema_version":"agent-memory-graph-v1","entities":[],"relations":[]}\ntrailing')
+            self.assertEqual(parsed_mixed["schema_version"], GRAPH_SCHEMA_VERSION)
             patch = normalize_llm_graph_patch(
                 {
                     "insights": {"intent": "implementation", "helpfulScore": 0.87, "tags": ["Graph", "Neo4j"]},

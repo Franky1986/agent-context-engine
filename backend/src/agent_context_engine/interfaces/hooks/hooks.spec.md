@@ -63,9 +63,21 @@ pre-action safety checks, and enqueue or persist events for later processing.
 - Cursor classifier runner auth failures fall back to deterministic policy and
   operator guidance instead of creating tainting `classifier_invalid_output`
   cascades.
+- Cursor auth readiness checks must treat textual unauthenticated states such
+  as `Not logged in` as not-ready even when `cursor-agent status` exits `0`.
+- Cursor queue reservation and later replay must preserve the resolved
+  headless background runner (`codex` or `claude`) instead of falling back to
+  `cursor` during the provisional session-row write.
+- Cursor startup guidance and early prompt blocking must validate the delegated
+  background runner's real auth-readiness, not just whether a `codex` or
+  `claude` binary exists in `PATH`.
 - Hook/session command rendering should point at the active installation's
   public CLI when available, not stale repo-local shortcuts from a superseded
   installation.
+- Internal Agent Context Engine subprocesses such as auth/readiness probes,
+  classifier runs, dreaming, query expansion, monitor asks, and graph LLM
+  passes must bypass hook capture so they do not create fake user-visible
+  sessions.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`
