@@ -2,15 +2,15 @@
 
 ## Purpose
 
-Represent wrapper command naming, wrapper script resolution, and symlink-based
-command publication behind one application boundary so installation code no
-longer hard-codes these publication rules inline.
+Represent wrapper command naming and wrapper script resolution behind one
+application boundary so installation code no longer hard-codes these rules
+inline.
 
 ## Scope
 
 - Wrapper command name rendering from prefix/suffix policy.
 - Wrapper script path resolution inside an installation root.
-- Symlink-based command publication and removal for the current active path.
+- Wrapper publication policy inputs for the current active path.
 
 ## Non-Scope
 
@@ -20,30 +20,29 @@ longer hard-codes these publication rules inline.
 
 ## Responsibilities
 
-- Keep naming and publication behavior deterministic.
-- Preserve the current symlink-based publication strategy.
+- Keep naming and wrapper-path resolution deterministic.
+- Leave concrete filesystem publication mutation to adapters.
 - Make unsupported wrapper names fail explicitly.
 
 ## Inputs / Outputs
 
-- Inputs: base wrapper name, prefix/suffix, installation root, target link path.
-- Outputs: resolved command names, resolved script paths, created/removed links.
+- Inputs: base wrapper name, prefix/suffix, installation root, target wrapper name.
+- Outputs: resolved command names and resolved script paths.
 
 ## Dependencies / Ports
 
-- May depend on filesystem symlink semantics for the active implementation.
+- Must not mutate filesystem publication targets directly.
 - Must not decide platform support claims by itself.
 
 ## Failure Modes
 
 - Unsupported wrapper names fail explicitly.
-- Existing conflicting link paths fail unless replacement is allowed.
-- Non-symlink directories are never replaced silently.
+- Unsupported wrapper names fail explicitly and deterministically.
 
 ## Acceptance Criteria
 
 - Installation and instance-profile naming use the same command-name renderer.
-- Installation link creation uses the centralized symlink publisher.
+- Installation link creation uses a dedicated publication adapter.
 - Current macOS-visible global wrapper behavior remains unchanged.
 
 ## Tests / Checks
