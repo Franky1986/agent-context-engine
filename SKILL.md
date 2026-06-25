@@ -196,6 +196,51 @@ Important runtime paths under `memory/`:
 - `graph/`: facts, patches, candidates, matches, and reconciliation artifacts
 - `logs/`: hook and scheduler logs
 
+## Documentation and Spec Sync After Changes
+
+After cross-cutting changes (runtime behavior, install flow, runner wiring,
+session metadata, monitor contract, security/firing rules, etc.), keep operator
+docs/specs/changelog aligned in one pass:
+
+```sh
+./scripts/release-doc-sync \
+  --bump-backend patch \
+  --bump-monitor patch \
+  --changelog-note "backend: update runtime contract and operator behavior"
+  --changelog-note "monitor: update session visibility and monitoring notes"
+```
+
+This command:
+
+- updates backend (`backend/pyproject.toml`) and monitor/frontend versions (`frontend/package*.json`),
+- refreshes version mentions in public docs and release snapshots,
+- syncs the spec index via `docs/index.md`,
+- writes/updates `CHANGELOG.md` sections for changed versions.
+
+Use `--release-date YYYY-MM-DD` for historical backports.
+
+Short command alias:
+
+```sh
+agent-context-engine docsupdate \
+  --bump-backend patch \
+  --bump-monitor patch \
+  --changelog-note "backend: ..." \
+  --changelog-note "monitor: ..."
+```
+
+`docsupdate` is a CLI command for `release-doc-sync` with the same argument contract.
+
+The documented client command bindings live at:
+
+- `.agents/skills/docsupdate/SKILL.md` (Codex)
+- `.codex/commands/docsupdate.md`
+- `.claude/commands/docsupdate.md`
+- `.cursor/commands/docsupdate.md`
+- `.opencode/commands/docsupdate.md`
+
+This avoids switching between PATH-dependent wrappers or remembered aliases.
+
 ## Retrieval And Personal Memory
 
 Common commands:

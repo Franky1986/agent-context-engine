@@ -31,6 +31,54 @@ and repository-level operating constraints.
 - Treat spec and documentation updates as part of the same change, not as a follow-up cleanup step. When behavior, command contracts, installation defaults, hook flows, or operator guidance changes, update the nearest `*.spec.md` plus the relevant user-facing docs in the same patch.
 - When a `*.spec.md` file is added or moved, run `python3 scripts/update_docs_index.py --check` and keep `docs/index.md` aligned.
 - Changes to installation, harnesses, monitor behavior, or agent workflow contracts must keep `AGENT_BOOTSTRAP.md`, `docs/setup/RUNNER_HARNESSES.md`, and `session-start-hook-entry.md` accurate.
+- After such changes, run one sync pass and commit:
+
+```sh
+./scripts/release-doc-sync \
+  --bump-backend patch \
+  --bump-monitor patch \
+  --changelog-note "backend: <summary of changed backend behavior>"
+  --changelog-note "monitor: <summary of changed monitor/runtime behavior>"
+```
+
+Use the short form for release-cycle operations:
+
+```sh
+agent-context-engine docsupdate \
+  --changelog-note "backend: ..." \
+  --changelog-note "monitor: ..."
+```
+
+`docsupdate` is a CLI entry that executes `release-doc-sync` through the
+`agent-context-engine` command.
+
+`docsupdate` is the canonical maintenance workflow label for clients; see `/docsupdate` entries below.
+
+Client command surfaces should stay as thin references to the canonical command spec:
+
+- `docs/commands/docsupdate/README.md`
+- `.agents/skills/docsupdate/SKILL.md` (preferred/primary in Codex)
+- `.codex/commands/docsupdate.md` (fallback in mixed Codex builds)
+- `.claude/commands/docsupdate.md`
+- `.cursor/commands/docsupdate.md`
+- `.opencode/commands/docsupdate.md`
+
+Canonical command behavior is centered in `./scripts/docsupdate`.
+
+For Codex clients, use the skill (`$docsupdate`) directly; if the slash entry is not shown, run `/skills` and then `/use docsupdate`.
+
+- If explicit versions are required, pass `--backend-version` / `--monitor-version`
+  instead of bump flags. Example:
+
+```sh
+./scripts/release-doc-sync \
+  --backend-version 0.2.8 \
+  --monitor-version 0.6.5 \
+  --release-date 2026-06-25
+```
+
+- If changelog text is not ready yet, use `--skip-index` during draft work and add
+  `update_docs_index.py --check` / changelog notes as a follow-up.
 
 ## Installation Context
 

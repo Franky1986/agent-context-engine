@@ -21,6 +21,12 @@ memory/
 .opencode/
 .agents_probe
 
+# Docs-level command surfaces that should stay versioned in this repository.
+/.opencode/
+!.opencode/
+!.opencode/commands/
+!.opencode/commands/*
+
 # Persist command surfaces for this repo in these directories.
 # They are versioned and intended to be reused across checkouts.
 /.agents/
