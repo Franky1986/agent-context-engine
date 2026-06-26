@@ -85,9 +85,28 @@ Recent validation for the Windows experimental slice confirmed:
 - runtime selection surfaces Windows-specific publisher, wrapper, hook,
   scheduler, quoting, process-launch, workspace-binding, and system-open
   adapters,
-- focused Windows contract tests and fresh-install smoke checks are green on
-  the development host,
+- focused Windows contract tests are green on the development host (`10/10`
+  focused tests),
 - real Windows runtime validation and CI remain intentionally pending.
+
+Latest automated validation on the current public checkout install also
+confirmed:
+
+- `doctor`, `check-installation`, `install-discovery`, `last`, `search`,
+  `retrieve`, `session-start-context`, `repo-context --list`,
+  `personal-context --list`, `integrations-status`,
+  `launchagent-status --verbose`, and `dream-queue-status` completed against
+  the active macOS install,
+- `agent-context-engine risk list --limit 5` now completes again against the
+  active runtime and renders normalized category lists,
+- `python3 scripts/check_agent_context_engine.py --skip-tests --skip-runtime-db`
+  now completes the fresh-install smoke path without the previous interactive
+  install stall,
+- the active install currently reports operational drift rather than code-path
+  failure for LaunchAgent and monitor runtime state (`installed: no`,
+  `loaded: no`, no local monitor API on `127.0.0.1:8788`),
+- `doctor` now degrades to a warning when instance metadata cannot be written,
+  instead of crashing the diagnostic run.
 
 ## Known Follow-Up Areas
 

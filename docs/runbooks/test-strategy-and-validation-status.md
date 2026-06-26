@@ -58,6 +58,129 @@ For the Windows experimental slice, keep two layers separate:
 1. contract/generated-artifact validation on the current development host
 2. one explicit real Windows install/activation/runtime pass
 
+### Windows Retrieval Validation Matrix
+
+Use this matrix only on a real Windows machine or Windows VM. The goal is to
+close the remaining gap between the current contract tests and true end-to-end
+retrieval evidence.
+
+Keep the scope narrow. Do not mix dreaming, monitor UI checks, and takeover
+flows into the same pass.
+
+`WIN-RET-01` CLI retrieval smoke
+
+- Setup:
+  - one active Windows installation
+  - one test project root
+  - no special graph or dream prerequisites
+- Action:
+  - `agent-context-engine doctor`
+  - `agent-context-engine last --limit 5`
+  - `agent-context-engine search "test" --limit 5`
+  - `agent-context-engine retrieve "test" --limit 5`
+- Expected:
+  - all commands exit `0`
+  - no path parsing failure
+  - no PowerShell/cmd wrapper error
+  - retrieval output includes `retrieval_run:`
+
+`WIN-RET-02` startup context commands
+
+- Setup:
+  - same install as `WIN-RET-01`
+- Action:
+  - `agent-context-engine session-start-context`
+  - `agent-context-engine repo-context --list`
+  - `agent-context-engine personal-context --list`
+- Expected:
+  - all commands exit `0`
+  - output remains readable with Windows paths
+  - no malformed slash/backslash rendering breaks command hints
+
+`WIN-RET-03` local project retrieval with explicit workdir
+
+- Setup:
+  - one Windows project directory with an obvious unique string in a tracked
+    file or summary fixture
+- Action:
+  - from that project directory run a short agent session
+  - then run `agent-context-engine retrieve "<unique string>" --limit 5`
+- Expected:
+  - the session becomes retrievable
+  - returned workdir/project metadata points at the Windows project path
+  - no path normalization drops the drive letter
+
+`WIN-RET-04` risk-filtered retrieval
+
+- Setup:
+  - at least one private or risky retrieval candidate in local memory
+- Action:
+  - `agent-context-engine retrieve "<private query>" --limit 10`
+  - `agent-context-engine retrieve "<private query>" --limit 10 --include-risky`
+- Expected:
+  - default retrieval hides risky/private hits
+  - `--include-risky` surfaces them
+  - both runs complete without CLI or quoting errors
+
+`WIN-RET-05` retrieval run auditability
+
+- Setup:
+  - run `WIN-RET-01` and `WIN-RET-04` first
+- Action:
+  - `agent-context-engine retrieval-runs --limit 10`
+  - `agent-context-engine retrieval-run <retrieval_run_id>`
+- Expected:
+  - recent runs appear
+  - result rows keep provenance and score breakdown
+  - access log rows render normally on Windows
+
+`WIN-RET-06` query expansion with German input
+
+- Setup:
+  - at least one indexed item whose canonical wording is English
+- Action:
+  - `agent-context-engine retrieve "hexagonale architektur" --limit 5 --json`
+- Expected:
+  - command exits `0`
+  - payload contains deterministic query expansion
+  - expanded queries include `hexagonal architecture`
+  - top result is relevant rather than empty/noisy
+
+`WIN-RET-07` hook-to-retrieval continuity
+
+- Setup:
+  - one runner integration active on Windows, preferably `codex` first
+- Action:
+  - start one short session from a Windows project
+  - end the session
+  - run `agent-context-engine last --limit 5`
+  - run `agent-context-engine retrieve "<phrase from the session>" --limit 5`
+- Expected:
+  - the session is visible in `last`
+  - retrieval can find the fresh session content
+  - no wrapper/hook path mismatch prevents indexing
+
+`WIN-RET-08` monitor retrieval API parity
+
+- Setup:
+  - local monitor running on Windows
+- Action:
+  - open `/api/search?q=test&limit=5`
+  - open `/api/retrieve?q=test&limit=5`
+  - open `/api/retrieval-runs?limit=10`
+- Expected:
+  - endpoints answer
+  - retrieval result shape matches CLI semantics
+  - no Windows-only path serialization issue appears in JSON
+
+Minimum evidence to record for each Windows retrieval case:
+
+- exact command
+- exit code
+- first 10-20 output lines or the relevant JSON fragment
+- whether the path shape looked correct
+- whether the result was correct, empty-but-valid, or wrong
+
 ## Recommended Test Environment
 
 Use three installation scenarios:
@@ -388,6 +511,18 @@ Example:
 - retrieval smoke on `refactor-2` succeeded for both `search` and `retrieve`
 - Cursor activation for `/Users/frankrichter/projects/test` succeeded with
   `--background-runner claude`, and resulting Cursor sessions were summarized and dreamed
+- a fresh automated public-checkout validation pass on the current macOS host
+  completed direct CLI smoke for `doctor`, `check-installation`,
+  `install-discovery`, `last`, `search`, `retrieve`,
+  `session-start-context`, `repo-context --list`, `personal-context --list`,
+  `integrations-status`, `launchagent-status --verbose`, and
+  `dream-queue-status`
+- the focused Windows experimental runtime contract slice is green on the
+  development host (`10/10` focused tests)
+- follow-up hardening since that pass removed two concrete regressions:
+  `agent-context-engine risk list --limit 5` now renders normalized category
+  lists again, and the fresh-install smoke path now forces a non-interactive
+  install invocation for automated checks
 
 ## Recommended Depth
 
@@ -427,22 +562,29 @@ Status legend:
 
 ### A. Installation And Baseline
 
+- [x] `agent-context-engine doctor`, `agent-context-engine check-installation`, and `agent-context-engine install-discovery --target /private/tmp/ace-validation-target` completed on the current public checkout root.
+- [x] the fresh `install-discovery` pass still exposes memory-root reuse, wrapper takeover, monitor-port defaults, and explicit user-confirmation requirements before mutation.
 - [x] `install-discovery` exposes target, monitor port, memory root, and wrapper decisions before writing.
 - [x] isolated installs in recent `test27`, `test28`, and `test29` runs revalidated the monitor port before writing config.
 - [x] runtime bootstrap, monitor start, and LaunchAgent load completed in recent isolated install runs.
 - [x] `session-start-hook-entry.md` now points at `agent-context-engine` instead of stale installation-only paths.
+- [ ] the current public checkout install still reports LaunchAgent drift (`installed: no`, `loaded: no`) and no active local monitor runtime on the default port.
+- [x] `python3 scripts/check_agent_context_engine.py --skip-tests --skip-runtime-db` now completes the fresh-install smoke path without the previous interactive install stall.
 - [ ] fresh deterministic takeover-install regression after the latest install changes still needs one clean scripted pass.
 - [ ] `repair-installation` still needs a targeted break-and-repair validation pass.
 
 ### B. CLI And Retrieval Basics
 
+- [x] `doctor`, `last --limit 5`, `search "test" --limit 5`, `retrieve "test" --limit 5`, `session-start-context`, `repo-context --list`, and `personal-context --list` all completed successfully on the current public checkout install.
 - [x] `last --limit 10`, `status --limit 10`, `dream-queue-status`, and `dream-v2-inspect` worked against `test29`.
 - [x] `search "deutsche häuser" --limit 5` on `refactor-2` returned the expected fresh session/window artifacts.
 - [x] `retrieve "Was wurde in den letzten Sessions über deutsche Häuser geschrieben?" --limit 5` on `refactor-2` succeeded and persisted a retrieval run.
-- [ ] `session-start-context`, `repo-context --list`, and `personal-context --list` still need a dedicated smoke pass on the current branch.
+- [ ] real Windows retrieval evidence is still missing for the dedicated matrix:
+  `WIN-RET-01` through `WIN-RET-08`.
 
 ### C. Wrappers And Integrations
 
+- [x] `agent-context-engine integrations-status` completed on the current public checkout install and reported `6/6 ready`; Cursor remains intentionally `hooks=not_prepared` on this root.
 - [x] `cursor-enable --target ... --installation-root ...` wrote installation-root-aware bindings for `pr-llm-service`.
 - [x] `cursor-enable --target /Users/frankrichter/projects/test --installation-root /Users/frankrichter/projects/agent-context-engine-refactor-2 --background-runner claude` succeeded.
 - [x] generated Cursor hook files now carry the effective launch workdir so routing resolves against the actual project path.
@@ -464,11 +606,13 @@ Status legend:
 ### E. Firewall And Risk
 
 - [~] previous failure cases established the need to separate ACE reads from riskier tool execution.
+- [x] a fresh automated CLI pass now confirms `agent-context-engine risk list --limit 5` completes and renders normalized category lists again.
 - [ ] a fresh end-to-end firewall and taint matrix has not yet been rerun after the latest installation and integration fixes.
 - [ ] explicit re-check that `agent-context-engine last --limit 10` no longer falls into false risk blocks is still open.
 
 ### F. Dreaming
 
+- [x] `agent-context-engine dream-queue-status` completed on the current public checkout install and returned queue state without path or runtime-resolution failures.
 - [x] `test29` has two successful pipeline-v2 dream runs in the queue.
 - [x] codex dream run `dream_2026-06-24T11-14-19Z00-00_019ef955-756d-7330-bc4f-251778614e72_12943` succeeded with all 8 stages.
 - [x] that codex run recorded usage in the LLM stages:
@@ -495,11 +639,13 @@ Status legend:
 
 ### H. Monitor, LaunchAgent, And Scheduler
 
+- [x] `agent-context-engine launchagent-status --verbose` completed on the current public checkout install and reported the expected LaunchAgent path and current loaded state.
 - [x] recent isolated installs started a monitor and loaded a LaunchAgent.
 - [x] `launchagent-status --verbose` for `refactor-2` showed the isolated local env file and `--runner same-as-session --graph-runner same-as-session` defaults for the normal install path.
 - [x] `dream-queue-status` in `test29` reported `queued=0 running=0 failed=0 terminal_failed=0 succeeded=2`.
 - [x] `dream-queue-status` in `refactor-2` reported `queued=0 running=0 failed=0 terminal_failed=0 succeeded=3` after the isolated validation runs.
 - [x] `test29` monitor API confirmed the activated Cursor project and its hook state.
+- [ ] `curl -sf http://127.0.0.1:8788/api/status` failed during this pass because no local monitor process was running for the public checkout root.
 - [ ] a fresh `/api/status` drift audit after the latest monitor UI changes is still open.
 - [ ] the Sessions UI change and the Cursor aggregate card should still be checked visually in a live monitor session.
 

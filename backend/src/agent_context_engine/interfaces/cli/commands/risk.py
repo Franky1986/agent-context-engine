@@ -65,8 +65,16 @@ def cmd_risk_list(args: argparse.Namespace) -> int:
         print(json_dumps(rows))
         return 0
     for row in rows:
+        categories = row.get("categories")
+        if not isinstance(categories, list):
+            categories = []
         print(f"{local_time(row['created_at'])} {row['status']} {row['risk_level']} {row['risk_event_id']} {row['source_kind']} {row['source_ref'] or ''}")
-        print(f"  decision={row['decision']} categories={row['categories_json']} impact={row['impact']}")
+        print(
+            "  decision="
+            + f"{row['decision']} "
+            + f"categories={json.dumps(categories, ensure_ascii=False)} "
+            + f"impact={row['impact']}"
+        )
         if row["preview"]:
             print(f"  preview={markdown_escape(row['preview'], 220)}")
     if not rows:

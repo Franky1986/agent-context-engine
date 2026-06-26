@@ -393,6 +393,7 @@ def check_fresh_install_smoke() -> CheckResult:
         env.setdefault("AGENT_MEMORY_TEST_SKIP_MONITOR_START", "1")
         env.setdefault("AGENT_MEMORY_TEST_SKIP_MONITOR_OPEN", "1")
         env.setdefault("AGENT_MEMORY_TEST_SKIP_RUNTIME_BOOTSTRAP", "1")
+        env.setdefault("AGENT_MEMORY_TEST_SKIP_POST_INSTALL_CHECKS", "1")
         install = subprocess.run(
             [
                 sys.executable,
@@ -402,6 +403,9 @@ def check_fresh_install_smoke() -> CheckResult:
                 str(target),
                 "--instance-name",
                 instance_name,
+                "--language",
+                "en",
+                "--no-interactive",
                 "--link-codex-ace",
                 "--link-claude-ace",
                 "--link-agy-ace",

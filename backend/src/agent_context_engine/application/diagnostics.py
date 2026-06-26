@@ -421,5 +421,8 @@ def run_doctor_checks(
                 )
             )
     exit_code = 1 if failures else 0
-    sync_instance_metadata(ROOT, doctor_succeeded=exit_code == 0)
+    try:
+        sync_instance_metadata(ROOT, doctor_succeeded=exit_code == 0)
+    except OSError as exc:
+        lines.append(f"warn  instance metadata sync skipped: {exc}")
     return lines, exit_code
