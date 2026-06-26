@@ -60,8 +60,9 @@ non-interactive use it prints the recommended explicit command.
 Central installation into the chosen target root prepares these local artifacts
 by default. Hook artifacts and GUI workspace hooks are activated only as the
 final install step, after runtime bootstrap, frontend build, scheduler
-installation/loading, post-install verification, and requested monitor startup
-have succeeded:
+installation/loading, and requested monitor startup have succeeded. The full
+`doctor` / `check-installation` verification pass runs after that final hook
+activation:
 
 - Codex hooks under `.codex/`
 - Claude Code hooks under `.claude/`

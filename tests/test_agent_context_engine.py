@@ -10831,8 +10831,8 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(instance_metadata["instance_id"], "install-root")
             self.assertEqual(instance_metadata["installation_root"], str(install_root.resolve()))
             self.assertEqual(instance_metadata["memory_root"], str(memory_root.resolve()))
-            self.assertEqual(instance_metadata["product_version"], "0.2.7")
-            self.assertEqual(instance_metadata["monitor_version"], "0.6.5")
+            self.assertEqual(instance_metadata["product_version"], "0.2.8")
+            self.assertEqual(instance_metadata["monitor_version"], "0.6.6")
             self.assertEqual(instance_metadata["monitor_port"], 8899)
             self.assertEqual(instance_metadata["wrapper_suffix"], "-ace")
             self.assertTrue(str(instance_metadata["installed_at"]))
@@ -11592,6 +11592,55 @@ The session reconciled stale queue state and resumed pending dreams.
                 memory_root=(test_home_root(root) / ".agent-context-engine" / "memory").resolve(),
             )
             howto_mock.assert_called_once_with(host="127.0.0.1", port=8787, runner="codex", language="en")
+
+    def test_install_runs_final_doctor_after_monitor_start_and_hook_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+
+            from agent_context_engine.interfaces.cli import main as cli_main
+
+            parser = cli_main.build_parser()
+            args = parser.parse_args([
+                "install",
+                "--target",
+                str(root),
+                "--language",
+                "en",
+                "--no-interactive",
+                "--no-install-launchagent",
+                "--force",
+                "--no-bootstrap-runtime",
+            ])
+
+            call_order: list[str] = []
+
+            def fake_monitor_start(*args: object, **kwargs: object) -> tuple[bool, str]:
+                call_order.append("monitor")
+                return True, "ok"
+
+            def fake_activate_hooks(*args: object, **kwargs: object) -> list[Path]:
+                call_order.append("hooks")
+                return []
+
+            def fake_post_install_checks(*args: object, **kwargs: object) -> dict[str, int]:
+                call_order.append("doctor")
+                return {"doctor_exit": 0, "check_installation_exit": 0}
+
+            with mock.patch.dict(os.environ, {"AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD": "1"}, clear=False), mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation._autostart_monitor_after_install",
+                side_effect=fake_monitor_start,
+            ), mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation._activate_installation_hooks",
+                side_effect=fake_activate_hooks,
+            ), mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation._run_post_install_checks",
+                side_effect=fake_post_install_checks,
+            ):
+                rc = args.func(args)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(call_order, ["monitor", "hooks", "doctor"])
 
     def test_install_can_skip_monitor_autostart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

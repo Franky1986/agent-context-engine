@@ -81,10 +81,11 @@ application services.
   explicit opt-out, not the public-checkout default.
 - Install execution must activate hook configs, GUI workspace hooks, and
   global-only integration hooks only after runtime bootstrap, frontend build,
-  scheduler installation/loading, post-install verification, and requested
-  monitor startup have completed successfully. Incomplete installs must leave
-  hooks inactive and must not start a monitor for an unbuilt frontend or
-  unusable backend.
+  scheduler installation/loading, and requested monitor startup have completed
+  successfully. The full `doctor` / `check-installation` pass belongs at the
+  very end, after those hook files exist. Incomplete installs must leave hooks
+  inactive and must not start a monitor for an unbuilt frontend or unusable
+  backend.
 - `docsupdate` is the canonical maintenance workflow label and resolves to the
   shared editor entrypoint contract (`docs/commands/docsupdate/README.md`).
 - Install discovery must prefer an explicit language hint first, then the

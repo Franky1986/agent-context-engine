@@ -152,9 +152,10 @@ where possible, offers safe public-checkout defaults such as the `-ace`
 wrapper suffix, runtime bootstrap, shared global command relinking by default,
 and scheduler installation/loading by default, shows a final install-plan confirmation,
 and starts the local monitor at the end only after runtime bootstrap, frontend
-build, scheduler installation/loading, and post-install verification succeed
-unless `--no-start-monitor` is used before writing files in interactive use.
-Hook configs and GUI workspace hooks are the final activation step; if the
+build, and scheduler installation/loading succeed unless `--no-start-monitor`
+is used before writing files in interactive use. Hook configs and GUI
+workspace hooks are the final activation step, and the closing
+`doctor`/`check-installation` pass runs after those hook files exist; if the
 install remains incomplete, leave hooks inactive and rerun install or repair
 after prerequisites are fixed.
 

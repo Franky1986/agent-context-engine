@@ -1472,29 +1472,33 @@ def _render_install_plan(summary: dict[str, object], args: argparse.Namespace, *
     return "\n".join(lines)
 
 
-def _run_post_install_checks(target: Path, *, language: str) -> dict[str, int]:
+def _run_post_install_checks(target: Path, *, language: str, include_doctor: bool = True) -> dict[str, int]:
+    doctor_summary = "0" if include_doctor else "skipped"
     if os.environ.get("AGENT_MEMORY_TEST_SKIP_POST_INSTALL_CHECKS", "") in {"1", "true", "True", "yes"}:
         print(
             _ui_text(
                 language,
-                en="verification summary: doctor=0 check-installation=0",
-                de="Verifikationszusammenfassung: doctor=0 check-installation=0",
+                en=f"verification summary: doctor={doctor_summary} check-installation=0",
+                de=f"Verifikationszusammenfassung: doctor={doctor_summary} check-installation=0",
             )
         )
         return {"doctor_exit": 0, "check_installation_exit": 0}
     cli_path = agent_memory_cli_path_for_root(target)
-    doctor = subprocess.run(
-        [str(cli_path), "doctor"],
-        cwd=str(target),
-        env={**os.environ, ROOT_ENV_VAR: str(target)},
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    doctor_output = "\n".join(part for part in [doctor.stdout.strip(), doctor.stderr.strip()] if part)
-    if doctor_output:
-        print(doctor_output)
-    doctor_exit = int(doctor.returncode)
+    doctor_exit = 0
+    if include_doctor:
+        doctor = subprocess.run(
+            [str(cli_path), "doctor"],
+            cwd=str(target),
+            env={**os.environ, ROOT_ENV_VAR: str(target)},
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        doctor_output = "\n".join(part for part in [doctor.stdout.strip(), doctor.stderr.strip()] if part)
+        if doctor_output:
+            print(doctor_output)
+        doctor_exit = int(doctor.returncode)
+        doctor_summary = str(doctor_exit)
     check_args = argparse.Namespace(
         target=str(target),
         memory_root=None,
@@ -1511,8 +1515,8 @@ def _run_post_install_checks(target: Path, *, language: str) -> dict[str, int]:
     print(
         _ui_text(
             language,
-            en=f"verification summary: doctor={doctor_exit} check-installation={check_exit}",
-            de=f"Verifikationszusammenfassung: doctor={doctor_exit} check-installation={check_exit}",
+            en=f"verification summary: doctor={doctor_summary} check-installation={check_exit}",
+            de=f"Verifikationszusammenfassung: doctor={doctor_summary} check-installation={check_exit}",
         )
     )
     return {"doctor_exit": doctor_exit, "check_installation_exit": check_exit}
@@ -4294,9 +4298,7 @@ def cmd_install(args: argparse.Namespace) -> int:
                 launchagent_env_file=launchagent_env_file,
             )
         )
-    verification = _run_post_install_checks(target, language=language)
-    verification_ok = all(int(value) == 0 for value in verification.values())
-    installation_ready_for_activation = runtime_bootstrap_ok and frontend_build_ok and scheduler_install_ok and verification_ok
+    installation_ready_for_activation = runtime_bootstrap_ok and frontend_build_ok and scheduler_install_ok
     if (
         getattr(args, "start_monitor", True)
         and installation_ready_for_activation
@@ -4322,9 +4324,9 @@ def cmd_install(args: argparse.Namespace) -> int:
             installation_ready_for_activation = False
     elif getattr(args, "start_monitor", True) and not installation_ready_for_activation:
         print(
-            "warn: monitor start skipped because installation verification is incomplete: "
+            "warn: monitor start skipped because installation prerequisites are incomplete: "
             + f"runtime_bootstrap_ok={runtime_bootstrap_ok} frontend_build_ok={frontend_build_ok} "
-            + f"scheduler_install_ok={scheduler_install_ok} verification_ok={verification_ok}",
+            + f"scheduler_install_ok={scheduler_install_ok}",
             file=sys.stderr,
         )
     else:
@@ -4344,6 +4346,7 @@ def cmd_install(args: argparse.Namespace) -> int:
             "warn: hook activation skipped because installation is not complete; rerun install or repair-installation after fixing prerequisites",
             file=sys.stderr,
         )
+    _run_post_install_checks(target, language=language, include_doctor=installation_ready_for_activation)
     print(f"next: run {agent_memory_cli_for_root(target)} doctor")
     wrapper_link_results = _verify_global_wrapper_links(args=args, prefix=prefix, suffix=suffix)
     if wrapper_link_results:

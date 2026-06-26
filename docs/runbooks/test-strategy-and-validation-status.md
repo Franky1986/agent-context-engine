@@ -61,7 +61,7 @@ For the Windows experimental slice, keep two layers separate:
 
 Current Windows setup validation has covered native `.cmd` command shims,
 PowerShell hook/wrapper rendering, Task Scheduler script generation,
-wrapper PATH resolution, gated monitor startup, final-step hook activation, and
+wrapper PATH resolution, gated monitor startup, late hook activation, and
 frontend production build on a Windows host. Full runner-to-retrieval evidence
 for a fresh external Windows project remains tracked by the matrix below.
 
@@ -503,8 +503,8 @@ Example:
 
 ## 2026-06-25 Update Snapshot
 
-- backend version `0.2.7`
-- monitor version `0.6.5`
+- backend version `0.2.8`
+- monitor version `0.6.6`
 - cursor activation now persists configured background runner and launch workdir on hook
   generation
 - session list and session detail now expose both origin client and background dream
@@ -551,8 +551,8 @@ Most important regressions:
 
 Change set under test:
 
-- backend version `0.2.7`
-- monitor version `0.6.5`
+- backend version `0.2.8`
+- monitor version `0.6.6`
 - installation and integration command surface updated around `--installation-root`
 - isolated install flow updated around deterministic local memory and wrapper behavior
 - installation integration tests are now a separate `install-integration-suite`

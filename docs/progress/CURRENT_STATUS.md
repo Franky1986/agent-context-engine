@@ -27,8 +27,8 @@ workflows. The current public slice includes:
 
 Versioned release snapshot:
 
-- Backend / product: `0.2.7`
-- Monitor: `0.6.5`
+- Backend / product: `0.2.8`
+- Monitor: `0.6.6`
 
 ## Installation State
 
@@ -45,9 +45,10 @@ The current install flow now supports:
 - Windows-native `.cmd` publication and PowerShell hook/wrapper generation for
   experimental installs,
 - Windows user `PATH` repair for generated command shims,
-- guarded install finalization where monitor startup and hook activation happen
-  only after runtime/bootstrap, frontend build, scheduler setup, and
-  verification succeed.
+- guarded install finalization where hook activation stays until the end, the
+  monitor starts only after runtime/bootstrap, frontend build, and scheduler
+  setup succeed, and the full `doctor`/`check-installation` pass closes the
+  install afterwards.
 
 ## Integration State
 

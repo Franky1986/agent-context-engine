@@ -11,8 +11,22 @@ The entries below document the changes added since that initial public release.
 
 ## Unreleased
 
+- no unreleased entries currently
+
+## Monitor 0.6.6
+
 ### Changed
 
+- documented the Windows installation surface alongside the public monitor
+  release snapshot and aligned versioned status docs with the new install flow
+
+## Backend 0.2.8
+
+### Changed
+
+- install and install-discovery now keep the platform scheduler enabled by
+  default across the documented Windows/macOS flow, with prerequisite guidance
+  surfaced for unsupported Python/Node/npm environments
 - external Cursor project activation now records the target in install-wide
   `workspace_roots.cursor`, keeping `doctor`, `check-installation`, and monitor
   installation summaries aligned with `cursor-status --target ...`
@@ -21,11 +35,16 @@ The entries below document the changes added since that initial public release.
 
 ### Fixed
 
+- fresh-checkout installs no longer run the full `doctor` before final hook
+  activation, so hook files stay late in the flow without forcing a manual
+  `integration-hooks` repair before monitor startup
+- Windows Antigravity hook config rendering now escapes command paths through
+  structured JSON replacement instead of raw string interpolation
+- Windows runtime bootstrap now resolves the venv Python path correctly and
+  keeps wrapper publication and scheduler guidance aligned with the platform
 - queued hook reservations now revert previously covered sessions back to
   `summary_pending` / `dream_pending` as soon as new work is reserved, instead
   of leaving stale fully-covered states visible until later replay
-- runtime HTTP version constants now match the published public snapshot
-  (`0.2.7` backend / `0.6.5` monitor)
 
 ## Monitor 0.6.5
 

@@ -52,10 +52,11 @@ The install command follows this order:
 8. Install and load the platform scheduler. On Windows this is a Task Scheduler
    job whose action points to a generated short `windows-scheduler-run.cmd`
    script, avoiding `schtasks /TR` command-length limits.
-9. Run post-install verification.
-10. Start the monitor only when verification and prerequisites are clean.
-11. Activate hook configs, GUI workspace hooks, and global-only integration
+9. Start the monitor only when the runtime, frontend build, and scheduler
+   prerequisites are clean.
+10. Activate hook configs, GUI workspace hooks, and global-only integration
     hooks as the final step.
+11. Run post-install verification after the final hook activation.
 
 ## Wrapper Behavior
 
