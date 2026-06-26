@@ -79,10 +79,29 @@ def codex_subprocess_env(
     extra: dict[str, str] | None = None,
 ) -> dict[str, str]:
     env = dict(base_env or os.environ)
+    _prepend_windows_command_paths(env)
     env["CODEX_HOME"] = str(prepare_codex_runtime_home())
     if extra:
         env.update(extra)
     return env
+
+
+def _prepend_windows_command_paths(env: dict[str, str]) -> None:
+    if os.name != "nt":
+        return
+    candidates: list[str] = []
+    appdata = env.get("APPDATA") or os.environ.get("APPDATA")
+    userprofile = env.get("USERPROFILE") or os.environ.get("USERPROFILE")
+    if appdata:
+        candidates.append(str(Path(appdata) / "npm"))
+    if userprofile:
+        candidates.append(str(Path(userprofile) / ".local" / "bin"))
+    existing = env.get("PATH") or env.get("Path") or ""
+    existing_parts = [part for part in existing.split(os.pathsep) if part]
+    existing_norm = {str(Path(part)).lower() for part in existing_parts}
+    prefix = [path for path in candidates if path and str(Path(path)).lower() not in existing_norm]
+    if prefix:
+        env["PATH"] = os.pathsep.join(prefix + existing_parts)
 
 
 def codex_thread_name(session_id: str) -> str | None:

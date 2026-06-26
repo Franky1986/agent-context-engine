@@ -42,4 +42,4 @@ User-only controls:
 - `hooks-status`
 
 Monitor:
-- `agent-context-engine monitor --runner codex --host 127.0.0.1 --port 8787 --language en --replace-existing --no-open`
+- `agent-context-engine monitor --runner codex --host 127.0.0.1 --port 8787 --language de --replace-existing --no-open`

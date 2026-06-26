@@ -63,6 +63,10 @@ application services.
 - Install discovery and install execution agree on wrapper-link conflict
   semantics for direct `scripts/*` targets and active installed script targets
   within the same checkout.
+- Install execution must verify the platform-published command path: plain
+  symlink names on POSIX systems and `.cmd` shim paths on Windows. Windows
+  installs must also make the configured link directory available to current
+  command resolution and persist it in the user `PATH` when possible.
 - Install discovery and `check-installation` must surface unsupported local
   Python/Node/npm prerequisites before pointing operators or agents at
   bootstrap or frontend repair commands that would fail immediately.
@@ -71,6 +75,16 @@ application services.
   `install-launchagent` command name may remain as a compatibility surface, but
   Windows guidance and approval prompts must refer to Task Scheduler rather
   than implying a macOS LaunchAgent.
+- Install discovery and install execution must keep scheduler installation and
+  loading enabled by default because periodic summaries, dreams, graph
+  extraction, and catch-up depend on it. `--no-install-launchagent` remains an
+  explicit opt-out, not the public-checkout default.
+- Install execution must activate hook configs, GUI workspace hooks, and
+  global-only integration hooks only after runtime bootstrap, frontend build,
+  scheduler installation/loading, post-install verification, and requested
+  monitor startup have completed successfully. Incomplete installs must leave
+  hooks inactive and must not start a monitor for an unbuilt frontend or
+  unusable backend.
 - `docsupdate` is the canonical maintenance workflow label and resolves to the
   shared editor entrypoint contract (`docs/commands/docsupdate/README.md`).
 - Install discovery must prefer an explicit language hint first, then the

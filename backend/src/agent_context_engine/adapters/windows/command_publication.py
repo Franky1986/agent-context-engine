@@ -34,12 +34,9 @@ def _render_cmd_shim(target: Path) -> str:
             f'{SHIM_MARKER}\n'
             "@echo off\n"
             "setlocal\n"
-            "where py >nul 2>nul\n"
-            "if %ERRORLEVEL% EQU 0 (\n"
-            f'  py -3 "{resolved_target}" %*\n'
-            ") else (\n"
-            f'  python "{resolved_target}" %*\n'
-            ")\n"
+            f'python "{resolved_target}" %*\n'
+            "if not %ERRORLEVEL% EQU 9009 exit /b %ERRORLEVEL%\n"
+            f'py -3 "{resolved_target}" %*\n'
             "exit /b %ERRORLEVEL%\n"
         )
     elif suffix == ".ps1":

@@ -45,6 +45,7 @@ development references in this repository.
 - [Platform Extension Protocol](runbooks/platform-extension-protocol.md)
 - [Test Strategy And Validation Status](runbooks/test-strategy-and-validation-status.md)
 - [Runner And Harness Guide](setup/RUNNER_HARNESSES.md)
+- [Windows Installation Flow](setup/WINDOWS_INSTALLATION.md)
 - [Instance Isolation / Workspace Binding Epic](epics/instance-isolation-and-workspace-binding-plan.md)
 - [Platform Capability And Agent Flow Refactor Epic](epics/platform-capability-agent-flow-refactor-plan.md)
 - [Platform Capability And Agent Flow Refactor Findings Baseline (2026-06-25)](epics/platform-capability-agent-flow-refactor-findings-2026-06-25.md)

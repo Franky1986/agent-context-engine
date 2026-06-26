@@ -150,9 +150,13 @@ only and suggests the central default install root under
 `~/.agent-context-engine/install`, keeps prompts in the detected user language
 where possible, offers safe public-checkout defaults such as the `-ace`
 wrapper suffix, runtime bootstrap, shared global command relinking by default,
-and delayed LaunchAgent installation, shows a final install-plan confirmation,
-and starts the local monitor at the end unless `--no-start-monitor` is used
-before writing files in interactive use.
+and scheduler installation/loading by default, shows a final install-plan confirmation,
+and starts the local monitor at the end only after runtime bootstrap, frontend
+build, scheduler installation/loading, and post-install verification succeed
+unless `--no-start-monitor` is used before writing files in interactive use.
+Hook configs and GUI workspace hooks are the final activation step; if the
+install remains incomplete, leave hooks inactive and rerun install or repair
+after prerequisites are fixed.
 
 When discovery detects that `agent-context-engine`, `ace`, or the shared
 `*-ace` wrapper names already point at another installation, the default plan
@@ -210,14 +214,16 @@ cd /path/to/agent-context-engine-root
 agent-context-engine doctor
 agent-context-engine check-installation
 agent-context-engine launchagent-status
-# monitor should already be running after install; restart it manually only if needed
+# monitor should already be running after a fully successful install; restart it manually only if needed
 agent-context-engine monitor --runner codex --port 8788 --replace-existing --no-open
 ```
 
-The hooks start capturing sessions immediately. The first completed agent turn
-in a new session queues a small deterministic initial dream by default, while
-the LaunchAgent provides periodic catch-up for summaries, dreams, graph
-extraction, and optional Neo4j sync.
+After a fully successful install, hooks start capturing sessions immediately.
+The first completed agent turn in a new session queues a small deterministic
+initial dream by default, while
+the scheduler (macOS LaunchAgent, Windows Task Scheduler, or the active
+platform scheduler adapter) provides periodic catch-up for summaries, dreams,
+graph extraction, and optional Neo4j sync.
 
 If a specific project should be activated for a client:
 

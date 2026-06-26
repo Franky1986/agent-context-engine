@@ -898,7 +898,6 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
     if role == "public_checkout":
         if not recommended_wrapper_suffix:
             recommended_wrapper_suffix = _public_wrapper_suffix_for_checkout(checkout_root)
-        launchagent_recommended = False
     current_installation_exists = installation_profile_path(target_root).exists()
     if current_installation_exists:
         target_monitor = dict(load_installation_profile(target_root).get("monitor") or {})
@@ -1572,8 +1571,9 @@ def _verify_global_wrapper_links(*, args: argparse.Namespace, prefix: str, suffi
     for wrapper_name in _linked_wrapper_specs(args):
         command_name = link_command_name(wrapper_name, prefix, suffix)
         link_path = link_dir / command_name
+        published_link_path = Path(f"{link_path}.cmd") if os.name == "nt" and link_path.suffix.lower() != ".cmd" else link_path
         try:
-            target = str(link_path.resolve(strict=False)) if (link_path.exists() or link_path.is_symlink()) else ""
+            target = str(published_link_path.resolve(strict=False)) if (published_link_path.exists() or published_link_path.is_symlink()) else ""
         except OSError:
             target = ""
         resolved = shutil.which(command_name) or ""
@@ -1581,8 +1581,8 @@ def _verify_global_wrapper_links(*, args: argparse.Namespace, prefix: str, suffi
             {
                 "wrapper_name": wrapper_name,
                 "command_name": command_name,
-                "link_path": str(link_path),
-                "link_exists": "yes" if (link_path.exists() or link_path.is_symlink()) else "no",
+                "link_path": str(published_link_path),
+                "link_exists": "yes" if (published_link_path.exists() or published_link_path.is_symlink()) else "no",
                 "target": target,
                 "path_resolved": resolved,
             }
@@ -2284,6 +2284,112 @@ def _enable_workspace_hooks(*, client: str, target: Path, memory_root: Path) -> 
     }
 
 
+def _activate_installation_hooks(
+    *,
+    target: Path,
+    runtime_memory_root: Path,
+    script_abs: str,
+    hook_renderer: object,
+    workspace_roots: dict[str, list[Path]],
+) -> list[Path]:
+    from ....application.hook_rendering import build_shell_hook_adapter_spec
+
+    activated_paths: list[Path] = []
+    codex_templates = SKILL_ROOT / "templates" / "codex-hooks"
+    codex_script_path = target / ".codex" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
+    claude_script_path = target / ".claude" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
+    antigravity_script_path = target / ".agents" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
+    gemini_script_path = target / ".gemini" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
+    for path in [codex_script_path, claude_script_path, antigravity_script_path, gemini_script_path]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    _write_json(target / ".codex" / "hooks.json", _render_shell_hook_config(codex_templates / "hooks.json", command=f"./.codex/hooks/{codex_script_path.name}"))
+    _write_platform_script(
+        codex_script_path,
+        hook_renderer.render_shell_hook_adapter(
+            build_shell_hook_adapter_spec(
+                "codex",
+                agent_context_engine_root=target,
+                agent_memory_script=script_abs,
+            )
+        ),
+    )
+    claude_templates = SKILL_ROOT / "templates" / "claude-hooks"
+    _write_json(target / ".claude" / "settings.json", _render_shell_hook_config(claude_templates / "settings.json", command=f"./.claude/hooks/{claude_script_path.name}"))
+    _write_platform_script(
+        claude_script_path,
+        hook_renderer.render_shell_hook_adapter(
+            build_shell_hook_adapter_spec(
+                "claude",
+                agent_context_engine_root=target,
+                agent_memory_script=script_abs,
+            )
+        ),
+    )
+    _write_json(target / ".agents" / "hooks.json", _render_antigravity_hook_config(hook_script=antigravity_script_path))
+    _write_platform_script(
+        antigravity_script_path,
+        hook_renderer.render_shell_hook_adapter(
+            build_shell_hook_adapter_spec(
+                "antigravity",
+                agent_context_engine_root=target,
+                agent_memory_script=script_abs,
+            )
+        ),
+    )
+    gemini_templates = SKILL_ROOT / "templates" / "gemini-hooks"
+    _write_json(target / ".gemini" / "settings.json", _render_shell_hook_config(gemini_templates / "settings.json", command=f"./.gemini/hooks/{gemini_script_path.name}"))
+    _write_platform_script(
+        gemini_script_path,
+        hook_renderer.render_shell_hook_adapter(
+            build_shell_hook_adapter_spec(
+                "gemini",
+                agent_context_engine_root=target,
+                agent_memory_script=script_abs,
+            )
+        ),
+    )
+    write_workspace_binding("codex", root=target, memory_root=target, written_by="install")
+    write_workspace_binding("claude", root=target, memory_root=target, written_by="install")
+    ensure_opencode_project(
+        target,
+        memory_root=runtime_memory_root,
+    )
+    _run_integration_hook_action(client="opencode", action="enable", target=target, memory_root=runtime_memory_root)
+    for workspace_root in workspace_roots["codex"]:
+        try:
+            _enable_workspace_hooks(client="codex", target=workspace_root, memory_root=target)
+            print(f"enabled Codex GUI workspace hooks: {workspace_root}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"warn: could not enable Codex workspace hooks in {workspace_root}: {exc}", file=sys.stderr)
+    for workspace_root in workspace_roots["claude"]:
+        try:
+            _enable_workspace_hooks(client="claude", target=workspace_root, memory_root=target)
+            print(f"enabled Claude workspace hooks: {workspace_root}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"warn: could not enable Claude workspace hooks in {workspace_root}: {exc}", file=sys.stderr)
+    for workspace_root in workspace_roots["cursor"]:
+        try:
+            _enable_workspace_hooks(client="cursor", target=workspace_root, memory_root=target)
+            print(f"enabled Cursor workspace hooks: {workspace_root}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"warn: could not enable Cursor workspace hooks in {workspace_root}: {exc}", file=sys.stderr)
+    for path in [
+        codex_script_path,
+        claude_script_path,
+        antigravity_script_path,
+        gemini_script_path,
+        codex_script_path.with_suffix(".ps1"),
+        claude_script_path.with_suffix(".ps1"),
+        antigravity_script_path.with_suffix(".ps1"),
+        gemini_script_path.with_suffix(".ps1"),
+    ]:
+        if path.exists():
+            _mark_platform_executable(path)
+            activated_paths.append(path)
+    return activated_paths
+
+
 def _print_headless_guidance(client: str) -> None:
     guidance = HEADLESS_INSTALL_GUIDANCE.get(client)
     if not guidance:
@@ -2919,9 +3025,22 @@ def _render_shell_hook_config(template_path: Path, *, command: str) -> dict[str,
     return _replace_hook_commands(json.loads(template_path.read_text(encoding="utf-8")), command)
 
 
+def _replace_string_placeholder(value: object, placeholder: str, replacement: str) -> object:
+    if isinstance(value, dict):
+        return {key: _replace_string_placeholder(item, placeholder, replacement) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_string_placeholder(item, placeholder, replacement) for item in value]
+    if isinstance(value, str):
+        return value.replace(placeholder, replacement)
+    return value
+
+
 def _render_antigravity_hook_config(*, hook_script: Path) -> dict[str, object]:
-    template = (SKILL_ROOT / "templates" / "antigravity-hooks" / "hooks.json").read_text(encoding="utf-8")
-    return json.loads(template.replace("__ANTIGRAVITY_HOOK_SCRIPT__", str(hook_script.resolve())))
+    template = json.loads((SKILL_ROOT / "templates" / "antigravity-hooks" / "hooks.json").read_text(encoding="utf-8"))
+    rendered = _replace_string_placeholder(template, "__ANTIGRAVITY_HOOK_SCRIPT__", str(hook_script.resolve()))
+    if not isinstance(rendered, dict):
+        raise ValueError("invalid antigravity hook template")
+    return rendered
 
 
 def _write_platform_script(script_path: Path, script_text: str) -> list[Path]:
@@ -3602,6 +3721,61 @@ def create_command_link(
     return actual_link
 
 
+def _path_contains(path_value: str, entry: Path) -> bool:
+    expected = os.path.normcase(os.path.normpath(str(entry)))
+    for part in path_value.split(os.pathsep):
+        candidate = part.strip().strip('"')
+        if not candidate:
+            continue
+        if os.path.normcase(os.path.normpath(candidate)) == expected:
+            return True
+    return False
+
+
+def _prepend_process_path(entry: Path) -> None:
+    current = os.environ.get("PATH") or os.environ.get("Path") or ""
+    if _path_contains(current, entry):
+        return
+    os.environ["PATH"] = str(entry) + (os.pathsep + current if current else "")
+
+
+def _ensure_windows_user_path_contains(entry: Path) -> str | None:
+    if os.name != "nt":
+        return None
+    _prepend_process_path(entry)
+    if os.environ.get("AGENT_MEMORY_TEST_SKIP_USER_PATH_UPDATE", "") in {"1", "true", "True", "yes"}:
+        return f"updated current process PATH with {entry}"
+    try:
+        import ctypes
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
+            value_name = "Path"
+            try:
+                current, value_type = winreg.QueryValueEx(key, value_name)
+            except FileNotFoundError:
+                try:
+                    current, value_type = winreg.QueryValueEx(key, "PATH")
+                    value_name = "PATH"
+                except FileNotFoundError:
+                    current, value_type = "", winreg.REG_EXPAND_SZ
+            current_text = str(current or "")
+            if _path_contains(current_text, entry):
+                return f"Windows user PATH already contains {entry}"
+            separator = ";" if current_text else ""
+            winreg.SetValueEx(key, value_name, 0, value_type or winreg.REG_EXPAND_SZ, f"{entry}{separator}{current_text}")
+        try:
+            HWND_BROADCAST = 0xFFFF
+            WM_SETTINGCHANGE = 0x001A
+            SMTO_ABORTIFHUNG = 0x0002
+            ctypes.windll.user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment", SMTO_ABORTIFHUNG, 5000, None)
+        except Exception:
+            pass
+        return f"added {entry} to Windows user PATH"
+    except Exception as exc:  # noqa: BLE001
+        return f"warn: could not update Windows user PATH with {entry}: {exc}"
+
+
 def remove_command_link(link_dir: Path, link_name: str, *, installation_root: Path | None = None) -> Path:
     from ....application.platform import current_platform_profile
     from ....application.platform.runtime_selection import select_command_publisher
@@ -3888,77 +4062,14 @@ def cmd_install(args: argparse.Namespace) -> int:
         or _expected_launchagent_plist_path(launchagent_label)
     )
     launchagent_env_file = str(getattr(args, "launchagent_env_file", None) or default_launchagent["env_file"]).strip() or default_launchagent["env_file"]
-    codex_templates = SKILL_ROOT / "templates" / "codex-hooks"
     script_abs = str((target / script_rel).resolve())
-    root_abs = str(target.resolve())
-    from ....application.hook_rendering import build_shell_hook_adapter_spec
     from ....application.platform import current_platform_profile
     from ....application.platform.runtime_selection import select_hook_adapter_renderer
     hook_renderer = select_hook_adapter_renderer(current_platform_profile())
-    codex_script_path = target / ".codex" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
-    claude_script_path = target / ".claude" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
-    antigravity_script_path = target / ".agents" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
-    gemini_script_path = target / ".gemini" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
-    for path in [codex_script_path, claude_script_path, antigravity_script_path, gemini_script_path]:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json(target / ".codex" / "hooks.json", _render_shell_hook_config(codex_templates / "hooks.json", command=f"./.codex/hooks/{codex_script_path.name}"))
-    _write_platform_script(
-        codex_script_path,
-        hook_renderer.render_shell_hook_adapter(
-            build_shell_hook_adapter_spec(
-                "codex",
-                agent_context_engine_root=target,
-                agent_memory_script=script_abs,
-            )
-        ),
-    )
-    claude_templates = SKILL_ROOT / "templates" / "claude-hooks"
-    _write_json(target / ".claude" / "settings.json", _render_shell_hook_config(claude_templates / "settings.json", command=f"./.claude/hooks/{claude_script_path.name}"))
-    _write_platform_script(
-        claude_script_path,
-        hook_renderer.render_shell_hook_adapter(
-            build_shell_hook_adapter_spec(
-                "claude",
-                agent_context_engine_root=target,
-                agent_memory_script=script_abs,
-            )
-        ),
-    )
-    antigravity_templates = SKILL_ROOT / "templates" / "antigravity-hooks"
-    _write_json(target / ".agents" / "hooks.json", _render_antigravity_hook_config(hook_script=antigravity_script_path))
-    _write_platform_script(
-        antigravity_script_path,
-        hook_renderer.render_shell_hook_adapter(
-            build_shell_hook_adapter_spec(
-                "antigravity",
-                agent_context_engine_root=target,
-                agent_memory_script=script_abs,
-            )
-        ),
-    )
-    gemini_templates = SKILL_ROOT / "templates" / "gemini-hooks"
-    _write_json(target / ".gemini" / "settings.json", _render_shell_hook_config(gemini_templates / "settings.json", command=f"./.gemini/hooks/{gemini_script_path.name}"))
-    _write_platform_script(
-        gemini_script_path,
-        hook_renderer.render_shell_hook_adapter(
-            build_shell_hook_adapter_spec(
-                "gemini",
-                agent_context_engine_root=target,
-                agent_memory_script=script_abs,
-            )
-        ),
-    )
-    write_workspace_binding("codex", root=target, memory_root=target, written_by="install")
-    write_workspace_binding("claude", root=target, memory_root=target, written_by="install")
     repos_index = ensure_repos_index(target, args.project or [], interactive=not args.no_interactive, language=language)
     agents_path = ensure_agents_memory_block(target, language=language, command_prefix=command_prefix)
     hook_entry_path = ensure_session_start_hook_entry(target, command_prefix=command_prefix, language=language, memory_root=target)
     entrypoints = ensure_harness_entrypoints(target)
-    ensure_opencode_project(
-        target,
-        memory_root=runtime_memory_root,
-    )
-    _run_integration_hook_action(client="opencode", action="enable", target=target, memory_root=runtime_memory_root)
     _materialize_windows_cli_and_wrappers(script_root=cli_path.parent, installation_root=target)
     user_cli_link: Path | None = None
     if not isolated_install:
@@ -3982,28 +4093,23 @@ def cmd_install(args: argparse.Namespace) -> int:
         installed_skill / "scripts" / "gemini-ace.cmd",
         installed_skill / "scripts" / "opencode-ace",
         installed_skill / "scripts" / "opencode-ace.cmd",
-        codex_script_path,
-        claude_script_path,
-        antigravity_script_path,
-        gemini_script_path,
-        codex_script_path.with_suffix(".ps1"),
-        claude_script_path.with_suffix(".ps1"),
-        antigravity_script_path.with_suffix(".ps1"),
-        gemini_script_path.with_suffix(".ps1"),
     ]:
         if path.exists():
             _mark_platform_executable(path)
+    runtime_bootstrap_ok = True
     skip_runtime_bootstrap = os.environ.get("AGENT_MEMORY_TEST_SKIP_RUNTIME_BOOTSTRAP", "") in {"1", "true", "True", "yes"}
     if getattr(args, "bootstrap_runtime", False) and not skip_runtime_bootstrap:
         try:
             for action in ensure_runtime_venv(target, install_backend_dependencies=True):
                 print(f"runtime bootstrap: {action}")
         except (RuntimeError, subprocess.CalledProcessError) as exc:
+            runtime_bootstrap_ok = False
             print(
                 f"warn: runtime bootstrap failed; run `{agent_memory_cli_for_root(target)} repair-installation --apply` later: {exc}"
                 + _runtime_bootstrap_failure_hint(exc),
                 file=sys.stderr,
             )
+    frontend_build_ok = True
     if os.environ.get("AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD", "") not in {"1", "true", "True", "yes"}:
         try:
             for action in ensure_monitor_frontend_build(
@@ -4013,6 +4119,7 @@ def cmd_install(args: argparse.Namespace) -> int:
             ):
                 print(f"monitor frontend: {action}")
         except (RuntimeError, subprocess.CalledProcessError) as exc:
+            frontend_build_ok = False
             print(
                 f"warn: monitor frontend build failed; run `{agent_memory_cli_for_root(target)} repair-installation --apply --install-frontend-deps` later: {exc}"
                 + _frontend_build_failure_hint(target),
@@ -4082,24 +4189,9 @@ def cmd_install(args: argparse.Namespace) -> int:
             print(str(exc), file=sys.stderr)
             return 1
         print(f"linked {link} -> {installed_skill / 'scripts' / wrapper_name}")
-    for workspace_root in workspace_roots["codex"]:
-        try:
-            _enable_workspace_hooks(client="codex", target=workspace_root, memory_root=target)
-            print(f"enabled Codex GUI workspace hooks: {workspace_root}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"warn: could not enable Codex workspace hooks in {workspace_root}: {exc}", file=sys.stderr)
-    for workspace_root in workspace_roots["claude"]:
-        try:
-            _enable_workspace_hooks(client="claude", target=workspace_root, memory_root=target)
-            print(f"enabled Claude workspace hooks: {workspace_root}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"warn: could not enable Claude workspace hooks in {workspace_root}: {exc}", file=sys.stderr)
-    for workspace_root in workspace_roots["cursor"]:
-        try:
-            _enable_workspace_hooks(client="cursor", target=workspace_root, memory_root=target)
-            print(f"enabled Cursor workspace hooks: {workspace_root}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"warn: could not enable Cursor workspace hooks in {workspace_root}: {exc}", file=sys.stderr)
+    path_update = _ensure_windows_user_path_contains(link_dir)
+    if path_update:
+        print(path_update)
     print(f"installed agent-context-engine into {target}")
     print(f"install mode: {install_plan['install_mode']}")
     if args.instance_name:
@@ -4159,6 +4251,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     print(f"repo index: {repos_index}")
     for path in entrypoints:
         print(f"updated harness entrypoint: {path}")
+    scheduler_install_ok = True
     if args.install_launchagent and scheduler_capability is not None and scheduler_capability.status == CapabilityStatus.SUPPORTED:
         if not isolated_install and scheduler_capability.implementation == "launchagent":
             for action in _stop_superseded_launchagents_for_memory_root(target=target, memory_root=runtime_memory_root):
@@ -4178,9 +4271,11 @@ def cmd_install(args: argparse.Namespace) -> int:
         if scheduler_install.returncode == 0:
             print(f"installed and loaded {scheduler_name}")
         else:
+            scheduler_install_ok = False
             message = scheduler_install.stderr.strip() or scheduler_install.stdout.strip()
             print(f"warn: {scheduler_name} install failed; run manually if needed: {message}", file=sys.stderr)
     elif args.install_launchagent:
+        scheduler_install_ok = False
         print(
             f"warn: {scheduler_name} install skipped on this platform profile: "
             + f"profile={platform_profile.profile_id} status={scheduler_capability.status.value if scheduler_capability else 'unsupported'} "
@@ -4200,7 +4295,13 @@ def cmd_install(args: argparse.Namespace) -> int:
             )
         )
     verification = _run_post_install_checks(target, language=language)
-    if getattr(args, "start_monitor", True) and os.environ.get("AGENT_MEMORY_TEST_SKIP_MONITOR_START", "") not in {"1", "true", "True", "yes"}:
+    verification_ok = all(int(value) == 0 for value in verification.values())
+    installation_ready_for_activation = runtime_bootstrap_ok and frontend_build_ok and scheduler_install_ok and verification_ok
+    if (
+        getattr(args, "start_monitor", True)
+        and installation_ready_for_activation
+        and os.environ.get("AGENT_MEMORY_TEST_SKIP_MONITOR_START", "") not in {"1", "true", "True", "yes"}
+    ):
         started, detail = _autostart_monitor_after_install(
             target,
             runner=workflow_settings["monitor_runner"],
@@ -4218,8 +4319,31 @@ def cmd_install(args: argparse.Namespace) -> int:
                 + f"{detail}; command={monitor_restart_command(target, runner=workflow_settings['monitor_runner'])}",
                 file=sys.stderr,
             )
+            installation_ready_for_activation = False
+    elif getattr(args, "start_monitor", True) and not installation_ready_for_activation:
+        print(
+            "warn: monitor start skipped because installation verification is incomplete: "
+            + f"runtime_bootstrap_ok={runtime_bootstrap_ok} frontend_build_ok={frontend_build_ok} "
+            + f"scheduler_install_ok={scheduler_install_ok} verification_ok={verification_ok}",
+            file=sys.stderr,
+        )
     else:
         print("next: run " + monitor_restart_command(target, runner=workflow_settings["monitor_runner"]))
+    if installation_ready_for_activation:
+        activated_hook_paths = _activate_installation_hooks(
+            target=target,
+            runtime_memory_root=runtime_memory_root,
+            script_abs=script_abs,
+            hook_renderer=hook_renderer,
+            workspace_roots=workspace_roots,
+        )
+        if activated_hook_paths:
+            print(f"activated hooks as final install step: {len(activated_hook_paths)} files")
+    else:
+        print(
+            "warn: hook activation skipped because installation is not complete; rerun install or repair-installation after fixing prerequisites",
+            file=sys.stderr,
+        )
     print(f"next: run {agent_memory_cli_for_root(target)} doctor")
     wrapper_link_results = _verify_global_wrapper_links(args=args, prefix=prefix, suffix=suffix)
     if wrapper_link_results:
@@ -4239,7 +4363,8 @@ def cmd_install(args: argparse.Namespace) -> int:
                 )
     start_hints = _wrapper_start_hints(target, args)
     print("next: start " + ", ".join(start_hints))
-    print("info: /hooks can be used inside Codex to inspect installed hooks; approve any Codex hook safety review if shown")
+    if installation_ready_for_activation:
+        print("info: /hooks can be used inside Codex to inspect installed hooks; approve any Codex hook safety review if shown")
     print(
         _ui_text(
             language,

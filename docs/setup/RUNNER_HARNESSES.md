@@ -6,6 +6,7 @@ selection during installation, project activation, and integration Q&A.
 Use it together with:
 
 - `AGENT_BOOTSTRAP.md` for fresh-clone installation flow
+- `docs/setup/WINDOWS_INSTALLATION.md` for the Windows setup contract
 - `docs/skills/integration-management-agent.md` for status/change workflow
 - `docs/runbooks/integration-management.md` for operational semantics
 
@@ -57,7 +58,10 @@ choices, shows a final install-plan confirmation before writing files, and in
 non-interactive use it prints the recommended explicit command.
 
 Central installation into the chosen target root prepares these local artifacts
-by default:
+by default. Hook artifacts and GUI workspace hooks are activated only as the
+final install step, after runtime bootstrap, frontend build, scheduler
+installation/loading, post-install verification, and requested monitor startup
+have succeeded:
 
 - Codex hooks under `.codex/`
 - Claude Code hooks under `.claude/`
@@ -70,9 +74,15 @@ by default:
   `scripts/ace`
 - on Windows, the same installation also materializes `.cmd` companions for
   the public CLI and managed wrappers
+- on Windows, the configured command link directory is added to the current
+  process `PATH` and to the user `PATH` when missing, so `codex-ace` and other
+  wrappers resolve in new shells
 - installed public CLI `agent-context-engine`, relinked to the chosen
   installation by default
 - default `.venv/` when `install` runs normally; use `--no-bootstrap-runtime` to skip it
+- platform scheduler installation/loading by default so summaries, dreams,
+  graph extraction, and catch-up work continue after hook capture; use
+  `--no-install-launchagent` only as an explicit opt-out
 - local frontend build prerequisites; use `node >=20.19.0` or `>=22.12.0` and
   `npm >=9.5.0` for fresh monitor dependency installs and rebuilds
 
@@ -211,6 +221,11 @@ The CLI flag names remain `launchagent-*` for compatibility, but on Windows the
 same install path drives the per-user Task Scheduler job instead of a macOS
 LaunchAgent.
 
+Scheduler setup is part of the default install contract because background
+dreaming depends on periodic catch-up. Operators may skip it only with an
+explicit `--no-install-launchagent` opt-out, and diagnostics should report that
+as drift until the scheduler is installed and loaded.
+
 The `--memory-root` path is the persistent runtime storage root. It owns:
 
 - SQLite
@@ -302,8 +317,11 @@ Agent rule:
 - prefer discovery-driven defaults over asking for raw CLI flags
 - summarize suggested target, memory root, monitor port, wrapper naming, and
   refresh mode, then wait for explicit user approval before applying them
-- leave successful installs with the local monitor already started unless the
-  user explicitly opted out
+- leave fully successful installs with the local monitor already started unless
+  the user explicitly opted out; do not start a monitor when backend/runtime
+  dependencies or the frontend build are incomplete
+- activate hooks only as the final step of a successful install so an incomplete
+  setup can still be repaired without live hook traffic
 
 Reasonable defaults:
 

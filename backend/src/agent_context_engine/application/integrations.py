@@ -938,15 +938,24 @@ def _shell_hook_status(client: str, *, root: Path = ROOT, memory_root: Path | No
 
 def _antigravity_template(*, root: Path = ROOT) -> dict[str, Any]:
     template_path = SKILL_ROOT / "templates" / "antigravity-hooks" / "hooks.json"
-    template = json.loads(
-        template_path.read_text(encoding="utf-8").replace(
-            "__ANTIGRAVITY_HOOK_SCRIPT__",
-            str(antigravity_project_paths(root)["script_path"].resolve()),
-        )
+    template = _replace_string_placeholder(
+        json.loads(template_path.read_text(encoding="utf-8")),
+        "__ANTIGRAVITY_HOOK_SCRIPT__",
+        str(antigravity_project_paths(root)["script_path"].resolve()),
     )
     if not isinstance(template, dict):
         raise ValueError("invalid antigravity hook template")
     return template
+
+
+def _replace_string_placeholder(value: Any, placeholder: str, replacement: str) -> Any:
+    if isinstance(value, dict):
+        return {key: _replace_string_placeholder(item, placeholder, replacement) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_string_placeholder(item, placeholder, replacement) for item in value]
+    if isinstance(value, str):
+        return value.replace(placeholder, replacement)
+    return value
 
 
 def _antigravity_hook_events(*, root: Path = ROOT) -> list[str]:

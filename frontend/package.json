@@ -15,16 +15,19 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.2",
-    "vite": "8.0.16",
-    "typescript": "5.9.3",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "typescript": "5.9.3",
+    "vite": "8.0.16"
   },
   "devDependencies": {
     "@storybook/react-vite": "10.4.2",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",
-    "storybook": "10.4.2",
-    "openapi-typescript": "7.13.0"
+    "openapi-typescript": "7.13.0",
+    "storybook": "10.4.2"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "^1.0.3"
   }
 }

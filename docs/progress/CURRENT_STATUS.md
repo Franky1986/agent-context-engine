@@ -1,7 +1,7 @@
 # Current Status
 
 ## Date
-2026-06-25
+2026-06-26
 
 ## Public Snapshot
 
@@ -43,7 +43,11 @@ The current install flow now supports:
 - isolated wrapper naming and local SQLite/runtime storage for side-by-side
   installs,
 - Windows-native `.cmd` publication and PowerShell hook/wrapper generation for
-  experimental installs.
+  experimental installs,
+- Windows user `PATH` repair for generated command shims,
+- guarded install finalization where monitor startup and hook activation happen
+  only after runtime/bootstrap, frontend build, scheduler setup, and
+  verification succeed.
 
 ## Integration State
 
@@ -71,7 +75,7 @@ confirmed:
 
 - install root and memory root stay local to the checkout,
 - `search` and `retrieve` return the expected fresh session/dream content,
-- `/Users/frankrichter/projects/test` activates correctly through
+- an external test project activates correctly through
   `cursor-enable --target ... --installation-root ... --background-runner claude`,
 - the activation is now visible both in target-local `cursor-status --target ...`
   and in install-wide diagnostics via persisted `workspace_roots.cursor`,
@@ -85,9 +89,17 @@ Recent validation for the Windows experimental slice confirmed:
 - runtime selection surfaces Windows-specific publisher, wrapper, hook,
   scheduler, quoting, process-launch, workspace-binding, and system-open
   adapters,
-- focused Windows contract tests are green on the development host (`10/10`
-  focused tests),
-- real Windows runtime validation and CI remain intentionally pending.
+- focused Windows contract tests are green on the development host,
+- global wrapper publication now verifies `.cmd` shim paths and resolves
+  `codex-ace` from `PATH`,
+- `codex-ace --version` completed through the generated wrapper on Windows,
+- monitor frontend typecheck/build completed with the Windows Node toolchain,
+- interrupted dream state was cleaned to an empty dream queue and no running
+  dream runs,
+- the Windows Task Scheduler job is installed and ready rather than stuck
+  running,
+- broader CI and a full fresh external-project runner-to-retrieval pass remain
+  pending before any Windows support-level increase.
 
 Latest automated validation on the current public checkout install also
 confirmed:

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import importlib.util
 import argparse
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -28,8 +30,13 @@ PLATFORM_REFACTOR_FIXTURES = SKILL_ROOT / "tests" / "fixtures" / "platform_capab
 
 
 def load_agent_memory(root: Path):
+    home = test_home_root(root)
     os.environ["AGENT_CONTEXT_ENGINE_ROOT"] = str(root)
-    os.environ["HOME"] = str(test_home_root(root))
+    os.environ["HOME"] = str(home)
+    os.environ["USERPROFILE"] = str(home)
+    os.environ["APPDATA"] = str(home / "AppData" / "Roaming")
+    os.environ["LOCALAPPDATA"] = str(home / "AppData" / "Local")
+    os.environ["AGENT_MEMORY_TEST_SKIP_USER_PATH_UPDATE"] = "1"
     for name in list(sys.modules):
         if name == "agent_memory" or name.startswith("agent_context_engine."):
             del sys.modules[name]
@@ -50,10 +57,15 @@ def run_cli(
     extra_env: dict[str, str] | None = None,
     timeout: int = 20,
 ) -> subprocess.CompletedProcess[str]:
+    home = test_home_root(root)
     env = {
         **os.environ,
         "AGENT_CONTEXT_ENGINE_ROOT": str(root),
-        "HOME": str(test_home_root(root)),
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "APPDATA": str(home / "AppData" / "Roaming"),
+        "LOCALAPPDATA": str(home / "AppData" / "Local"),
+        "AGENT_MEMORY_TEST_SKIP_USER_PATH_UPDATE": "1",
         "AGENT_MEMORY_LAUNCH_CWD": "",
         "AGENT_MEMORY_AUTO_DREAM_ON_STOP": "0",
         "AGENT_MEMORY_AUTO_WORKER_ON_HOOK": "0",
@@ -4700,6 +4712,32 @@ exit 0
             self.assertIsNotNone(risk)
             self.assertEqual(risk["status"], "warned")
             self.assertIn("llm_policy_warning", risk["categories_json"])
+
+    def test_codex_classifier_uses_resolved_executable_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application import classifier
+
+            resolved = str(root / "bin" / "codex.cmd")
+
+            def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                out = Path(command[command.index("--output-last-message") + 1])
+                out.write_text(
+                    '{"decision":"allow","risk_level":"none","sensitivity":"normal","categories":[],"poisoning_flags":[],"injection_policy":"startup_safe","impact":"Allowed.","memory_action":"index","reason":"Allowed.","confidence":0.99}',
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with (
+                mock.patch.object(classifier.shutil, "which", return_value=resolved) as which_mock,
+                mock.patch.object(classifier.subprocess, "run", side_effect=fake_run) as run_mock,
+            ):
+                output = classifier.run_classifier_llm("codex", None, "classify this", 10)
+
+            self.assertIn('"decision":"allow"', output)
+            which_mock.assert_called()
+            self.assertEqual(run_mock.call_args.args[0][0], resolved)
 
     def test_invalid_llm_classifier_output_quarantines_noncritical_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -9523,20 +9561,22 @@ The session reconciled stale queue state and resumed pending dreams.
                 "--no-install-launchagent",
                 "--no-start-monitor",
                 "--no-bootstrap-runtime",
+                "--force",
                 "--link-dir",
                 str(link_dir),
                 extra_env={"AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD": "1"},
                 timeout=60,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+            hook_adapter_name = "hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh"
             self.assertTrue((root / ".codex" / "hooks.json").exists())
-            self.assertTrue((root / ".codex" / "hooks" / "hook_adapter.sh").exists())
+            self.assertTrue((root / ".codex" / "hooks" / hook_adapter_name).exists())
             self.assertTrue((root / ".codex" / "agent-memory-binding.json").exists())
             self.assertTrue((root / ".claude" / "settings.json").exists())
-            self.assertTrue((root / ".claude" / "hooks" / "hook_adapter.sh").exists())
+            self.assertTrue((root / ".claude" / "hooks" / hook_adapter_name).exists())
             self.assertTrue((root / ".claude" / "agent-memory-binding.json").exists())
             self.assertTrue((root / ".agents" / "hooks.json").exists())
-            self.assertTrue((root / ".agents" / "hooks" / "hook_adapter.sh").exists())
+            self.assertTrue((root / ".agents" / "hooks" / hook_adapter_name).exists())
             self.assertTrue((root / ".opencode" / "plugins" / "agent-memory.js").exists())
             self.assertTrue((root / "opencode.json").exists())
             claude_settings = json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
@@ -9544,15 +9584,24 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("SessionStart", claude_settings["hooks"])
             opencode_plugin = (root / ".opencode" / "plugins" / "agent-memory.js").read_text(encoding="utf-8")
             self.assertIn("sessionIdFrom", opencode_plugin)
-            codex_script = (root / ".codex" / "hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
-            claude_script = (root / ".claude" / "hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
-            self.assertIn("HOOKS_STATE", codex_script)
-            self.assertIn("AGENT_MEMORY_INTERNAL_RUN", codex_script)
-            self.assertIn("python3 - \"$HOOKS_STATE\" codex", codex_script)
-            self.assertIn("TMPERR", claude_script)
-            self.assertIn("HOOKS_STATE", claude_script)
-            self.assertIn("AGENT_MEMORY_INTERNAL_RUN", claude_script)
-            self.assertIn("python3 - \"$HOOKS_STATE\" claude", claude_script)
+            hook_script_name = "hook_adapter.ps1" if os.name == "nt" else hook_adapter_name
+            codex_script = (root / ".codex" / "hooks" / hook_script_name).read_text(encoding="utf-8")
+            claude_script = (root / ".claude" / "hooks" / hook_script_name).read_text(encoding="utf-8")
+            if os.name == "nt":
+                self.assertIn("AGENT_CONTEXT_ENGINE_ROOT", codex_script)
+                self.assertIn("log-hook", codex_script)
+            else:
+                self.assertIn("HOOKS_STATE", codex_script)
+                self.assertIn("AGENT_MEMORY_INTERNAL_RUN", codex_script)
+                self.assertIn("python3 - \"$HOOKS_STATE\" codex", codex_script)
+            if os.name == "nt":
+                self.assertIn("AGENT_CONTEXT_ENGINE_ROOT", claude_script)
+                self.assertIn("log-hook", claude_script)
+            else:
+                self.assertIn("TMPERR", claude_script)
+                self.assertIn("HOOKS_STATE", claude_script)
+                self.assertIn("AGENT_MEMORY_INTERNAL_RUN", claude_script)
+                self.assertIn("python3 - \"$HOOKS_STATE\" claude", claude_script)
             antigravity_hooks = json.loads((root / ".agents" / "hooks.json").read_text(encoding="utf-8"))
             self.assertIn("agent-memory", antigravity_hooks)
             self.assertIn("PreInvocation", antigravity_hooks["agent-memory"])
@@ -9583,11 +9632,10 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertTrue(cursor_rule.exists())
             self.assertIn("alwaysApply: true", cursor_rule.read_text(encoding="utf-8"))
             self.assertIn("AGENTS.md", cursor_rule.read_text(encoding="utf-8"))
-            self.assertTrue((link_dir / "codex-ace").is_symlink())
-            self.assertTrue((link_dir / "claude-ace").is_symlink())
-            self.assertTrue((link_dir / "agy-ace").is_symlink())
-            self.assertTrue((link_dir / "gemini-ace").is_symlink())
-            self.assertTrue((link_dir / "opencode-ace").is_symlink())
+            link_suffix = ".cmd" if os.name == "nt" else ""
+            for command_name in ["codex-ace", "claude-ace", "agy-ace", "gemini-ace", "opencode-ace"]:
+                link_path = link_dir / f"{command_name}{link_suffix}"
+                self.assertTrue(link_path.exists() or link_path.is_symlink())
 
             doctor = run_cli(root, "doctor")
             self.assertEqual(doctor.returncode, 0, doctor.stderr)
@@ -9967,11 +10015,31 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("# SCRIPT=C:/agent-context-engine.py", rendered_shell)
             self.assertIn("log-hook", rendered_shell)
             self.assertIn("py", rendered_shell)
+            self.assertIn("AGENT_MEMORY_CLASSIFIER_FALLBACK_TO_DETERMINISTIC", rendered_shell)
 
             self.assertEqual(rendered_cursor, renderer.render_cursor_project_hook_wrapper(cursor_spec))
             self.assertIn("# client=cursor", rendered_cursor)
             self.assertIn("# support=experimental", rendered_cursor)
             self.assertIn("# SCRIPT=C:/agent-context-engine.py", rendered_cursor)
+            self.assertIn("AGENT_MEMORY_CLASSIFIER_FALLBACK_TO_DETERMINISTIC", rendered_cursor)
+
+    def test_codex_subprocess_env_prepends_windows_user_command_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.adapters.runners import codex as codex_runner
+
+            base_env = {
+                "APPDATA": str(root / "AppData" / "Roaming"),
+                "USERPROFILE": str(root / "User"),
+                "PATH": str(root / "bin"),
+            }
+            with mock.patch.object(codex_runner.os, "name", "nt"):
+                env = codex_runner.codex_subprocess_env(base_env=base_env)
+
+            path_parts = env["PATH"].split(os.pathsep)
+            self.assertEqual(path_parts[0], str(Path(base_env["APPDATA"]) / "npm"))
+            self.assertEqual(path_parts[1], str(Path(base_env["USERPROFILE"]) / ".local" / "bin"))
 
     def test_windows_wrapper_renderer_contract_reports_support_and_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10041,6 +10109,8 @@ The session reconciled stale queue state and resumed pending dreams.
 
             self.assertEqual(link.name, "agent-context-engine.cmd")
             self.assertIn("agent-context-engine command shim v1", content)
+            self.assertIn('python "', content)
+            self.assertIn("9009", content)
             self.assertIn('py -3 "', content)
             self.assertIn(str(target.resolve()), content)
 
@@ -10222,7 +10292,7 @@ The session reconciled stale queue state and resumed pending dreams.
                 "default_monitor_port": 8787,
                 "recommended_wrapper_prefix": "",
                 "recommended_wrapper_suffix": "ace",
-                "recommended_install_launchagent": False,
+                "recommended_install_launchagent": True,
                 "recommended_plan": {},
                 "memory_root_candidates": [],
                 "active_monitor_runtime_entries": [],
@@ -10266,7 +10336,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("prerequisite suggestions", rendered)
             self.assertIn("Install or switch to Python >=3.11.0", rendered)
             self.assertIn("Upgrade Node.js from v20.11.1 to >=20.19.0 or >=22.12.0", rendered)
-            self.assertIn("install the Windows Task Scheduler after explicit approval", rendered)
+            self.assertNotIn("install the Windows Task Scheduler after explicit approval", rendered)
 
     def test_installation_check_adds_direct_backend_dependency_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10454,6 +10524,31 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual((summary.get("system_open_adapter") or {}).get("adapter_name"), "windows_system_open")
             self.assertEqual((summary.get("scheduler_installer") or {}).get("support_level"), "experimental")
 
+    def test_windows_task_scheduler_dry_run_uses_scheduler_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.adapters.windows.scheduler import WindowsTaskSchedulerInstaller
+            from agent_context_engine.application.instance_profile import default_installation_profile, save_installation_profile
+
+            profile = default_installation_profile()
+            profile["instance_id"] = "demo"
+            profile["root_path"] = str(root)
+            profile["workflows"]["dream_runner"] = "codex"
+            save_installation_profile(root, profile)
+
+            args = argparse.Namespace(target=str(root), dry_run=True, load=True, interval=900)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = WindowsTaskSchedulerInstaller().install(args)
+
+            self.assertEqual(result, 0)
+            rendered = output.getvalue()
+            self.assertIn("schtasks /Create", rendered)
+            self.assertIn("scheduler-run", rendered)
+            self.assertIn("--dream-queue-limit", rendered)
+            self.assertNotIn(" monitor --runner ", rendered)
+
     def test_runtime_selection_summary_surfaces_linux_scaffolded_non_active_stack(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -10608,15 +10703,15 @@ The session reconciled stale queue state and resumed pending dreams.
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("instance: client-a", result.stdout)
-            self.assertTrue((link_dir / "client-a-codex-ace").is_symlink())
-            self.assertTrue((link_dir / "client-a-claude-ace").is_symlink())
-            self.assertTrue((link_dir / "client-a-agy-ace").is_symlink())
-            self.assertTrue((link_dir / "client-a-gemini-ace").is_symlink())
-            self.assertTrue((link_dir / "client-a-opencode-ace").is_symlink())
+            link_suffix = ".cmd" if os.name == "nt" else ""
+            for command_name in ["client-a-codex-ace", "client-a-claude-ace", "client-a-agy-ace", "client-a-gemini-ace", "client-a-opencode-ace"]:
+                link_path = link_dir / f"{command_name}{link_suffix}"
+                self.assertTrue(link_path.exists() or link_path.is_symlink())
             self.assertTrue((target / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine").exists())
 
+            doctor_script_name = "agent-context-engine.cmd" if os.name == "nt" else "agent-context-engine"
             doctor = subprocess.run(
-                [str(target / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine"), "doctor"],
+                [str(target / "docs" / "skills" / "agent-context-engine" / "scripts" / doctor_script_name), "doctor"],
                 text=True,
                 capture_output=True,
                 cwd=str(target),
@@ -10624,6 +10719,8 @@ The session reconciled stale queue state and resumed pending dreams.
                     **os.environ,
                     "HOME": str(test_home_root(root)),
                     "AGENT_CONTEXT_ENGINE_ROOT": str(target),
+                    "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
+                    "Path": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("Path", os.environ.get("PATH", "")),
                 },
                 timeout=20,
                 check=False,
@@ -10973,7 +11070,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(summary["recommended_memory_root_source"], "default_home_root")
             self.assertEqual(summary["recommended_wrapper_prefix"], "")
             self.assertEqual(summary["recommended_wrapper_suffix"], "-ace")
-            self.assertFalse(summary["recommended_install_launchagent"])
+            self.assertTrue(summary["recommended_install_launchagent"])
             self.assertEqual(summary["recommended_monitor_port"], 8787)
 
     def test_install_discovery_ignores_foreign_repo_local_defaults_for_new_checkout(self) -> None:
@@ -11247,7 +11344,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("--bootstrap-runtime", result.stdout)
             self.assertIn("--link-codex-ace", result.stdout)
             self.assertIn("--link-opencode-ace", result.stdout)
-            self.assertIn("--no-install-launchagent", result.stdout)
+            self.assertNotIn("--no-install-launchagent", result.stdout)
             self.assertNotIn(f"--target '{source_root.resolve()}'", result.stdout)
             self.assertIn("Nutzerfreigabe erforderlich", result.stdout)
 
@@ -11468,6 +11565,8 @@ The session reconciled stale queue state and resumed pending dreams.
                 "en",
                 "--no-interactive",
                 "--no-install-launchagent",
+                "--force",
+                "--no-bootstrap-runtime",
             ])
 
             command = installation_cmd._monitor_start_command(root, runner="codex", host="127.0.0.1", port=8787, language="en")
@@ -11475,7 +11574,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("--replace-existing", command)
             self.assertIn("--no-open", command)
 
-            with mock.patch("agent_context_engine.interfaces.cli.commands.installation._run_post_install_checks", return_value={"doctor_exit": 0, "check_installation_exit": 0}), mock.patch(
+            with mock.patch.dict(os.environ, {"AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD": "1"}, clear=False), mock.patch("agent_context_engine.interfaces.cli.commands.installation._run_post_install_checks", return_value={"doctor_exit": 0, "check_installation_exit": 0}), mock.patch(
                 "agent_context_engine.interfaces.cli.commands.installation._autostart_monitor_after_install",
                 return_value=(True, "ok"),
             ) as autostart_mock, mock.patch(
@@ -11511,15 +11610,54 @@ The session reconciled stale queue state and resumed pending dreams.
                 "--no-interactive",
                 "--no-install-launchagent",
                 "--no-start-monitor",
+                "--force",
+                "--no-bootstrap-runtime",
             ])
 
-            with mock.patch("agent_context_engine.interfaces.cli.commands.installation._run_post_install_checks", return_value={"doctor_exit": 0, "check_installation_exit": 0}), mock.patch(
+            with mock.patch.dict(os.environ, {"AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD": "1"}, clear=False), mock.patch("agent_context_engine.interfaces.cli.commands.installation._run_post_install_checks", return_value={"doctor_exit": 0, "check_installation_exit": 0}), mock.patch(
                 "agent_context_engine.interfaces.cli.commands.installation._autostart_monitor_after_install"
             ) as autostart_mock:
                 rc = args.func(args)
 
             self.assertEqual(rc, 0)
             autostart_mock.assert_not_called()
+
+    def test_install_skips_monitor_and_hooks_when_frontend_build_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+
+            from agent_context_engine.interfaces.cli import main as cli_main
+
+            parser = cli_main.build_parser()
+            args = parser.parse_args([
+                "install",
+                "--target",
+                str(root),
+                "--language",
+                "en",
+                "--no-interactive",
+                "--no-install-launchagent",
+                "--force",
+                "--no-bootstrap-runtime",
+            ])
+
+            with mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation.ensure_monitor_frontend_build",
+                side_effect=RuntimeError("frontend dependency install failed"),
+            ), mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation._run_post_install_checks",
+                return_value={"doctor_exit": 0, "check_installation_exit": 0},
+            ), mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation._autostart_monitor_after_install"
+            ) as autostart_mock, mock.patch(
+                "agent_context_engine.interfaces.cli.commands.installation._activate_installation_hooks"
+            ) as activate_hooks_mock:
+                rc = args.func(args)
+
+            self.assertEqual(rc, 0)
+            autostart_mock.assert_not_called()
+            activate_hooks_mock.assert_not_called()
 
     def test_install_reports_mode_and_runs_verification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -11667,11 +11805,10 @@ The session reconciled stale queue state and resumed pending dreams.
                 "--no-install-launchagent",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue((link_dir / "codex-ace").is_symlink())
-            self.assertTrue((link_dir / "claude-ace").is_symlink())
-            self.assertTrue((link_dir / "agy-ace").is_symlink())
-            self.assertTrue((link_dir / "gemini-ace").is_symlink())
-            self.assertTrue((link_dir / "opencode-ace").is_symlink())
+            link_suffix = ".cmd" if os.name == "nt" else ""
+            for command_name in ["codex-ace", "claude-ace", "agy-ace", "gemini-ace", "opencode-ace"]:
+                link_path = link_dir / f"{command_name}{link_suffix}"
+                self.assertTrue(link_path.exists() or link_path.is_symlink())
             self.assertIn("global wrapper verification:", result.stdout)
             self.assertIn("codex-ace:", result.stdout)
 
@@ -11933,17 +12070,18 @@ The session reconciled stale queue state and resumed pending dreams.
 
             enable = run_cli(root, "global-wrapper-enable", "gemini-ace", "--link-dir", str(link_dir))
             self.assertEqual(enable.returncode, 0, enable.stderr)
-            self.assertTrue((link_dir / "gemini-ace").is_symlink())
+            link_suffix = ".cmd" if os.name == "nt" else ""
+            self.assertTrue((link_dir / f"gemini-ace{link_suffix}").exists() or (link_dir / "gemini-ace").is_symlink())
             registry = json.loads((test_home_root(root) / ".agent-context-engine" / "link-registry.json").read_text(encoding="utf-8"))
             gemini_entry = dict(registry["entries"]["gemini-ace"])
             self.assertEqual(gemini_entry["status"], "linked")
-            self.assertTrue(gemini_entry["target"].endswith("/scripts/gemini-ace"))
+            self.assertIn(Path(gemini_entry["target"]).name, {"gemini-ace", "gemini-ace.cmd"})
 
             antigravity_enable = run_cli(root, "global-wrapper-enable", "agy-ace", "--link-dir", str(link_dir))
             self.assertEqual(antigravity_enable.returncode, 0, antigravity_enable.stderr)
-            self.assertTrue((link_dir / "agy-ace").is_symlink())
+            self.assertTrue((link_dir / f"agy-ace{link_suffix}").exists() or (link_dir / "agy-ace").is_symlink())
 
-            status = run_cli(root, "global-wrapper-status", "--link-dir", str(link_dir), extra_env={"PATH": f"{link_dir}:{os.environ.get('PATH', '')}"})
+            status = run_cli(root, "global-wrapper-status", "--link-dir", str(link_dir), extra_env={"PATH": f"{link_dir}{os.pathsep}{os.environ.get('PATH', '')}"})
             self.assertEqual(status.returncode, 0, status.stderr)
             self.assertIn("gemini-ace:", status.stdout)
             self.assertIn("agy-ace:", status.stdout)
@@ -11953,7 +12091,7 @@ The session reconciled stale queue state and resumed pending dreams.
 
             disable = run_cli(root, "global-wrapper-disable", "gemini-ace", "--link-dir", str(link_dir))
             self.assertEqual(disable.returncode, 0, disable.stderr)
-            self.assertFalse((link_dir / "gemini-ace").exists() or (link_dir / "gemini-ace").is_symlink())
+            self.assertFalse((link_dir / f"gemini-ace{link_suffix}").exists() or (link_dir / "gemini-ace").is_symlink())
             registry = json.loads((test_home_root(root) / ".agent-context-engine" / "link-registry.json").read_text(encoding="utf-8"))
             self.assertEqual(registry["entries"]["gemini-ace"]["status"], "removed")
 
@@ -12532,6 +12670,17 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("python3 - \"$HOOKS_STATE\" antigravity", script_text)
             self.assertIn('"decision": "deny"', script_text)
             self.assertIn('"injectSteps"', script_text)
+
+    def test_antigravity_hook_config_renderer_accepts_windows_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands.installation import _render_antigravity_hook_config
+
+            config = _render_antigravity_hook_config(hook_script=Path("C:/Users/demo/project/.agents/hooks/hook_adapter.cmd"))
+            command = config["agent-memory"]["PreInvocation"][0]["command"]
+            self.assertIn("hook_adapter.cmd PreInvocation", command)
+            self.assertIn("\\", json.dumps(config))
 
     def test_antigravity_integration_hook_management_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

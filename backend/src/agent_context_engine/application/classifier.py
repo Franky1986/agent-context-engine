@@ -287,14 +287,15 @@ def run_classifier_llm(runner: str, model: str | None, prompt: str, timeout: int
         "AGENT_CONTEXT_ENGINE_ROOT": str(ROOT),
     }
     if runner == "codex":
-        if not shutil.which("codex"):
-            raise RuntimeError("codex executable not found")
         env = codex_subprocess_env(base_env=env)
+        codex_executable = shutil.which("codex", path=env.get("PATH"))
+        if not codex_executable:
+            raise RuntimeError("codex executable not found")
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "classifier.json"
             schema_path = Path(tmp) / "risk-classifier.schema.json"
             schema_path.write_text(json_dumps(classifier_output_schema()), encoding="utf-8")
-            command = ["codex", "exec"]
+            command = [codex_executable, "exec"]
             if model:
                 command.extend(["--model", model])
             command.extend(

@@ -63,6 +63,11 @@ pre-action safety checks, and enqueue or persist events for later processing.
 - Cursor classifier runner auth failures fall back to deterministic policy and
   operator guidance instead of creating tainting `classifier_invalid_output`
   cascades.
+- Windows hook adapters must give user-scoped command shims such as
+  `%APPDATA%\npm` and `%USERPROFILE%\.local\bin` precedence for internal
+  runner subprocesses, and classifier runner launch failures must fall back to
+  deterministic policy instead of creating tainting `classifier_invalid_output`
+  cascades.
 - Cursor auth readiness checks must treat textual unauthenticated states such
   as `Not logged in` as not-ready even when `cursor-agent status` exits `0`.
 - Cursor queue reservation and later replay must preserve the resolved

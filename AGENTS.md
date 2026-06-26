@@ -11,7 +11,7 @@ as the canonical source for project rules, installation/bootstrap references,
 and repository-level operating constraints.
 
 ## Agent Context Engine Quick Path
-- Preferred interaction language for future agents: English.
+- Preferred interaction language for future agents: German.
 - When asked about previous sessions, handovers, project context, "what happened last", "continue there", "we already analyzed this", or similar memory requests, use the local Agent Context Engine CLI first.
 - Agent Context Engine command prefix: `agent-context-engine`
 - Canonical public CLI contract: `agent-context-engine` from `PATH`. Repo-local `./scripts/ace` and `./scripts/agent-context-engine` remain compatibility fallbacks, not the primary hook/session contract.

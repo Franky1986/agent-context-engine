@@ -1,6 +1,6 @@
 # Agent Context Engine Test Strategy And Validation Status
 
-Last updated: 2026-06-25
+Last updated: 2026-06-26
 
 This document defines a deterministic test order for Agent Context Engine and
 tracks which parts have already been verified in recent installation,
@@ -15,11 +15,12 @@ Platform note:
 
 ## Relevant References
 
-- [AGENTS.md](/Users/frankrichter/projects/agent-context-engine/AGENTS.md)
-- [AGENT_BOOTSTRAP.md](/Users/frankrichter/projects/agent-context-engine/AGENT_BOOTSTRAP.md)
-- [Runner And Harness Guide](/Users/frankrichter/projects/agent-context-engine/docs/setup/RUNNER_HARNESSES.md)
-- [Integration Management Runbook](/Users/frankrichter/projects/agent-context-engine/docs/runbooks/integration-management.md)
-- [README.md](/Users/frankrichter/projects/agent-context-engine/README.md)
+- [AGENTS.md](../../AGENTS.md)
+- [AGENT_BOOTSTRAP.md](../../AGENT_BOOTSTRAP.md)
+- [Runner And Harness Guide](../setup/RUNNER_HARNESSES.md)
+- [Windows Installation Flow](../setup/WINDOWS_INSTALLATION.md)
+- [Integration Management Runbook](integration-management.md)
+- [README.md](../../README.md)
 
 ## Testing Strategy
 
@@ -57,6 +58,12 @@ For the Windows experimental slice, keep two layers separate:
 
 1. contract/generated-artifact validation on the current development host
 2. one explicit real Windows install/activation/runtime pass
+
+Current Windows setup validation has covered native `.cmd` command shims,
+PowerShell hook/wrapper rendering, Task Scheduler script generation,
+wrapper PATH resolution, gated monitor startup, final-step hook activation, and
+frontend production build on a Windows host. Full runner-to-retrieval evidence
+for a fresh external Windows project remains tracked by the matrix below.
 
 ### Windows Retrieval Validation Matrix
 
@@ -191,12 +198,12 @@ Use three installation scenarios:
 
 Use separate project targets and one dedicated runtime root:
 
-- `/Users/frankrichter/projects/agent-context-engine-test-main`
-- `/Users/frankrichter/projects/agent-context-engine-test-takeover`
-- `/Users/frankrichter/projects/agent-context-engine-test-isolated`
-- `/Users/frankrichter/projects/ace-runner-project-a`
-- `/Users/frankrichter/projects/ace-runner-project-b`
-- `/Users/frankrichter/.agent-context-engine-test-memory`
+- `<workspace>/agent-context-engine-test-main`
+- `<workspace>/agent-context-engine-test-takeover`
+- `<workspace>/agent-context-engine-test-isolated`
+- `<workspace>/ace-runner-project-a`
+- `<workspace>/ace-runner-project-b`
+- `<home>/.agent-context-engine-test-memory`
 
 ## Phase A: Installation And Baseline
 
@@ -509,7 +516,7 @@ Example:
 - isolated install `agent-context-engine-refactor-2` validated target-local runtime
   storage, local SQLite, and LaunchAgent wiring
 - retrieval smoke on `refactor-2` succeeded for both `search` and `retrieve`
-- Cursor activation for `/Users/frankrichter/projects/test` succeeded with
+- Cursor activation for a dedicated test project succeeded with
   `--background-runner claude`, and resulting Cursor sessions were summarized and dreamed
 - a fresh automated public-checkout validation pass on the current macOS host
   completed direct CLI smoke for `doctor`, `check-installation`,
@@ -586,10 +593,10 @@ Status legend:
 
 - [x] `agent-context-engine integrations-status` completed on the current public checkout install and reported `6/6 ready`; Cursor remains intentionally `hooks=not_prepared` on this root.
 - [x] `cursor-enable --target ... --installation-root ...` wrote installation-root-aware bindings for `pr-llm-service`.
-- [x] `cursor-enable --target /Users/frankrichter/projects/test --installation-root /Users/frankrichter/projects/agent-context-engine-refactor-2 --background-runner claude` succeeded.
+- [x] `cursor-enable --target <cursor-test-project> --installation-root <isolated-install-root> --background-runner claude` succeeded.
 - [x] generated Cursor hook files now carry the effective launch workdir so routing resolves against the actual project path.
-- [x] `cursor-status --target /Users/frankrichter/projects/pr-llm-service` reported active hooks and one recorded session.
-- [x] `cursor-status --target /Users/frankrichter/projects/test` on `refactor-2` reported `9/9` active events, `background runner: claude`, and `background readiness: ready`.
+- [x] `cursor-status --target <service-test-project>` reported active hooks and one recorded session.
+- [x] `cursor-status --target <cursor-test-project>` on `refactor-2` reported `9/9` active events, `background runner: claude`, and `background readiness: ready`.
 - [x] `/api/integrations` for `test29` reported one activated Cursor project with `hooks_state=enabled` and `hooks_enabled=true`.
 - [x] session list now shows `cursor` as origin client with separate dream runner metadata, and prefers `last_workdir` in session table paths.
 - [x] session rows now render explicit origin/dream badges for quick provenance checks.
@@ -676,13 +683,13 @@ From `refactor-2`:
   - `pending dreams` remained non-zero because later event coverage still lagged `last_event_seq`
 
 - cursor session `99979a47-1e71-4595-b0b0-e63543c1859e`
-  - project: `/Users/frankrichter/projects/test`
+  - project: `<cursor-test-project>`
   - summary: `summarized`
   - dream status: `dreamed`
   - preferred dream runner: `claude`
 
 - cursor session `746d43b2-371d-4d7b-9cd7-2f77c04669a1`
-  - project: `/Users/frankrichter/projects/test`
+  - project: `<cursor-test-project>`
   - summary: `summarized`
   - dream status: `dreamed`
   - preferred dream runner: `claude`
@@ -690,7 +697,7 @@ From `refactor-2`:
 From `test29`:
 
 - codex session `019ef955-756d-7330-bc4f-251778614e72`
-  - workdir: `/Users/frankrichter`
+  - workdir: `<home>`
   - last dream run: succeeded
   - dream runner: `codex`
   - dream model: `gpt-5.4-mini`

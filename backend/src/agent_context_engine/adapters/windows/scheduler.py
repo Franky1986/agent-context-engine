@@ -15,14 +15,10 @@ def _task_name(root: Path) -> str:
     return f"AgentContextEngine\\{instance_id}"
 
 
-def _monitor_command(root: Path) -> str:
+def _scheduler_command(root: Path, args: argparse.Namespace) -> str:
     profile = load_installation_profile(root)
-    monitor = dict(profile.get("monitor") or {})
     workflows = dict(profile.get("workflows") or {})
-    runner = str(workflows.get("monitor_runner") or "codex").strip() or "codex"
-    host = str(monitor.get("host") or "127.0.0.1").strip() or "127.0.0.1"
-    port = int(monitor.get("port") or 8787)
-    language = str(monitor.get("language") or "en").strip() or "en"
+    runner = str(getattr(args, "runner", None) or workflows.get("dream_runner") or "same-as-session").strip() or "same-as-session"
     candidates = [
         root / "scripts" / "agent-context-engine.cmd",
         root / "scripts" / "agent-context-engine",
@@ -30,7 +26,65 @@ def _monitor_command(root: Path) -> str:
         root / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine",
     ]
     cli_path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
-    return f'"{cli_path.resolve()}" monitor --runner {runner} --host {host} --port {port} --language {language} --replace-existing --no-open'
+    parts = [
+        f'"{cli_path.resolve()}"',
+        "scheduler-run",
+        "--grace-minutes",
+        str(getattr(args, "grace_minutes", 5)),
+        "--runner",
+        runner,
+        "--runner-timeout",
+        str(getattr(args, "runner_timeout", 1800)),
+        "--graph-runner",
+        str(getattr(args, "graph_runner", None) or "same-as-session"),
+        "--repair-missing-graph-patches-limit",
+        str(getattr(args, "repair_missing_graph_patches_limit", 0)),
+        "--dream-enqueue-limit",
+        str(getattr(args, "dream_enqueue_limit", 25)),
+        "--dream-queue-limit",
+        str(getattr(args, "dream_queue_limit", 5)),
+        "--neo4j-sync-limit",
+        str(getattr(args, "neo4j_sync_limit", 5)),
+        "--neo4j-batch-size",
+        str(getattr(args, "neo4j_batch_size", 500)),
+        "--neo4j-timeout",
+        str(getattr(args, "neo4j_timeout", 60)),
+    ]
+    runner_model = str(getattr(args, "runner_model", None) or "").strip()
+    if runner_model:
+        parts.extend(["--runner-model", runner_model])
+    graph_runner_model = str(getattr(args, "graph_runner_model", None) or "").strip()
+    if graph_runner_model:
+        parts.extend(["--graph-runner-model", graph_runner_model])
+    parts.append("--sync-neo4j" if getattr(args, "sync_neo4j", False) else "--no-sync-neo4j")
+    return " ".join(parts)
+
+
+def _scheduler_script_path(root: Path) -> Path:
+    profile = load_installation_profile(root)
+    storage = dict(profile.get("storage") or {})
+    memory_root = Path(str(storage.get("memory_root") or root / "memory")).expanduser().resolve()
+    return memory_root / "local" / "windows-scheduler-run.cmd"
+
+
+def _write_scheduler_script(root: Path, args: argparse.Namespace) -> Path:
+    script_path = _scheduler_script_path(root)
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text(
+        "\r\n".join(
+            [
+                "@echo off",
+                "setlocal",
+                f"cd /d \"{root}\"",
+                f"set AGENT_CONTEXT_ENGINE_ROOT={root}",
+                _scheduler_command(root, args),
+                "exit /b %ERRORLEVEL%",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return script_path
 
 
 def _run(command: list[str]) -> int:
@@ -51,23 +105,32 @@ class WindowsTaskSchedulerInstaller(SchedulerInstallerPort):
 
     def install(self, args: argparse.Namespace) -> int:
         root = Path(str(getattr(args, "target", None) or getattr(args, "installation_root", None) or Path.cwd())).expanduser().resolve()
+        interval_minutes = max(1, int(getattr(args, "interval", 900)) // 60)
+        script_path = _write_scheduler_script(root, args)
         command = [
             "schtasks",
             "/Create",
             "/TN",
             _task_name(root),
             "/SC",
-            "ONLOGON",
+            "MINUTE",
+            "/MO",
+            str(interval_minutes),
             "/RL",
             "LIMITED",
             "/TR",
-            _monitor_command(root),
+            f'"{script_path}"',
             "/F",
         ]
         if getattr(args, "dry_run", False):
             print(" ".join(command))
+            print(f"script: {script_path}")
+            print(_scheduler_command(root, args))
             return 0
-        return _run(command)
+        exit_code = _run(command)
+        if exit_code != 0 or not getattr(args, "load", False):
+            return exit_code
+        return _run(["schtasks", "/Run", "/TN", _task_name(root)])
 
     def uninstall(self, args: argparse.Namespace) -> int:
         root = Path(str(getattr(args, "target", None) or getattr(args, "installation_root", None) or Path.cwd())).expanduser().resolve()

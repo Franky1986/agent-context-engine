@@ -87,6 +87,7 @@ agent-context-engine launchagent-status
 - [Activation Model](docs/setup/activation-model.md)
 - [Central Installation Mode](docs/setup/central-installation-mode.md)
 - [Runner And Harness Guide](docs/setup/RUNNER_HARNESSES.md)
+- [Windows Installation Flow](docs/setup/WINDOWS_INSTALLATION.md)
 - [Build And Checks](docs/setup/BUILD_AND_CHECKS.md)
 - [Monitor Operator Workflows](docs/runbooks/monitor-operator-workflows.md)
 - [Project Origin](docs/project-origin.md)
