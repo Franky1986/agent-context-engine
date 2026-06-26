@@ -78,7 +78,9 @@ application services.
 - Install discovery and install execution must keep scheduler installation and
   loading enabled by default because periodic summaries, dreams, graph
   extraction, and catch-up depend on it. `--no-install-launchagent` remains an
-  explicit opt-out, not the public-checkout default.
+  explicit opt-out, not the public-checkout default. A saved user-level
+  launchagent opt-out must not silently flip fresh-install discovery away from
+  that default; discovery should surface the recommendation source explicitly.
 - Install execution must activate hook configs, GUI workspace hooks, and
   global-only integration hooks only after runtime bootstrap, frontend build,
   scheduler installation/loading, and requested monitor startup have completed

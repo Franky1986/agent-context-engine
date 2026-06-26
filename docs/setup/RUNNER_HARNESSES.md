@@ -84,6 +84,10 @@ activation:
 - platform scheduler installation/loading by default so summaries, dreams,
   graph extraction, and catch-up work continue after hook capture; use
   `--no-install-launchagent` only as an explicit opt-out
+- fresh-install discovery should still recommend scheduler installation by
+  default even when an older user config stored a prior opt-out; the discovery
+  output now shows whether the recommendation came from the fresh-install
+  default or a saved user setting
 - local frontend build prerequisites; use `node >=20.19.0` or `>=22.12.0` and
   `npm >=9.5.0` for fresh monitor dependency installs and rebuilds
 

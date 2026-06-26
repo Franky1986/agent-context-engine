@@ -11073,6 +11073,42 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertTrue(summary["recommended_install_launchagent"])
             self.assertEqual(summary["recommended_monitor_port"], 8787)
 
+    def test_install_discovery_ignores_saved_launchagent_opt_out_for_fresh_install(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "agent-context-engine-public"
+            (root / "scripts").mkdir(parents=True, exist_ok=True)
+            (root / "scripts" / "agent_context_engine.py").write_text("# placeholder\n", encoding="utf-8")
+            (root / "backend" / "src" / "agent_context_engine").mkdir(parents=True, exist_ok=True)
+
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import save_user_config
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary
+
+            save_user_config({"default_launchagent_enabled": False}, home=test_home_root(root))
+            summary = _discovery_summary(start=root, language_hint="de")
+
+            self.assertTrue(summary["recommended_install_launchagent"])
+            self.assertEqual(
+                summary["recommended_install_launchagent_source"],
+                "fresh_install_default_ignored_saved_opt_out",
+            )
+
+    def test_install_discovery_keeps_saved_launchagent_opt_out_for_existing_installation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import save_user_config
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary
+
+            install = run_cli(root, "install", "--target", str(root), "--no-install-launchagent")
+            self.assertEqual(install.returncode, 0, install.stderr)
+            save_user_config({"default_launchagent_enabled": False}, home=test_home_root(root))
+
+            summary = _discovery_summary(start=root, language_hint="en")
+
+            self.assertFalse(summary["recommended_install_launchagent"])
+            self.assertEqual(summary["recommended_install_launchagent_source"], "saved_user_default")
+
     def test_install_discovery_ignores_foreign_repo_local_defaults_for_new_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_root = Path(tmp)

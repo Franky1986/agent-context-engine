@@ -217,6 +217,18 @@ def _monitor_port_reason_text(*, recommended_port: int, default_port: int, langu
     )
 
 
+def _launchagent_recommendation_source_text(source: str, *, language: str = "en") -> str:
+    if source == "saved_user_default":
+        return _ui_text(language, en="saved user default", de="gespeicherter Nutzer-Default")
+    if source == "fresh_install_default_ignored_saved_opt_out":
+        return _ui_text(
+            language,
+            en="fresh-install default; saved user opt-out not applied automatically",
+            de="Neuinstallations-Default; gespeicherter Nutzer-Opt-out wird nicht automatisch uebernommen",
+        )
+    return _ui_text(language, en="fresh-install default", de="Neuinstallations-Default")
+
+
 GLOBAL_WRAPPERS = (
     "codex-ace",
     "claude-ace",
@@ -894,11 +906,18 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
     recommended_port = _next_monitor_port(monitor_port, host=monitor_host, reserved_ports=reserved_monitor_ports)
     recommended_wrapper_prefix = "" if discarded_foreign_install_defaults else str(user_config.get("default_wrapper_prefix") or "").strip()
     recommended_wrapper_suffix = str(user_config.get("default_wrapper_suffix") or "").strip()
-    launchagent_recommended = bool(user_config.get("default_launchagent_enabled", True))
+    launchagent_user_default = bool(user_config.get("default_launchagent_enabled", True))
     if role == "public_checkout":
         if not recommended_wrapper_suffix:
             recommended_wrapper_suffix = _public_wrapper_suffix_for_checkout(checkout_root)
     current_installation_exists = installation_profile_path(target_root).exists()
+    launchagent_recommended = True
+    launchagent_recommendation_source = "fresh_install_default"
+    if current_installation_exists:
+        launchagent_recommended = launchagent_user_default
+        launchagent_recommendation_source = "saved_user_default"
+    elif not launchagent_user_default:
+        launchagent_recommendation_source = "fresh_install_default_ignored_saved_opt_out"
     if current_installation_exists:
         target_monitor = dict(load_installation_profile(target_root).get("monitor") or {})
         target_host = str(target_monitor.get("host") or monitor_host).strip() or monitor_host
@@ -970,6 +989,7 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
         "recommended_wrapper_prefix": recommended_wrapper_prefix,
         "recommended_wrapper_suffix": recommended_wrapper_suffix,
         "recommended_install_launchagent": launchagent_recommended,
+        "recommended_install_launchagent_source": launchagent_recommendation_source,
         "wrapper_conflicts": wrapper_conflicts,
         "user_cli_conflict": user_cli_conflict,
         "launchagent_identity": launchagent_identity,
@@ -1017,6 +1037,8 @@ def _render_install_discovery(summary: dict[str, object], *, language: str | Non
         ),
         f"- {_ui_text(lang, en=f'{scheduler_name} install/load in this plan', de=f'{scheduler_name}-Installation/Aktivierung in diesem Plan')}: "
         + _ui_text(lang, en="enabled by default" if summary["recommended_install_launchagent"] else "deferred by default", de="standardmaessig aktiv" if summary["recommended_install_launchagent"] else "standardmaessig spaeter"),
+        f"- {_ui_text(lang, en=f'{scheduler_name} recommendation source', de=f'Quelle der {scheduler_name}-Empfehlung')}: "
+        + _launchagent_recommendation_source_text(str(summary.get("recommended_install_launchagent_source") or ""), language=lang),
         f"- {_ui_text(lang, en='runtime bootstrap', de='Runtime-Bootstrap')}: {_ui_text(lang, en='yes', de='ja')}",
         f"- {_ui_text(lang, en='monitor startup after install', de='Monitorstart nach der Installation')}: {_ui_text(lang, en='yes', de='ja')}",
         f"- {_ui_text(lang, en='user confirmation required', de='Nutzerfreigabe erforderlich')}: "

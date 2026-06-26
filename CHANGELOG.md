@@ -38,6 +38,9 @@ The entries below document the changes added since that initial public release.
 - fresh-checkout installs no longer run the full `doctor` before final hook
   activation, so hook files stay late in the flow without forcing a manual
   `integration-hooks` repair before monitor startup
+- fresh-install discovery no longer inherits a stale saved launchagent opt-out
+  silently; new installs recommend the scheduler by default again and show the
+  recommendation source explicitly
 - Windows Antigravity hook config rendering now escapes command paths through
   structured JSON replacement instead of raw string interpolation
 - Windows runtime bootstrap now resolves the venv Python path correctly and
