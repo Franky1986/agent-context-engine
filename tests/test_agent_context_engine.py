@@ -6693,6 +6693,34 @@ exit 0
             conn = am.connect()
             self.assertEqual(conn.execute("select count(*) as c from retrieval_runs").fetchone()["c"], 0)
 
+    def test_monitor_repo_index_load_and_save_use_runtime_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+
+            from agent_context_engine.interfaces.http.routes.memory_api import monitor_repo_index, monitor_save_repo_index
+
+            content = "\n".join(
+                [
+                    "# Repository Index",
+                    "",
+                    "### `workbench`",
+                    "",
+                    "- Path: [workbench](file:///tmp/workbench)",
+                    "- Entry point: `README.md`",
+                    "- Note: active project",
+                    "",
+                ]
+            )
+            saved = monitor_save_repo_index(content)
+            self.assertTrue(saved["saved"])
+            self.assertEqual(saved["path"], "memory/knowledge/repos.md")
+
+            repo_index = monitor_repo_index()
+            self.assertTrue(repo_index["exists"])
+            self.assertEqual(repo_index["path"], "memory/knowledge/repos.md")
+            self.assertIn("### `workbench`", repo_index["content"])
+
     def test_personal_memory_propose_and_accept(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

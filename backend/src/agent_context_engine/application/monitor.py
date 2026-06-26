@@ -31,7 +31,7 @@ from .platform.runtime_summary import runtime_selection_summary
 from ..interfaces.hooks.support.queue import hook_queue_status
 from .personal import PERSONAL_ROOT, parse_frontmatter, personal_files
 from .retrieval import index_memory_document, retrieve_memory_with_safety, search_memory_chunks
-from ..infrastructure.config import REPOS_INDEX, ensure_repos_index, env_file_path, read_repos_index_text, write_repos_index_text
+from ..infrastructure.config import ROOT, REPOS_INDEX, ensure_repos_index, env_file_path, read_repos_index_text, write_repos_index_text
 from ..infrastructure.db import connect
 from ..interfaces.http.version import MONITOR_VERSION, PRODUCT_VERSION
 
