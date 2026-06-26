@@ -22,13 +22,17 @@ workflows. The current public slice includes:
 - isolated installs with target-local runtime storage,
 - verified Cursor project activation with a pinned Claude background runner,
 - verified retrieval over fresh isolated-session summaries and semantic memory,
+- canonical runtime repo knowledge under `memory/knowledge/repos.md` with
+  legacy docs-path import fallback,
+- install discovery/install summaries that surface already known repos/folders
+  and where that knowledge is visible in the monitor,
 - explicit Windows experimental runtime adapters for command publication,
   PowerShell wrappers/hooks, Task Scheduler wiring, and diagnostics.
 
 Versioned release snapshot:
 
-- Backend / product: `0.2.8`
-- Monitor: `0.6.6`
+- Backend / product: `0.2.9`
+- Monitor: `0.6.7`
 
 ## Installation State
 
@@ -45,6 +49,8 @@ The current install flow now supports:
 - Windows-native `.cmd` publication and PowerShell hook/wrapper generation for
   experimental installs,
 - Windows user `PATH` repair for generated command shims,
+- runtime repo-index migration/import from legacy docs storage into canonical
+  memory storage, plus install-time visibility into recognized repos/folders,
 - guarded install finalization where hook activation stays until the end, the
   monitor starts only after runtime/bootstrap, frontend build, and scheduler
   setup succeed, and the full `doctor`/`check-installation` pass closes the
@@ -120,6 +126,9 @@ confirmed:
   `loaded: no`, no local monitor API on `127.0.0.1:8788`),
 - `doctor` now degrades to a warning when instance metadata cannot be written,
   instead of crashing the diagnostic run.
+- runtime repo-index migration, rebuild-index indexing, and retrieval over the
+  canonical repo-index document were revalidated through focused end-to-end
+  tests.
 
 ## Known Follow-Up Areas
 

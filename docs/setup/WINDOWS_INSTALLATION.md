@@ -25,8 +25,9 @@ hook activation so the operator can repair the setup without live hook traffic.
 Windows installations need:
 
 - Python 3.11 or newer, with `python` preferred on `PATH`
-- Node.js `>=20.19.0` or `>=22.12.0`
-- npm `>=9.5.0`
+- a `node`/`npm` toolchain accepted by the checked-in monitor frontend
+  lockfile; `install-discovery` and `check-installation` report the exact
+  currently required versions for the active checkout
 - the desired runner CLIs, such as `codex` or `claude`, installed and
   authenticated for headless workflows
 

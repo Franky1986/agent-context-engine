@@ -28,7 +28,7 @@ from .installation import frontend_build_status, python_runtime_status
 from .integrations import workspace_binding_status
 from .platform import current_runtime_capabilities_payload, platform_profile_for_family, platform_profile_from_payload
 from .platform.runtime_summary import runtime_selection_summary
-from ..infrastructure.config import DB_PATH, ENV_FILE_PATH, MEMORY_DIR, REPOS_INDEX, ROOT, SKILL_ROOT
+from ..infrastructure.config import DB_PATH, ENV_FILE_PATH, MEMORY_DIR, ROOT, SKILL_ROOT, ensure_repos_index, read_repos_index_text
 from ..infrastructure.db import connect, dreamable_sessions
 
 
@@ -46,10 +46,11 @@ def is_under_root(value: str | None) -> bool:
 
 
 def repo_index_external_paths() -> list[str]:
-    if not REPOS_INDEX.exists():
+    text = read_repos_index_text(ROOT)
+    if not text:
         return []
     paths: list[str] = []
-    for line in REPOS_INDEX.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in text.splitlines():
         if "file://" not in line:
             continue
         raw = line.split("file://", 1)[1].split(")", 1)[0]
@@ -290,6 +291,7 @@ def run_doctor_checks(
         )
 
     hook_script_suffix = ".cmd" if platform_family == "windows" else ".sh"
+    repo_index_path = ensure_repos_index(ROOT)
     checks = [
         ([ROOT / ".codex" / "hooks.json"], "Codex hooks config", True),
         ([ROOT / ".codex" / "hooks" / f"hook_adapter{hook_script_suffix}", ROOT / ".codex" / "hooks" / "hook_adapter.sh", ROOT / ".codex" / "hooks" / "hook_adapter.cmd"], "Codex hook adapter", True),
@@ -300,7 +302,7 @@ def run_doctor_checks(
         ([ROOT / ".gemini" / "settings.json"], "Gemini CLI hooks config", False),
         ([ROOT / ".gemini" / "hooks" / f"hook_adapter{hook_script_suffix}", ROOT / ".gemini" / "hooks" / "hook_adapter.sh", ROOT / ".gemini" / "hooks" / "hook_adapter.cmd"], "Gemini CLI hook adapter", False),
         ([SKILL_ROOT / "scripts" / "agent_context_engine.py"], "agent memory CLI", True),
-        ([REPOS_INDEX], "repo index", True),
+        ([repo_index_path], "repo index", True),
     ]
     for candidates, label, required in checks:
         path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])

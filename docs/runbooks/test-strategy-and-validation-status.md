@@ -501,10 +501,10 @@ Example:
 13. Takeover install
 14. Isolated install
 
-## 2026-06-25 Update Snapshot
+## 2026-06-26 Update Snapshot
 
-- backend version `0.2.8`
-- monitor version `0.6.6`
+- backend version `0.2.9`
+- monitor version `0.6.7`
 - cursor activation now persists configured background runner and launch workdir on hook
   generation
 - session list and session detail now expose both origin client and background dream
@@ -526,6 +526,9 @@ Example:
   `dream-queue-status`
 - the focused Windows experimental runtime contract slice is green on the
   development host (`10/10` focused tests)
+- canonical repo knowledge now resolves from `memory/knowledge/repos.md` with
+  legacy docs-path import fallback, and focused tests cover rebuild-index
+  searchability plus install-discovery repo-index reporting
 - follow-up hardening since that pass removed two concrete regressions:
   `agent-context-engine risk list --limit 5` now renders normalized category
   lists again, and the fresh-install smoke path now forces a non-interactive
@@ -551,8 +554,8 @@ Most important regressions:
 
 Change set under test:
 
-- backend version `0.2.8`
-- monitor version `0.6.6`
+- backend version `0.2.9`
+- monitor version `0.6.7`
 - installation and integration command surface updated around `--installation-root`
 - isolated install flow updated around deterministic local memory and wrapper behavior
 - installation integration tests are now a separate `install-integration-suite`
@@ -560,6 +563,8 @@ Change set under test:
 - dream JSON extraction and fallback hardening already included in this branch
 - isolated install/runtime validation now includes `agent-context-engine-refactor-2`
   with local `memory/`
+- runtime repo-index migration and canonical `memory/knowledge/repos.md`
+  indexing/retrieval coverage are included in the focused regression slice
 
 Status legend:
 

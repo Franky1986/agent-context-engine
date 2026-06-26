@@ -11,7 +11,7 @@ across installation, hook startup, and harness entrypoints.
 - Canonical agent-flow contract fields.
 - Rendering of agent-facing instruction artifacts.
 - Stable wording for retrieval, handover, repo-context, monitor, and
-  user-control guidance.
+  user-control guidance, including the canonical runtime repo-index location.
 
 ## Non-Scope
 
@@ -31,8 +31,9 @@ across installation, hook startup, and harness entrypoints.
 
 ## Inputs / Outputs
 
-- Inputs: command prefix, preferred language, repo-context path, monitor runner,
-  monitor host/port defaults, and public-CLI expectations.
+- Inputs: command prefix, preferred language, canonical repo-index location
+  within the active memory root,
+  monitor runner, monitor host/port defaults, and public-CLI expectations.
 - Outputs: rendered markdown/text artifacts for agent-facing startup surfaces.
 
 ## Dependencies / Ports
@@ -53,6 +54,8 @@ across installation, hook startup, and harness entrypoints.
 - `CLAUDE.md` and Cursor every-chat entrypoint text come from the same boundary.
 - Installation and hook-session startup no longer maintain separate default
   wording for the same retrieval workflow.
+- Repo/project routing guidance must prefer `repo-context` commands and treat
+  `memory/knowledge/repos.md` as the canonical runtime repo index.
 - Public-CLI/PATH repair guidance and monitor startup defaults stay aligned
   between the shared contract and the checked-in startup docs.
 

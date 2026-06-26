@@ -351,6 +351,7 @@ def current_root_runtime_initialized() -> bool:
         REPO_ROOT / ".claude" / "settings.json",
         REPO_ROOT / ".agents" / "hooks.json",
         REPO_ROOT / ".gemini" / "settings.json",
+        REPO_ROOT / "memory" / "knowledge" / "repos.md",
         REPO_ROOT / "docs" / "knowledge" / "repos.md",
         REPO_ROOT / "memory" / "local" / "installation-profile.json",
     ]

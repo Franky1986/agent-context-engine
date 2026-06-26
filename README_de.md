@@ -8,7 +8,6 @@
 
 <p align="center">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
-  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-D22128">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-active%20runtime%20target-000000?logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-experimenteller%20Runtime%20Pfad-0078D4?logo=windows&logoColor=white">
@@ -31,8 +30,8 @@ Erstellt und gepflegt von [Frank Richter](https://www.linkedin.com/in/frank-rich
 
 Aktuelle öffentliche Versionen:
 
-- Backend / Produkt: `0.2.8`
-- Monitor: `0.6.6`
+- Backend / Produkt: `0.2.9`
+- Monitor: `0.6.7`
 
 Plattformstatus:
 
@@ -174,7 +173,7 @@ Das installiert unter anderem:
 <target>/.codex/hooks/hook_adapter.sh oder hook_adapter.cmd
 <target>/.claude/settings.json
 <target>/.claude/hooks/hook_adapter.sh oder hook_adapter.cmd
-<target>/docs/knowledge/repos.md
+<memory-root>/knowledge/repos.md
 ```
 
 Der `AGENTS.md`-Block weist zukünftige Agents an, zuerst
@@ -231,9 +230,18 @@ Installation vor der Freigabe. Meldungen wie `Operation not permitted`, ein
 zeitweise nicht schreibbarer Home-Pfad oder `unable to open database file`
 sind zunächst nur permission-limited Signale.
 
-Falls `docs/knowledge/repos.md` fehlt, legt der Installer sie an. Bekannte
-Projekte können mit wiederholtem `--project "name=/absolute/path"` übergeben
-werden. Für Automation verwende `--no-interactive`.
+Falls `memory/knowledge/repos.md` unter dem aktiven Runtime-Storage-Root fehlt,
+legt der Installer sie dort an. Bekannte Projekte können mit wiederholtem
+`--project "name=/absolute/path"` übergeben werden. Vorhandene Legacy-Dateien
+unter `docs/knowledge/repos.md` dienen nur noch als Fallback-Importquelle und
+werden bei der ersten Nutzung in das Runtime-Storage migriert. Für Automation
+verwende `--no-interactive`.
+
+Die Installations-Discovery meldet außerdem, ob bereits Repos/Ordner aus dem
+aktiven Memory-Root bekannt sind, zeigt die Repo-Index-Ablage, verweist auf die
+Monitor-Ansicht `Persoenlich -> Repo-Index` und erklaert, dass Agents spaeter
+dort weitere Repos oder Ordner ergaenzen oder bearbeiten koennen. Wiederholte
+`--project "name=/absolute/path"`-Argumente bleiben ebenfalls gueltig.
 
 Wenn das Ziel bereits von Agent Context Engine verwaltete Dateien enthält,
 verweigert der Installer das Überschreiben ohne `--force`. Für eine zweite
@@ -460,6 +468,14 @@ für das Frontend fehlen:
 ```sh
 agent-context-engine repair-installation --apply --install-frontend-deps
 ```
+
+Bei frischen Installationen und Frontend-Rebuilds muss die lokale
+`node`/`npm`-Toolchain zum eingecheckten Lockfile des Monitor-Frontends
+passen. `check-installation` und `install-discovery` weisen vor dem
+Frontend-Repair bereits auf unpassende lokale Versionen hin und nennen dann
+auch die konkret erforderliche Untergrenze des aktuellen Checkouts. Diese
+Anforderung gilt fuer Frontend-Dependency-Installationen und Builds des
+Monitors, nicht fuer das Python-Backend allein.
 
 Der Monitor bindet standardmäßig an `127.0.0.1` und öffnet
 `http://127.0.0.1:<port>/`.

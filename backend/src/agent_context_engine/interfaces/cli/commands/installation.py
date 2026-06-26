@@ -15,7 +15,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import quote
 
-from ....infrastructure.config import DEFAULT_STORAGE_SCHEMA_VERSION, ROOT, ROOT_ENV_VAR, SKILL_ROOT, safe_slug
+from ....infrastructure.config import DEFAULT_STORAGE_SCHEMA_VERSION, ROOT, ROOT_ENV_VAR, SKILL_ROOT, ensure_repos_index as ensure_runtime_repos_index, legacy_repos_index_path, safe_slug, write_repos_index_text
 from ....application.installation import (
     ensure_monitor_frontend_build,
     ensure_runtime_venv,
@@ -952,6 +952,10 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
     user_cli_conflict = _user_cli_conflict(target_root)
     replace_existing_global_links = any(bool(item.get("conflict")) for item in wrapper_conflicts) or bool(user_cli_conflict.get("conflict"))
     launchagent_identity = _launchagent_identity_status(label=launchagent_label, env_file=launchagent_env_file, plist_path=launchagent_path_text)
+    repo_index_status = _repo_index_discovery_status(
+        checkout_root=checkout_root,
+        memory_root=Path(recommended_memory_root).expanduser().resolve() if recommended_memory_root else (target_root / "memory").resolve(),
+    )
     recommended_plan = {
         "target_root": str(target_root),
         "memory_root_mode": "attach_existing" if recommended_memory_root else "new",
@@ -993,6 +997,7 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
         "wrapper_conflicts": wrapper_conflicts,
         "user_cli_conflict": user_cli_conflict,
         "launchagent_identity": launchagent_identity,
+        "repo_index_status": repo_index_status,
         "recommended_plan": recommended_plan,
         "requires_user_confirmation": True,
     }
@@ -1131,6 +1136,47 @@ def _render_install_discovery(summary: dict[str, object], *, language: str | Non
                 + f"{item.get('active_port') or item.get('configured_port') or 0} "
                 + f"[pid={item.get('pid') or 0}, status={item.get('status') or 'unknown'}]"
             )
+    repo_index_status = dict(summary.get("repo_index_status") or {})
+    repo_source = str(repo_index_status.get("source") or "missing")
+    repo_count = int(repo_index_status.get("entry_count") or 0)
+    repo_path = str(repo_index_status.get("path") or "")
+    if repo_source != "missing" and repo_count > 0:
+        lines.append(
+            f"- {_ui_text(lang, en='recognized repos/folders', de='Erkannte Repos/Ordner')}: "
+            + _ui_text(
+                lang,
+                en=f"{repo_count} entry/entries already known via {'runtime memory' if repo_source == 'runtime' else 'legacy repo index fallback'}",
+                de=f"{repo_count} Eintrag/Eintraege bereits bekannt ueber {'Runtime-Memory' if repo_source == 'runtime' else 'Legacy-Repo-Index-Fallback'}",
+            )
+        )
+        lines.append(f"- {_ui_text(lang, en='repo index location', de='Repo-Index-Ablage')}: {repo_path}")
+        sample_entries = [str(item) for item in list(repo_index_status.get("entries") or []) if str(item).strip()]
+        if sample_entries:
+            lines.append(
+                f"- {_ui_text(lang, en='known repo examples', de='Beispiele bekannter Repos')}: "
+                + ", ".join(sample_entries[:5])
+            )
+    else:
+        lines.append(
+            f"- {_ui_text(lang, en='recognized repos/folders', de='Erkannte Repos/Ordner')}: "
+            + _ui_text(
+                lang,
+                en="none yet; you can add them now with --project or later in the monitor",
+                de="noch keine; du kannst sie jetzt mit --project oder spaeter im Monitor aufnehmen",
+            )
+        )
+    lines.append(
+        f"- {_ui_text(lang, en='monitor repo knowledge view', de='Monitor-Ansicht fuer Repo-Wissen')}: "
+        + _ui_text(lang, en="Personal -> Repo-Index", de="Persoenlich -> Repo-Index")
+    )
+    lines.append(
+        f"- {_ui_text(lang, en='later repo/folder updates', de='Spaetere Repo-/Ordner-Ergaenzungen')}: "
+        + _ui_text(
+            lang,
+            en="agents can add or edit entries in the monitor Repo-Index panel; install also accepts repeated --project name=/absolute/path",
+            de="Agents koennen Eintraege spaeter im Monitor-Panel Repo-Index ergaenzen oder bearbeiten; die Installation akzeptiert ausserdem wiederholte --project name=/absoluter/pfad",
+        )
+    )
     lines.append(_ui_text(lang, en="- local prerequisite probe:", de="- lokaler Voraussetzungs-Check:"))
     lines.append(
         "  - "
@@ -1448,6 +1494,9 @@ def _render_install_plan(summary: dict[str, object], args: argparse.Namespace, *
     display_wrapper_links = [link_command_name(wrapper_name, prefix, suffix) for wrapper_name in linked_wrappers]
     replace_existing_global_links = bool(plan.get("replace_existing_global_links"))
     isolated = bool(plan.get("isolated"))
+    repo_index_status = dict(summary.get("repo_index_status") or {})
+    repo_count = int(repo_index_status.get("entry_count") or 0)
+    repo_path = str(repo_index_status.get("path") or "")
     lines = [
         _ui_text(language, en="Installation plan", de="Installationsplan"),
         f"- {_ui_text(language, en='mode', de='Modus')}: {install_mode}",
@@ -1472,7 +1521,25 @@ def _render_install_plan(summary: dict[str, object], args: argparse.Namespace, *
         f"- {_ui_text(language, en='checkout change mode', de='Checkout-Aenderungsmodus')}: {_checkout_change_mode_text(checkout_root=Path(str(summary['checkout_root'])).expanduser().resolve(), target_root=target_root, language=language)}",
         f"- {_ui_text(language, en='monitor port finalization', de='Finalisierung des Monitor-Ports')}: "
         + _ui_text(language, en="revalidated immediately before writing config", de="wird unmittelbar vor dem Schreiben der Konfiguration erneut validiert"),
+        f"- {_ui_text(language, en='repo knowledge in monitor', de='Repo-Wissen im Monitor')}: "
+        + _ui_text(language, en="Personal -> Repo-Index", de="Persoenlich -> Repo-Index"),
+        f"- {_ui_text(language, en='recognized repos/folders', de='Erkannte Repos/Ordner')}: "
+        + (
+            _ui_text(language, en=f"{repo_count} known", de=f"{repo_count} bekannt")
+            if repo_count > 0
+            else _ui_text(language, en="none yet", de="noch keine")
+        ),
     ]
+    if repo_path:
+        lines.append(f"- {_ui_text(language, en='repo index location', de='Repo-Index-Ablage')}: {repo_path}")
+    lines.append(
+        f"- {_ui_text(language, en='later repo/folder updates', de='Spaetere Repo-/Ordner-Ergaenzungen')}: "
+        + _ui_text(
+            language,
+            en="agents can update the Repo-Index in the monitor later; install also accepts repeated --project name=/absolute/path",
+            de="Agents koennen den Repo-Index spaeter im Monitor aktualisieren; die Installation akzeptiert ausserdem wiederholte --project name=/absoluter/pfad",
+        )
+    )
     if isolated:
         lines.append(
             f"- {_ui_text(language, en='isolated install contract', de='Isolierter Installationsvertrag')}: "
@@ -1875,7 +1942,7 @@ def render_session_start_hook_entry(target: Path, *, command_prefix: str, langua
     contract = build_agent_flow_contract(
         preferred_language=language,
         command_prefix=command_prefix,
-        repo_context_path="./docs/knowledge/repos.md",
+        repo_context_path="memory/knowledge/repos.md",
         monitor_runner=monitor_runner,
     )
     return select_instruction_renderer(current_platform_profile()).render_session_start_hook_entry(contract)
@@ -1996,6 +2063,41 @@ def render_repos_index(entries: list[tuple[str, Path]]) -> str:
     return "\n".join(lines)
 
 
+def _repo_index_entries_from_text(text: str) -> list[str]:
+    entries: list[str] = []
+    current_name = ""
+    for raw_line in text.splitlines():
+        heading = re.match(r"^### `([^`]+)`", raw_line)
+        if heading:
+            current_name = heading.group(1).strip()
+            if current_name and current_name != "example-project":
+                entries.append(current_name)
+    return entries
+
+
+def _repo_index_discovery_status(*, checkout_root: Path, memory_root: Path) -> dict[str, object]:
+    runtime_path = memory_root / "knowledge" / "repos.md"
+    legacy_path = legacy_repos_index_path(checkout_root)
+    source = "missing"
+    path = runtime_path
+    text = ""
+    if runtime_path.exists():
+        source = "runtime"
+        path = runtime_path
+        text = runtime_path.read_text(encoding="utf-8", errors="replace")
+    elif legacy_path.exists():
+        source = "legacy"
+        path = legacy_path
+        text = legacy_path.read_text(encoding="utf-8", errors="replace")
+    entries = _repo_index_entries_from_text(text)
+    return {
+        "source": source,
+        "path": str(path),
+        "entry_count": len(entries),
+        "entries": entries[:8],
+    }
+
+
 def ask_project_entries(*, language: str = "en") -> list[tuple[str, Path]]:
     if not sys.stdin.isatty():
         return []
@@ -2004,8 +2106,8 @@ def ask_project_entries(*, language: str = "en") -> list[tuple[str, Path]]:
     print(
         _ui_text(
             language,
-            en="Add projects Agent Context Engine should recognize. Press Enter on an empty name to finish.",
-            de="Fuege Projekte hinzu, die Agent Context Engine erkennen soll. Leerer Name beendet die Eingabe.",
+            en="Add repos or folders Agent Context Engine should recognize. Press Enter on an empty name to finish. You can review and edit them later in the monitor under Personal -> Repo-Index.",
+            de="Fuege Repos oder Ordner hinzu, die Agent Context Engine erkennen soll. Leerer Name beendet die Eingabe. Spaeter kannst du sie im Monitor unter Persoenlich -> Repo-Index ansehen und bearbeiten.",
         )
     )
     entries: list[tuple[str, Path]] = []
@@ -2021,8 +2123,8 @@ def ask_project_entries(*, language: str = "en") -> list[tuple[str, Path]]:
     return entries
 
 
-def ensure_repos_index(target: Path, project_specs: list[str], *, interactive: bool, language: str = "en") -> Path:
-    repos_index = target / "docs" / "knowledge" / "repos.md"
+def ensure_repos_runtime_index(target: Path, project_specs: list[str], *, interactive: bool, language: str = "en") -> Path:
+    repos_index = ensure_runtime_repos_index(target)
     if repos_index.exists():
         return repos_index
     entries: list[tuple[str, Path]] = []
@@ -2030,9 +2132,7 @@ def ensure_repos_index(target: Path, project_specs: list[str], *, interactive: b
         entries.append(project_spec_entry(spec))
     if interactive and not entries:
         entries = ask_project_entries(language=language)
-    repos_index.parent.mkdir(parents=True, exist_ok=True)
-    repos_index.write_text(render_repos_index(entries), encoding="utf-8")
-    return repos_index
+    return write_repos_index_text(render_repos_index(entries), target)
 
 
 def _workspace_roots(values: list[str] | None) -> list[Path]:
@@ -4092,7 +4192,6 @@ def cmd_install(args: argparse.Namespace) -> int:
     from ....application.platform import current_platform_profile
     from ....application.platform.runtime_selection import select_hook_adapter_renderer
     hook_renderer = select_hook_adapter_renderer(current_platform_profile())
-    repos_index = ensure_repos_index(target, args.project or [], interactive=not args.no_interactive, language=language)
     agents_path = ensure_agents_memory_block(target, language=language, command_prefix=command_prefix)
     hook_entry_path = ensure_session_start_hook_entry(target, command_prefix=command_prefix, language=language, memory_root=target)
     entrypoints = ensure_harness_entrypoints(target)
@@ -4169,6 +4268,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         monitor={"host": monitor_host, "port": monitor_port, "language": language},
         launchagent={"label": launchagent_label, "path": launchagent_path, "env_file": launchagent_env_file},
     )
+    repos_index = ensure_repos_runtime_index(target, args.project or [], interactive=not args.no_interactive, language=language)
     merge_user_config(
         default_language=language,
         default_monitor_host=None if isolated_install else monitor_host,
@@ -4275,6 +4375,22 @@ def cmd_install(args: argparse.Namespace) -> int:
     print(f"updated agent instructions: {agents_path}")
     print(f"updated hook entry: {hook_entry_path}")
     print(f"repo index: {repos_index}")
+    repo_entries = _repo_index_entries_from_text(repos_index.read_text(encoding="utf-8", errors="replace")) if repos_index.exists() else []
+    print(f"recognized repos/folders: {len(repo_entries)}")
+    if repo_entries:
+        print("repo examples: " + ", ".join(repo_entries[:5]))
+    print(
+        "monitor repo knowledge: "
+        + _ui_text(language, en="Personal -> Repo-Index", de="Persoenlich -> Repo-Index")
+    )
+    print(
+        "later repo/folder updates: "
+        + _ui_text(
+            language,
+            en="agents can add or edit entries in the monitor Repo-Index panel; install also accepts repeated --project name=/absolute/path",
+            de="Agents koennen Eintraege spaeter im Monitor-Panel Repo-Index ergaenzen oder bearbeiten; die Installation akzeptiert ausserdem wiederholte --project name=/absoluter/pfad",
+        )
+    )
     for path in entrypoints:
         print(f"updated harness entrypoint: {path}")
     scheduler_install_ok = True

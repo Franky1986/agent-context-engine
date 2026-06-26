@@ -115,7 +115,8 @@ def storage_paths(root: Path = ROOT) -> dict[str, Path]:
 
 MEMORY_DIR = memory_root(ROOT)
 DB_PATH = db_path(ROOT)
-REPOS_INDEX = ROOT / "docs" / "knowledge" / "repos.md"
+REPOS_INDEX = MEMORY_DIR / "knowledge" / "repos.md"
+LEGACY_REPOS_INDEX = ROOT / "docs" / "knowledge" / "repos.md"
 CODEX_SESSION_INDEX = Path.home() / ".codex" / "session_index.jsonl"
 DREAM_DIR = dream_dir(ROOT)
 LOCK_DIR = lock_dir(ROOT)
@@ -138,6 +139,54 @@ def json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def repos_index_path(root: Path = ROOT) -> Path:
+    return memory_root(root) / "knowledge" / "repos.md"
+
+
+def legacy_repos_index_path(root: Path = ROOT) -> Path:
+    return root / "docs" / "knowledge" / "repos.md"
+
+
+def _is_default_legacy_repos_index(text: str) -> bool:
+    normalized = text.replace("\r\n", "\n").strip()
+    return "### `example-project`" in normalized and "Replace this placeholder with the project purpose." in normalized
+
+
+def ensure_repos_index(root: Path = ROOT) -> Path:
+    canonical = repos_index_path(root)
+    if canonical.exists():
+        return canonical
+    legacy = legacy_repos_index_path(root)
+    if not legacy.exists():
+        return canonical
+    try:
+        text = legacy.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return canonical
+    if _is_default_legacy_repos_index(text):
+        return canonical
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    canonical.write_text(text, encoding="utf-8")
+    return canonical
+
+
+def read_repos_index_text(root: Path = ROOT) -> str:
+    path = ensure_repos_index(root)
+    if not path.exists():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def write_repos_index_text(content: str, root: Path = ROOT) -> Path:
+    path = repos_index_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
 def safe_slug(value: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-")
     return slug or "unknown"
@@ -158,13 +207,14 @@ class ProjectRef:
 
 
 def load_project_refs() -> list[ProjectRef]:
-    if not REPOS_INDEX.exists():
+    text = read_repos_index_text(ROOT)
+    if not text:
         return []
     refs: list[ProjectRef] = []
     current_name = ""
     heading_re = re.compile(r"^### `([^`]+)`")
     file_re = re.compile(r"file://([^)]+)")
-    for line in REPOS_INDEX.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         heading = heading_re.match(line)
         if heading:
             current_name = heading.group(1)

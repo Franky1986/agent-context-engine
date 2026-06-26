@@ -13,7 +13,7 @@ LANGUAGE_LABELS = {
 class AgentFlowContract:
     preferred_language: str
     command_prefix: str
-    repo_context_path: str = "./docs/knowledge/repos.md"
+    repo_context_path: str = "memory/knowledge/repos.md"
     monitor_runner: str = "codex"
     monitor_host: str = "127.0.0.1"
     monitor_port: int = 8787
@@ -29,7 +29,7 @@ def build_agent_flow_contract(
     *,
     preferred_language: str,
     command_prefix: str,
-    repo_context_path: str = "./docs/knowledge/repos.md",
+    repo_context_path: str = "memory/knowledge/repos.md",
     monitor_runner: str = "codex",
     monitor_host: str = "127.0.0.1",
     monitor_port: int = 8787,
@@ -38,7 +38,7 @@ def build_agent_flow_contract(
 ) -> AgentFlowContract:
     language = str(preferred_language or "en").strip().lower() or "en"
     runner = str(monitor_runner or "codex").strip() or "codex"
-    path = str(repo_context_path or "./docs/knowledge/repos.md").strip() or "./docs/knowledge/repos.md"
+    path = str(repo_context_path or "memory/knowledge/repos.md").strip() or "memory/knowledge/repos.md"
     return AgentFlowContract(
         preferred_language=language,
         command_prefix=str(command_prefix).strip(),
@@ -93,9 +93,9 @@ installation instead of falling back silently to stale repo-local shortcuts.
 - For session list/count/today questions, use `last` first and stop there unless the user explicitly asks for deeper detail.
 - Do not inspect `~/.cursor/projects/...`, local Cursor transcripts, or terminal metadata for session-history questions while the Agent Context Engine CLI is available.
 - If the user mentions a local repo/project/folder by name, or asks for side information about another project, resolve it via one of these — do not browse the filesystem:
-  - `cat {contract.repo_context_path}` — full repos context (fastest, no CLI needed)
   - `repo-context --list` — overview of known repos
   - `repo-context <identifier>` — targeted context for a specific repo
+  - the canonical runtime repo index lives under `{contract.repo_context_path}` in the active memory root
 - Load personal context only on demand, e.g. for "my preferences", "as usual", writing style, language, or personal standards.
 
 Start here for previous work:

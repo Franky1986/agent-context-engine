@@ -30,8 +30,9 @@ from .platform import current_runtime_capabilities_payload, platform_profile_for
 from .platform.runtime_summary import runtime_selection_summary
 from ..interfaces.hooks.support.queue import hook_queue_status
 from .personal import PERSONAL_ROOT, parse_frontmatter, personal_files
-from .retrieval import retrieve_memory_with_safety, search_memory_chunks
-from ..infrastructure.config import REPOS_INDEX, env_file_path
+from .retrieval import index_memory_document, retrieve_memory_with_safety, search_memory_chunks
+from ..infrastructure.config import REPOS_INDEX, ensure_repos_index, env_file_path, read_repos_index_text, write_repos_index_text
+from ..infrastructure.db import connect
 from ..interfaces.http.version import MONITOR_VERSION, PRODUCT_VERSION
 
 
@@ -370,6 +371,29 @@ def monitor_save_personal_file(path_value: str, content: str) -> dict[str, Any]:
     candidate.parent.mkdir(parents=True, exist_ok=True)
     candidate.write_text(content, encoding="utf-8")
     meta = parse_frontmatter(candidate)
+    try:
+        confidence = float(meta.get("confidence", "0.5"))
+    except ValueError:
+        confidence = 0.5
+    try:
+        conn = connect()
+        with conn:
+            index_memory_document(
+                conn,
+                candidate,
+                kind="personal_memory",
+                project_id="personal",
+                title=str(candidate.relative_to(PERSONAL_ROOT)),
+                memory_kind=meta.get("memory_kind") or "personal_operating",
+                source_kind=meta.get("source_kind") or "manual",
+                confidence=confidence,
+                risk_level=meta.get("risk_level") or "low",
+                sensitivity=meta.get("sensitivity") or "normal",
+                injection_policy=meta.get("injection_policy") or "on_demand",
+                evidence=meta.get("evidence") or [],
+            )
+    except Exception:
+        pass
     return {
         "path": str(candidate.relative_to(PERSONAL_ROOT)),
         "frontmatter": meta,
@@ -379,19 +403,37 @@ def monitor_save_personal_file(path_value: str, content: str) -> dict[str, Any]:
 
 
 def monitor_repo_index() -> dict[str, Any]:
-    path = REPOS_INDEX
+    path = ensure_repos_index(ROOT)
+    content = read_repos_index_text(ROOT)
     return {
-        "path": str(path.relative_to(path.parents[2])) if path.exists() else str(path.relative_to(path.parents[2])),
-        "exists": path.exists(),
-        "content": path.read_text(encoding="utf-8", errors="replace") if path.exists() else "",
+        "path": str(path.relative_to(path.parents[2])) if path.exists() else str(REPOS_INDEX.relative_to(REPOS_INDEX.parents[2])),
+        "exists": bool(content) or path.exists(),
+        "content": content,
         "privacy_note": "Local repository index; may contain private filesystem paths and project notes.",
     }
 
 
 def monitor_save_repo_index(content: str) -> dict[str, Any]:
-    path = REPOS_INDEX
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    path = write_repos_index_text(content, ROOT)
+    try:
+        conn = connect()
+        with conn:
+            index_memory_document(
+                conn,
+                path,
+                kind="repo_index",
+                project_id="personal",
+                title="repository-index",
+                memory_kind="repo_index",
+                source_kind="runtime_repo_index",
+                confidence=0.9,
+                risk_level="low",
+                sensitivity="normal",
+                injection_policy="on_demand",
+                evidence=[],
+            )
+    except Exception:
+        pass
     return {
         "path": str(path.relative_to(path.parents[2])),
         "exists": True,

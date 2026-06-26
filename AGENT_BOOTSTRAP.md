@@ -32,6 +32,10 @@ agent should:
    That summary should explicitly say that the proposed monitor port is only a
    discovery default and will be revalidated again immediately before config is
    written.
+   It should also mention whether repo/folder entries are already known from
+   the active memory root, where the runtime repo index lives, that the monitor
+   exposes it under `Personal -> Repo-Index`, and that agents can add later
+   repo/folder entries there.
 6. If discovery points to the central default install root
    `~/.agent-context-engine/install`, treat that as the default plan even when
    the current checkout itself is fresh. State clearly that the checkout stays
@@ -82,7 +86,7 @@ defaults before writing files:
 - Instance name: only needed when the user already has another Agent Context Engine
   installation or wants prefixed commands.
 - Project index: optional list of local projects to add to
-  `docs/knowledge/repos.md`.
+  `memory/knowledge/repos.md` under the active runtime storage root.
 
 Reasonable defaults:
 

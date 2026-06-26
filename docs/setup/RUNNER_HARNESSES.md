@@ -88,8 +88,9 @@ activation:
   default even when an older user config stored a prior opt-out; the discovery
   output now shows whether the recommendation came from the fresh-install
   default or a saved user setting
-- local frontend build prerequisites; use `node >=20.19.0` or `>=22.12.0` and
-  `npm >=9.5.0` for fresh monitor dependency installs and rebuilds
+- local frontend build prerequisites; keep `node`/`npm` aligned with the
+  checked-in monitor frontend lockfile and rely on `install-discovery` /
+  `check-installation` for the exact currently required version floor
 
 Central installation does not automatically activate every client in every other
 project folder.
@@ -322,6 +323,10 @@ Agent rule:
 - prefer discovery-driven defaults over asking for raw CLI flags
 - summarize suggested target, memory root, monitor port, wrapper naming, and
   refresh mode, then wait for explicit user approval before applying them
+- mention whether repo/folder entries are already known from the active memory
+  root, where the runtime repo index lives, that the monitor exposes it under
+  `Personal -> Repo-Index`, and that agents can add further repo/folder entries
+  there later
 - leave fully successful installs with the local monitor already started unless
   the user explicitly opted out; do not start a monitor when backend/runtime
   dependencies or the frontend build are incomplete

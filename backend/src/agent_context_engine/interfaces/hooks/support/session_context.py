@@ -41,7 +41,7 @@ def _default_startup_entry(command_prefix: str) -> str:
     contract = build_agent_flow_contract(
         preferred_language="en",
         command_prefix=command_prefix,
-        repo_context_path="./docs/knowledge/repos.md",
+        repo_context_path="memory/knowledge/repos.md",
         monitor_runner=monitor_runner,
     )
     return render_session_start_hook_entry(contract)

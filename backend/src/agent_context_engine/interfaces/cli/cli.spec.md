@@ -75,6 +75,11 @@ application services.
   `install-launchagent` command name may remain as a compatibility surface, but
   Windows guidance and approval prompts must refer to Task Scheduler rather
   than implying a macOS LaunchAgent.
+- Install discovery and install execution must surface the runtime repo-index
+  state: whether repos/folders are already known from the active memory root,
+  where the canonical repo index lives, where operators can review it in the
+  monitor (`Personal -> Repo-Index`), and how later repo/folder additions can
+  be made without editing tracked docs files.
 - Install discovery and install execution must keep scheduler installation and
   loading enabled by default because periodic summaries, dreams, graph
   extraction, and catch-up depend on it. `--no-install-launchagent` remains an
@@ -88,6 +93,11 @@ application services.
   very end, after those hook files exist. Incomplete installs must leave hooks
   inactive and must not start a monitor for an unbuilt frontend or unusable
   backend.
+- Install discovery, install execution, and repo-context commands must treat
+  `memory/knowledge/repos.md` under the active memory root as the canonical
+  runtime repo index. Legacy `docs/knowledge/repos.md` files may be imported as
+  a compatibility fallback, but new runtime writes must not depend on mutating
+  checkout-tracked docs files.
 - `docsupdate` is the canonical maintenance workflow label and resolves to the
   shared editor entrypoint contract (`docs/commands/docsupdate/README.md`).
 - Install discovery must prefer an explicit language hint first, then the

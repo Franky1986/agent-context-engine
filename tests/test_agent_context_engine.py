@@ -9419,8 +9419,8 @@ The session reconciled stale queue state and resumed pending dreams.
             root = Path(tmp)
             load_agent_memory(root)
             self.assertEqual(run_cli(root, "personal", "init").returncode, 0)
-            (root / "docs" / "knowledge").mkdir(parents=True, exist_ok=True)
-            (root / "docs" / "knowledge" / "repos.md").write_text(
+            (root / "memory" / "knowledge").mkdir(parents=True, exist_ok=True)
+            (root / "memory" / "knowledge" / "repos.md").write_text(
                 "\n".join(
                     [
                         "# Repository Index",
@@ -9456,8 +9456,8 @@ The session reconciled stale queue state and resumed pending dreams.
             root = Path(tmp)
             load_agent_memory(root)
             self.assertEqual(run_cli(root, "personal", "init").returncode, 0)
-            (root / "docs" / "knowledge").mkdir(parents=True, exist_ok=True)
-            (root / "docs" / "knowledge" / "repos.md").write_text(
+            (root / "memory" / "knowledge").mkdir(parents=True, exist_ok=True)
+            (root / "memory" / "knowledge" / "repos.md").write_text(
                 "\n".join(
                     [
                         "# Repository Index",
@@ -9503,6 +9503,68 @@ The session reconciled stale queue state and resumed pending dreams.
             repo_selected = run_cli(root, "repo-context", "workManagement")
             self.assertEqual(repo_selected.returncode, 0, repo_selected.stderr)
             self.assertIn("Tickets, roadmap, and delivery planning.", repo_selected.stdout)
+
+    def test_repo_context_migrates_legacy_repo_index_into_runtime_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            legacy_repos = root / "docs" / "knowledge" / "repos.md"
+            runtime_repos = root / "memory" / "knowledge" / "repos.md"
+            legacy_repos.parent.mkdir(parents=True, exist_ok=True)
+            legacy_repos.write_text(
+                "\n".join(
+                    [
+                        "# Repository Index",
+                        "",
+                        "## Projects",
+                        "",
+                        "### `workManagement`",
+                        "",
+                        f"- Path: [workManagement](file://{root / 'external' / 'workManagement'})",
+                        "- Entry point: `README.md`",
+                        "- Note: Tickets, roadmap, and delivery planning.",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            repo = run_cli(root, "repo-context")
+            self.assertEqual(repo.returncode, 0, repo.stderr)
+            self.assertIn("workManagement", repo.stdout)
+            self.assertTrue(runtime_repos.exists())
+            self.assertEqual(runtime_repos.read_text(encoding="utf-8"), legacy_repos.read_text(encoding="utf-8"))
+
+    def test_rebuild_indexes_indexes_runtime_repo_index_for_search(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            runtime_repos = root / "memory" / "knowledge" / "repos.md"
+            runtime_repos.parent.mkdir(parents=True, exist_ok=True)
+            runtime_repos.write_text(
+                "\n".join(
+                    [
+                        "# Repository Index",
+                        "",
+                        "## Projects",
+                        "",
+                        "### `presentations-app`",
+                        "",
+                        f"- Path: [presentations-app](file://{root / 'external' / 'presentations-app'})",
+                        "- Entry point: `README.md`",
+                        "- Note: Presentation tooling with Next.js structure.",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            rebuild = run_cli(root, "rebuild-indexes", "--no-graph")
+            self.assertEqual(rebuild.returncode, 0, rebuild.stderr)
+            search = run_cli(root, "search", "Next.js structure", "--limit", "3")
+            self.assertEqual(search.returncode, 0, search.stderr)
+            self.assertIn("memory/knowledge/repos.md", search.stdout)
+            self.assertIn("presentations-app", search.stdout)
 
     def test_folder_search_reports_unindexed_codex_transcripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -10831,8 +10893,8 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(instance_metadata["instance_id"], "install-root")
             self.assertEqual(instance_metadata["installation_root"], str(install_root.resolve()))
             self.assertEqual(instance_metadata["memory_root"], str(memory_root.resolve()))
-            self.assertEqual(instance_metadata["product_version"], "0.2.8")
-            self.assertEqual(instance_metadata["monitor_version"], "0.6.6")
+            self.assertEqual(instance_metadata["product_version"], "0.2.9")
+            self.assertEqual(instance_metadata["monitor_version"], "0.6.7")
             self.assertEqual(instance_metadata["monitor_port"], 8899)
             self.assertEqual(instance_metadata["wrapper_suffix"], "-ace")
             self.assertTrue(str(instance_metadata["installed_at"]))
@@ -11795,6 +11857,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(payload["recommended_plan"]["language"], "de")
             self.assertIn("launchagent_identity", payload)
             self.assertIn("wrapper_conflicts", payload)
+            self.assertIn("repo_index_status", payload)
 
     def test_install_discovery_uses_existing_installation_launchagent_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -11834,6 +11897,8 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("Installations-Discovery", discovery.stdout)
             self.assertIn("Vorgeschlagenes Ziel", discovery.stdout)
             self.assertIn("Nutzerfreigabe erforderlich", discovery.stdout)
+            self.assertIn("Monitor-Ansicht fuer Repo-Wissen", discovery.stdout)
+            self.assertIn("Spaetere Repo-/Ordner-Ergaenzungen", discovery.stdout)
 
             install = run_cli(
                 public_root,
@@ -11848,6 +11913,40 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(install.returncode, 0, install.stderr)
             self.assertIn("Installationszusammenfassung:", install.stdout)
             self.assertIn("Verifikationszusammenfassung:", install.stdout)
+            self.assertIn("monitor repo knowledge:", install.stdout)
+            self.assertIn("later repo/folder updates:", install.stdout)
+
+    def test_install_discovery_reports_known_repo_index_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            public_root = temp_root / "agent-context-engine"
+            memory_root = default_install_memory_root(test_home_root(public_root))
+            (public_root / "scripts").mkdir(parents=True, exist_ok=True)
+            (public_root / "scripts" / "agent_context_engine.py").write_text("# placeholder\n", encoding="utf-8")
+            (public_root / "backend" / "src" / "agent_memory").mkdir(parents=True, exist_ok=True)
+            (memory_root / "knowledge").mkdir(parents=True, exist_ok=True)
+            (memory_root / "knowledge" / "repos.md").write_text(
+                "\n".join(
+                    [
+                        "# Repository Index",
+                        "",
+                        "## Projects",
+                        "",
+                        "### `workManagement`",
+                        "",
+                        f"- Path: [workManagement](file://{temp_root / 'external' / 'workManagement'})",
+                        "- Entry point: `README.md`",
+                        "- Note: Tickets, roadmap, and delivery planning.",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            discovery = run_cli(public_root, "install-discovery", "--language", "en")
+            self.assertEqual(discovery.returncode, 0, discovery.stderr)
+            self.assertIn("recognized repos/folders", discovery.stdout)
+            self.assertIn("workManagement", discovery.stdout)
 
     def test_install_without_global_links_points_to_local_wrapper_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -12286,6 +12385,7 @@ The session reconciled stale queue state and resumed pending dreams.
             root = Path(tmp)
             target = root / "memory-root"
             project = root / "client project"
+            memory_root = default_install_memory_root(test_home_root(root))
             project.mkdir()
             result = run_cli(
                 root,
@@ -12298,7 +12398,7 @@ The session reconciled stale queue state and resumed pending dreams.
                 "--no-install-launchagent",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            repos = target / "docs" / "knowledge" / "repos.md"
+            repos = memory_root / "knowledge" / "repos.md"
             text = repos.read_text(encoding="utf-8")
             self.assertIn("### `Client Project`", text)
             self.assertIn("file://", text)

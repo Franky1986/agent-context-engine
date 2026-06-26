@@ -13,6 +13,31 @@ The entries below document the changes added since that initial public release.
 
 - no unreleased entries currently
 
+## Monitor 0.6.7
+
+### Changed
+
+- install discovery, install summaries, and release docs now surface the
+  canonical runtime repo index, recognized repo/folder entries, and the
+  monitor path for reviewing that knowledge under `Personal -> Repo-Index`
+
+## Backend 0.2.9
+
+### Changed
+
+- canonical repo knowledge now lives in `memory/knowledge/repos.md`, with
+  legacy `docs/knowledge/repos.md` content imported as a fallback instead of
+  remaining the primary runtime source
+- install discovery and install summaries now report recognized repo/folder
+  entries, the runtime repo-index location, and the supported follow-up path
+  for adding more repos through the monitor or CLI-bound project flows
+
+### Fixed
+
+- repo-index retrieval, startup context loading, diagnostics, and index rebuilds
+  now stay aligned on the same runtime repo-index path instead of mixing docs
+  and runtime storage locations
+
 ## Monitor 0.6.6
 
 ### Changed

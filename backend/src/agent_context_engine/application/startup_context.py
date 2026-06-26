@@ -5,7 +5,7 @@ import re
 
 from .instance_profile import monitor_restart_command, preferred_agent_memory_cli_for_root, resolve_monitor_profile
 from .personal import PERSONAL_ROOT, parse_frontmatter, personal_files
-from ..infrastructure.config import REPOS_INDEX, ROOT
+from ..infrastructure.config import ROOT, read_repos_index_text
 
 
 def _strip_frontmatter(text: str) -> str:
@@ -47,12 +47,13 @@ def startup_safe_personal_markdown(max_chars: int = 4000, selector: str | None =
 
 
 def repo_index_entries() -> list[tuple[str, str]]:
-    if not REPOS_INDEX.exists():
+    text = read_repos_index_text(ROOT)
+    if not text:
         return []
     sections: list[str] = []
     current_name = ""
     current_lines: list[str] = []
-    for raw_line in REPOS_INDEX.read_text(encoding="utf-8", errors="replace").splitlines():
+    for raw_line in text.splitlines():
         heading = re.match(r"^### `([^`]+)`", raw_line)
         if heading:
             if current_name:

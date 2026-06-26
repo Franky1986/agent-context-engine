@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 
-from ....infrastructure.config import ROOT
+from ....infrastructure.config import ROOT, ensure_repos_index
 from ....infrastructure.db import connect
 from ....application.personal import PERSONAL_ROOT, parse_frontmatter, personal_files
 from ....application.query_intent import classify_query_intent
@@ -99,6 +99,23 @@ def cmd_rebuild_indexes(args: argparse.Namespace) -> int:
             sensitivity=meta.get("sensitivity") or "normal",
             injection_policy=meta.get("injection_policy") or "on_demand",
             evidence=meta.get("evidence") or [],
+        ):
+            docs += 1
+    repo_index = ensure_repos_index(ROOT)
+    if repo_index.exists():
+        if index_memory_document(
+            conn,
+            repo_index,
+            kind="repo_index",
+            project_id="personal",
+            title="repository-index",
+            memory_kind="repo_index",
+            source_kind="runtime_repo_index",
+            confidence=0.9,
+            risk_level="low",
+            sensitivity="normal",
+            injection_policy="on_demand",
+            evidence=[],
         ):
             docs += 1
     if args.graph:
