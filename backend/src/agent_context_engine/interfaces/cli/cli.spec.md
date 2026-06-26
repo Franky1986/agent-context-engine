@@ -63,6 +63,14 @@ application services.
 - Install discovery and install execution agree on wrapper-link conflict
   semantics for direct `scripts/*` targets and active installed script targets
   within the same checkout.
+- Install discovery and `check-installation` must surface unsupported local
+  Python/Node/npm prerequisites before pointing operators or agents at
+  bootstrap or frontend repair commands that would fail immediately.
+- Install discovery and install execution must describe the active scheduler
+  backend accurately for the current platform profile. The historical
+  `install-launchagent` command name may remain as a compatibility surface, but
+  Windows guidance and approval prompts must refer to Task Scheduler rather
+  than implying a macOS LaunchAgent.
 - `docsupdate` is the canonical maintenance workflow label and resolves to the
   shared editor entrypoint contract (`docs/commands/docsupdate/README.md`).
 - Install discovery must prefer an explicit language hint first, then the

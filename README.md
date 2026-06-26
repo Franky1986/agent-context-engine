@@ -8,7 +8,7 @@
 
 <p align="center">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
-  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white">
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-20.19%2B%20or%2022.12%2B-339933?logo=node.js&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-D22128">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-active%20runtime%20target-000000?logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-experimental%20runtime%20path-0078D4?logo=windows&logoColor=white">
@@ -510,6 +510,11 @@ for the monitor frontend are missing, use:
 agent-context-engine repair-installation --apply --install-frontend-deps
 ```
 
+For fresh installs and rebuilds, keep the local toolchain aligned with the
+checked-in frontend lockfile: `node` must be `>=20.19.0` or `>=22.12.0`, and
+`npm` must be `>=9.5.0`. `check-installation` and `install-discovery` now
+surface unsupported local versions before the frontend repair step.
+
 The monitor binds to `127.0.0.1` by default and opens
 `http://127.0.0.1:<port>/`. It provides:
 
@@ -908,6 +913,10 @@ Install and load the macOS scheduler:
 ```sh
 agent-context-engine install-launchagent --load
 ```
+
+On Windows, the same legacy command name installs or refreshes the per-user
+Task Scheduler job instead of a LaunchAgent. Discovery and install guidance now
+call out the concrete scheduler backend before asking for approval.
 
 For normal restart/reload operations, use the wrapper with controlled defaults:
 

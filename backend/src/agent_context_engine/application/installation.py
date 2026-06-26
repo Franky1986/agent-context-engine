@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -66,6 +68,47 @@ HEADLESS_INSTALL_GUIDANCE = {
         "npm_package": "",
     },
 }
+
+MINIMUM_PYTHON_VERSION = (3, 11, 0)
+MINIMUM_NODE_VERSION = (20, 19, 0)
+ALTERNATE_NODE_VERSION = (22, 12, 0)
+MINIMUM_NPM_VERSION = (9, 5, 0)
+
+
+def _format_version_tuple(parts: tuple[int, int, int]) -> str:
+    return ".".join(str(part) for part in parts)
+
+
+def _parse_semver(text: str) -> tuple[int, int, int] | None:
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", text or "")
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _version_gte(current: tuple[int, int, int], minimum: tuple[int, int, int]) -> bool:
+    return current >= minimum
+
+
+def _node_version_supported(version: tuple[int, int, int] | None) -> bool:
+    if version is None:
+        return False
+    return _version_gte(version, MINIMUM_NODE_VERSION) or _version_gte(version, ALTERNATE_NODE_VERSION)
+
+
+def _command_version(executable: str, flag: str = "--version") -> tuple[str, tuple[int, int, int] | None]:
+    try:
+        proc = subprocess.run(
+            [executable, flag],
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "", None
+    output = (proc.stdout or proc.stderr).strip()
+    return output, _parse_semver(output)
 
 
 def local_time(value: object) -> str:
@@ -140,7 +183,16 @@ def frontend_project_root(root: Path = ROOT) -> Path:
 
 
 def venv_python_path(root: Path = ROOT) -> Path:
-    return root / ".venv" / "bin" / "python"
+    default = root / ".venv" / "Scripts" / "python.exe" if os.name == "nt" else root / ".venv" / "bin" / "python"
+    candidates = [
+        default,
+        root / ".venv" / "Scripts" / "python.exe",
+        root / ".venv" / "bin" / "python",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return default
 
 
 def preferred_runtime_python(root: Path = ROOT) -> Path:
@@ -306,8 +358,12 @@ def _python_import_available(python_path: Path, module_name: str) -> tuple[bool,
 def python_runtime_status(root: Path = ROOT) -> dict[str, Any]:
     python_path = preferred_runtime_python(root)
     yaml_ok, yaml_detail = _python_import_available(python_path, "yaml")
+    python_version = (sys.version_info.major, sys.version_info.minor, sys.version_info.micro)
     return {
         "python_path": str(python_path),
+        "python_version": _format_version_tuple(python_version),
+        "python_version_supported": _version_gte(python_version, MINIMUM_PYTHON_VERSION),
+        "python_version_required": f">={_format_version_tuple(MINIMUM_PYTHON_VERSION)}",
         "venv_path": str(venv_python_path(root)),
         "venv_exists": venv_python_path(root).exists(),
         "using_venv": python_path == venv_python_path(root),
@@ -338,6 +394,12 @@ def frontend_build_status(root: Path = ROOT) -> dict[str, Any]:
     latest_source = max((_mtime(path) for path in source_paths), default=0.0)
     latest_dist = max((_mtime(path) for path in dist_paths if path.is_file()), default=0.0)
     stale = bool(dist_index.exists() and latest_source and latest_dist and latest_source > latest_dist)
+    node_path = shutil.which("node") or ""
+    npm_path = shutil.which("npm") or ""
+    node_version_text, node_version = _command_version(node_path) if node_path else ("", None)
+    npm_version_text, npm_version = _command_version(npm_path) if npm_path else ("", None)
+    node_supported = _node_version_supported(node_version)
+    npm_supported = bool(npm_version and _version_gte(npm_version, MINIMUM_NPM_VERSION))
     return {
         "project_root": str(project),
         "project_exists": package_json.exists(),
@@ -347,7 +409,15 @@ def frontend_build_status(root: Path = ROOT) -> dict[str, Any]:
         "dist_stale": stale,
         "needs_build": (not dist_index.exists()) or stale,
         "node_modules_exists": node_modules.exists(),
-        "npm_path": shutil.which("npm") or "",
+        "node_path": node_path,
+        "node_version": node_version_text,
+        "node_version_supported": node_supported,
+        "node_version_required": f">={_format_version_tuple(MINIMUM_NODE_VERSION)} or >={_format_version_tuple(ALTERNATE_NODE_VERSION)}",
+        "npm_path": npm_path,
+        "npm_version": npm_version_text,
+        "npm_version_supported": npm_supported,
+        "npm_version_required": f">={_format_version_tuple(MINIMUM_NPM_VERSION)}",
+        "build_prerequisites_ready": bool(node_path and npm_path and node_supported and npm_supported),
     }
 
 
@@ -383,9 +453,22 @@ def ensure_monitor_frontend_build(
         return []
     if not force and not status["needs_build"]:
         return []
+    node_path = str(status["node_path"] or "")
     npm_path = str(status["npm_path"] or "")
+    if not node_path:
+        raise RuntimeError("node executable missing; install a supported Node.js runtime before building the monitor frontend")
     if not npm_path:
         raise RuntimeError("npm executable missing; cannot build monitor frontend")
+    if not bool(status["node_version_supported"]):
+        raise RuntimeError(
+            "incompatible node version for the monitor frontend: "
+            f"{status['node_version'] or 'unknown'} (required {status['node_version_required']})"
+        )
+    if not bool(status["npm_version_supported"]):
+        raise RuntimeError(
+            "incompatible npm version for the monitor frontend: "
+            f"{status['npm_version'] or 'unknown'} (required {status['npm_version_required']})"
+        )
     project = Path(status["project_root"])
     actions: list[str] = []
     if not status["node_modules_exists"]:
@@ -394,9 +477,9 @@ def ensure_monitor_frontend_build(
                 f"frontend dependencies are missing in {project / 'node_modules'}; "
                 f"run `{agent_memory_cli_for_root(root)} repair-installation --apply --install-frontend-deps` first"
             )
-        subprocess.run([npm_path, "--prefix", str(project), "install"], text=True, capture_output=True, timeout=1200, check=True)
+        subprocess.run([npm_path, "install"], text=True, capture_output=True, timeout=1200, check=True, cwd=str(project))
         actions.append(f"installed frontend dependencies in {project}")
-    subprocess.run([npm_path, "--prefix", str(project), "run", "build"], text=True, capture_output=True, timeout=1200, check=True)
+    subprocess.run([npm_path, "run", "build"], text=True, capture_output=True, timeout=1200, check=True, cwd=str(project))
     actions.append(f"built monitor frontend in {project}")
     return actions
 

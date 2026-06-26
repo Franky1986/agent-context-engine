@@ -10044,6 +10044,326 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn('py -3 "', content)
             self.assertIn(str(target.resolve()), content)
 
+    def test_venv_python_path_prefers_windows_scripts_python(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application import installation as app_installation
+
+            with mock.patch.object(app_installation.os, "name", "nt"):
+                expected = root / ".venv" / "Scripts" / "python.exe"
+                self.assertEqual(app_installation.venv_python_path(root), expected)
+                expected.parent.mkdir(parents=True, exist_ok=True)
+                expected.write_text("", encoding="utf-8")
+                self.assertEqual(app_installation.venv_python_path(root), expected)
+
+    def test_frontend_build_status_reports_unsupported_node_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frontend = root / "frontend"
+            frontend.mkdir(parents=True, exist_ok=True)
+            (frontend / "package.json").write_text("{}", encoding="utf-8")
+            load_agent_memory(root)
+            from agent_context_engine.application import installation as app_installation
+
+            with (
+                mock.patch.object(app_installation.shutil, "which", side_effect=["/mock/node", "/mock/npm"]),
+                mock.patch.object(
+                    app_installation,
+                    "_command_version",
+                    side_effect=[("v20.11.1", (20, 11, 1)), ("10.2.4", (10, 2, 4))],
+                ),
+            ):
+                status = app_installation.frontend_build_status(root)
+
+            self.assertEqual(status["node_version"], "v20.11.1")
+            self.assertFalse(status["node_version_supported"])
+            self.assertTrue(status["npm_version_supported"])
+            self.assertFalse(status["build_prerequisites_ready"])
+
+    def test_ensure_monitor_frontend_build_runs_inside_project_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frontend = root / "frontend"
+            frontend.mkdir(parents=True, exist_ok=True)
+            load_agent_memory(root)
+            from agent_context_engine.application import installation as app_installation
+
+            with (
+                mock.patch.object(
+                    app_installation,
+                    "frontend_build_status",
+                    return_value={
+                        "project_root": str(frontend),
+                        "project_exists": True,
+                        "dist_dir": str(frontend / "dist"),
+                        "dist_index": str(frontend / "dist" / "index.html"),
+                        "dist_exists": False,
+                        "dist_stale": False,
+                        "needs_build": True,
+                        "node_modules_exists": False,
+                        "node_path": "/mock/node",
+                        "node_version": "v20.19.0",
+                        "node_version_supported": True,
+                        "node_version_required": ">=20.19.0 or >=22.12.0",
+                        "npm_path": "/mock/npm",
+                        "npm_version": "10.2.4",
+                        "npm_version_supported": True,
+                        "npm_version_required": ">=9.5.0",
+                        "build_prerequisites_ready": True,
+                    },
+                ),
+                mock.patch.object(app_installation.subprocess, "run") as run_mock,
+            ):
+                actions = app_installation.ensure_monitor_frontend_build(root, install_dependencies=True, force=False)
+
+            self.assertEqual(
+                actions,
+                [
+                    f"installed frontend dependencies in {frontend}",
+                    f"built monitor frontend in {frontend}",
+                ],
+            )
+            install_call = run_mock.call_args_list[0]
+            build_call = run_mock.call_args_list[1]
+            self.assertEqual(install_call.args[0], ["/mock/npm", "install"])
+            self.assertEqual(build_call.args[0], ["/mock/npm", "run", "build"])
+            self.assertEqual(install_call.kwargs["cwd"], str(frontend))
+            self.assertEqual(build_call.kwargs["cwd"], str(frontend))
+
+    def test_installation_check_requires_manual_node_upgrade_for_frontend_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands import installation as install_commands
+
+            args = argparse.Namespace()
+            with (
+                mock.patch.object(
+                    install_commands,
+                    "python_runtime_status",
+                    return_value={
+                        "python_path": sys.executable,
+                        "python_version": "3.11.9",
+                        "python_version_supported": True,
+                        "python_version_required": ">=3.11.0",
+                        "venv_path": str(root / ".venv" / "Scripts" / "python.exe"),
+                        "venv_exists": True,
+                        "using_venv": True,
+                        "yaml_available": True,
+                        "yaml_detail": "",
+                        "backend_root": str(root / "backend"),
+                    },
+                ),
+                mock.patch.object(
+                    install_commands,
+                    "frontend_build_status",
+                    return_value={
+                        "project_root": str(root / "frontend"),
+                        "project_exists": True,
+                        "dist_dir": str(root / "frontend" / "dist"),
+                        "dist_index": str(root / "frontend" / "dist" / "index.html"),
+                        "dist_exists": False,
+                        "dist_stale": False,
+                        "needs_build": True,
+                        "node_modules_exists": False,
+                        "node_path": "/mock/node",
+                        "node_version": "v20.11.1",
+                        "node_version_supported": False,
+                        "node_version_required": ">=20.19.0 or >=22.12.0",
+                        "npm_path": "/mock/npm",
+                        "npm_version": "10.2.4",
+                        "npm_version_supported": True,
+                        "npm_version_required": ">=9.5.0",
+                        "build_prerequisites_ready": False,
+                    },
+                ),
+                mock.patch.object(install_commands, "integration_summary", return_value={"ready": 0, "total": 0, "items": []}),
+                mock.patch.object(install_commands, "_resolved_installation_profile", return_value={"workspace_roots": {}}),
+                mock.patch.object(
+                    install_commands,
+                    "_storage_status",
+                    return_value={
+                        "memory_root": str(root / "memory"),
+                        "schema_version": 1,
+                        "profile_path": str(root / "memory" / "local" / "storage-profile.json"),
+                        "writable": True,
+                        "legacy_co_located": False,
+                        "error": "",
+                    },
+                ),
+                mock.patch.object(install_commands, "launchagent_runtime_status", return_value={}),
+            ):
+                payload = install_commands._installation_check_payload(root=root, args=args)
+
+            findings = {item["code"]: item for item in payload["findings"]}
+            manual_codes = {item["code"] for item in payload["manual_actions"]}
+            agent_codes = {item["code"] for item in payload["agent_actions"]}
+            self.assertIn("node_version_unsupported", findings)
+            self.assertIn("upgrade_node", manual_codes)
+            self.assertNotIn("build_frontend", agent_codes)
+            self.assertNotIn("install_frontend_dependencies", agent_codes)
+
+    def test_install_discovery_surfaces_prerequisite_suggestions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands import installation as install_commands
+
+            summary = {
+                "checkout_root": str(root),
+                "checkout_role": "public_checkout",
+                "recommended_install_mode": "in_place",
+                "target_root": str(root),
+                "reply_language": "en",
+                "reply_language_source": "explicit",
+                "recommended_monitor_host": "127.0.0.1",
+                "recommended_monitor_port": 8787,
+                "default_monitor_port": 8787,
+                "recommended_wrapper_prefix": "",
+                "recommended_wrapper_suffix": "ace",
+                "recommended_install_launchagent": False,
+                "recommended_plan": {},
+                "memory_root_candidates": [],
+                "active_monitor_runtime_entries": [],
+                "wrapper_conflicts": [],
+                "user_cli_conflict": {},
+                "launchagent_identity": {},
+            }
+            with (
+                mock.patch.object(
+                    install_commands,
+                    "python_runtime_status",
+                    return_value={
+                        "python_version": "3.10.0",
+                        "python_version_supported": False,
+                        "python_version_required": ">=3.11.0",
+                    },
+                ),
+                mock.patch.object(
+                    install_commands,
+                    "frontend_build_status",
+                    return_value={
+                        "node_version": "v20.11.1",
+                        "node_version_supported": False,
+                        "node_version_required": ">=20.19.0 or >=22.12.0",
+                        "node_path": "/mock/node",
+                        "npm_version": "10.2.4",
+                        "npm_version_supported": True,
+                        "npm_version_required": ">=9.5.0",
+                        "npm_path": "/mock/npm",
+                    },
+                ),
+            ):
+                from agent_context_engine.application.platform import PlatformFamily, platform_profile_for_family
+
+                with mock.patch(
+                    "agent_context_engine.application.platform.current_platform_profile",
+                    return_value=platform_profile_for_family(PlatformFamily.WINDOWS),
+                ):
+                    rendered = install_commands._render_install_discovery(summary, language="en")
+
+            self.assertIn("prerequisite suggestions", rendered)
+            self.assertIn("Install or switch to Python >=3.11.0", rendered)
+            self.assertIn("Upgrade Node.js from v20.11.1 to >=20.19.0 or >=22.12.0", rendered)
+            self.assertIn("install the Windows Task Scheduler after explicit approval", rendered)
+
+    def test_installation_check_adds_direct_backend_dependency_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands import installation as install_commands
+
+            args = argparse.Namespace()
+            venv_python = root / ".venv" / "Scripts" / "python.exe"
+            backend_root = root / "backend"
+            with (
+                mock.patch.object(
+                    install_commands,
+                    "python_runtime_status",
+                    return_value={
+                        "python_path": sys.executable,
+                        "python_version": "3.11.9",
+                        "python_version_supported": True,
+                        "python_version_required": ">=3.11.0",
+                        "venv_path": str(venv_python),
+                        "venv_exists": True,
+                        "using_venv": True,
+                        "yaml_available": False,
+                        "yaml_detail": "",
+                        "backend_root": str(backend_root),
+                    },
+                ),
+                mock.patch.object(
+                    install_commands,
+                    "frontend_build_status",
+                    return_value={
+                        "project_root": str(root / "frontend"),
+                        "project_exists": True,
+                        "dist_dir": str(root / "frontend" / "dist"),
+                        "dist_index": str(root / "frontend" / "dist" / "index.html"),
+                        "dist_exists": True,
+                        "dist_stale": False,
+                        "needs_build": False,
+                        "node_modules_exists": True,
+                        "node_path": "/mock/node",
+                        "node_version": "v20.19.0",
+                        "node_version_supported": True,
+                        "node_version_required": ">=20.19.0 or >=22.12.0",
+                        "npm_path": "/mock/npm",
+                        "npm_version": "10.2.4",
+                        "npm_version_supported": True,
+                        "npm_version_required": ">=9.5.0",
+                        "build_prerequisites_ready": True,
+                    },
+                ),
+                mock.patch.object(install_commands, "integration_summary", return_value={"ready": 0, "total": 0, "items": []}),
+                mock.patch.object(install_commands, "_resolved_installation_profile", return_value={"workspace_roots": {}}),
+                mock.patch.object(
+                    install_commands,
+                    "_storage_status",
+                    return_value={
+                        "memory_root": str(root / "memory"),
+                        "schema_version": 1,
+                        "profile_path": str(root / "memory" / "local" / "storage-profile.json"),
+                        "writable": True,
+                        "legacy_co_located": False,
+                        "error": "",
+                    },
+                ),
+                mock.patch.object(install_commands, "launchagent_runtime_status", return_value={}),
+            ):
+                payload = install_commands._installation_check_payload(root=root, args=args)
+
+            manual_actions = {item["code"]: item for item in payload["manual_actions"]}
+            self.assertIn("install_backend_dependencies_direct", manual_actions)
+            self.assertIn("-m pip install -e", manual_actions["install_backend_dependencies_direct"]["command"])
+
+    def test_scheduler_install_command_uses_generic_windows_load_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.platform import PlatformFamily, platform_profile_for_family
+            from agent_context_engine.interfaces.cli.commands import installation as install_commands
+
+            profile = platform_profile_for_family(PlatformFamily.WINDOWS)
+            command = install_commands._scheduler_install_command(
+                root=root,
+                profile=profile,
+                launchagent_label="com.agent-context-engine.test",
+                launchagent_path=str(root / "LaunchAgents" / "test.plist"),
+                launchagent_env_file=str(root / "memory" / "local" / "agent-context-engine.env"),
+            )
+            argv = install_commands._scheduler_install_subcommand_args(
+                profile=profile,
+                launchagent_label="com.agent-context-engine.test",
+                launchagent_path=str(root / "LaunchAgents" / "test.plist"),
+                launchagent_env_file=str(root / "memory" / "local" / "agent-context-engine.env"),
+            )
+
+            self.assertEqual(command, f"{install_commands.agent_memory_cli_for_root(root)} install-launchagent --load")
+            self.assertEqual(argv, ["install-launchagent", "--load"])
+
     def test_platform_runtime_selection_exposes_windows_experimental_stack(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

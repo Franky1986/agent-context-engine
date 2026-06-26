@@ -331,6 +331,116 @@ def _ui_text(language: str, *, en: str, de: str) -> str:
     return de if language == "de" else en
 
 
+def _scheduler_capability(profile) -> object | None:
+    if profile is None:
+        return None
+    capability = getattr(profile, "capability", None)
+    if callable(capability):
+        return capability("scheduler_backend")
+    return None
+
+
+def _scheduler_display_name(profile) -> str:
+    capability = _scheduler_capability(profile)
+    implementation = str(getattr(capability, "implementation", "") or "").strip()
+    if implementation == "windows_task_scheduler":
+        return "Windows Task Scheduler"
+    if implementation == "launchagent":
+        return "LaunchAgent"
+    if implementation == "systemd_user":
+        return "systemd user service"
+    if implementation == "wsl_scheduler":
+        return "WSL scheduler bridge"
+    if implementation == "cron":
+        return "cron scheduler"
+    return "scheduler"
+
+
+def _scheduler_install_command(*, root: Path, profile, launchagent_label: str, launchagent_path: str, launchagent_env_file: str) -> str:
+    capability = _scheduler_capability(profile)
+    implementation = str(getattr(capability, "implementation", "") or "").strip()
+    base = f"{agent_memory_cli_for_root(root)} install-launchagent"
+    if implementation == "launchagent":
+        return (
+            base
+            + f" --label {launchagent_label} "
+            + f"--plist-path {_quote_platform_path(launchagent_path)} --env-file {_quote_platform_path(launchagent_env_file)} --load"
+        )
+    return base + " --load"
+
+
+def _scheduler_install_subcommand_args(*, profile, launchagent_label: str, launchagent_path: str, launchagent_env_file: str) -> list[str]:
+    capability = _scheduler_capability(profile)
+    implementation = str(getattr(capability, "implementation", "") or "").strip()
+    command = ["install-launchagent"]
+    if implementation == "launchagent":
+        command.extend(
+            [
+                "--label",
+                launchagent_label,
+                "--plist-path",
+                launchagent_path,
+                "--env-file",
+                launchagent_env_file,
+            ]
+        )
+    command.append("--load")
+    return command
+
+
+def _direct_backend_dependency_command(runtime: dict[str, object]) -> str:
+    venv_path = str(runtime.get("venv_path") or "").strip()
+    backend_root = str(runtime.get("backend_root") or "").strip()
+    if not venv_path or not backend_root:
+        return "repair-installation --apply"
+    return f"{_quote_platform_path(venv_path)} -m pip install -e {_quote_platform_path(backend_root)}"
+
+
+def _prerequisite_suggestions(*, runtime: dict[str, object], frontend: dict[str, object], language: str) -> list[str]:
+    suggestions: list[str] = []
+    if not runtime.get("python_version_supported"):
+        suggestions.append(
+            _ui_text(
+                language,
+                en=f"Install or switch to Python {runtime['python_version_required']} before running install.",
+                de=f"Vor der Installation Python {runtime['python_version_required']} installieren oder aktivieren.",
+            )
+        )
+    if not frontend.get("node_path"):
+        suggestions.append(
+            _ui_text(
+                language,
+                en=f"Install Node.js {frontend['node_version_required']} so the monitor frontend can be built.",
+                de=f"Node.js {frontend['node_version_required']} installieren, damit das Monitor-Frontend gebaut werden kann.",
+            )
+        )
+    elif not frontend.get("node_version_supported"):
+        suggestions.append(
+            _ui_text(
+                language,
+                en=f"Upgrade Node.js from {frontend['node_version'] or 'the current version'} to {frontend['node_version_required']}.",
+                de=f"Node.js von {frontend['node_version'] or 'der aktuellen Version'} auf {frontend['node_version_required']} aktualisieren.",
+            )
+        )
+    if not frontend.get("npm_path"):
+        suggestions.append(
+            _ui_text(
+                language,
+                en=f"Install npm {frontend['npm_version_required']} or a Node.js distribution that provides it.",
+                de=f"npm {frontend['npm_version_required']} oder eine passende Node.js-Distribution mit npm installieren.",
+            )
+        )
+    elif not frontend.get("npm_version_supported"):
+        suggestions.append(
+            _ui_text(
+                language,
+                en=f"Upgrade npm from {frontend['npm_version'] or 'the current version'} to {frontend['npm_version_required']}.",
+                de=f"npm von {frontend['npm_version'] or 'der aktuellen Version'} auf {frontend['npm_version_required']} aktualisieren.",
+            )
+        )
+    return suggestions
+
+
 def _environment_language(default: str = "en") -> str:
     for key in ("LC_ALL", "LC_MESSAGES", "LANG"):
         value = str(os.environ.get(key) or "").strip().lower()
@@ -870,9 +980,15 @@ def _discovery_summary(*, start: Path, target_hint: Path | None = None, memory_r
 
 
 def _render_install_discovery(summary: dict[str, object], *, language: str | None = None) -> str:
+    from ....application.platform import current_platform_profile
+
     lang = normalize_language(language or str(summary.get("reply_language") or "en"))
     checkout_root = Path(str(summary["checkout_root"])).expanduser().resolve()
     target_root = Path(str(summary["target_root"])).expanduser().resolve()
+    runtime = python_runtime_status(checkout_root)
+    frontend = frontend_build_status(checkout_root)
+    platform_profile = current_platform_profile()
+    scheduler_name = _scheduler_display_name(platform_profile)
     language_source = str(summary.get("reply_language_source") or "unknown")
     monitor_reason = _monitor_port_reason_text(
         recommended_port=int(summary["recommended_monitor_port"]),
@@ -900,7 +1016,7 @@ def _render_install_discovery(summary: dict[str, object], *, language: str | Non
             )
             for wrapper_name in _default_global_wrapper_links()
         ),
-        f"- {_ui_text(lang, en='launchagent install/load in this plan', de='LaunchAgent-Installation/Laden in diesem Plan')}: "
+        f"- {_ui_text(lang, en=f'{scheduler_name} install/load in this plan', de=f'{scheduler_name}-Installation/Aktivierung in diesem Plan')}: "
         + _ui_text(lang, en="enabled by default" if summary["recommended_install_launchagent"] else "deferred by default", de="standardmaessig aktiv" if summary["recommended_install_launchagent"] else "standardmaessig spaeter"),
         f"- {_ui_text(lang, en='runtime bootstrap', de='Runtime-Bootstrap')}: {_ui_text(lang, en='yes', de='ja')}",
         f"- {_ui_text(lang, en='monitor startup after install', de='Monitorstart nach der Installation')}: {_ui_text(lang, en='yes', de='ja')}",
@@ -994,6 +1110,51 @@ def _render_install_discovery(summary: dict[str, object], *, language: str | Non
                 + f"{item.get('active_port') or item.get('configured_port') or 0} "
                 + f"[pid={item.get('pid') or 0}, status={item.get('status') or 'unknown'}]"
             )
+    lines.append(_ui_text(lang, en="- local prerequisite probe:", de="- lokaler Voraussetzungs-Check:"))
+    lines.append(
+        "  - "
+        + _ui_text(
+            lang,
+            en=f"python {runtime['python_version']} ({'ok' if runtime['python_version_supported'] else 'unsupported'}, required {runtime['python_version_required']})",
+            de=f"Python {runtime['python_version']} ({'ok' if runtime['python_version_supported'] else 'nicht unterstuetzt'}, erforderlich {runtime['python_version_required']})",
+        )
+    )
+    lines.append(
+        "  - "
+        + _ui_text(
+            lang,
+            en=f"node {frontend['node_version'] or 'missing'} ({'ok' if frontend['node_version_supported'] else 'unsupported'}, required {frontend['node_version_required']})",
+            de=f"Node {frontend['node_version'] or 'fehlt'} ({'ok' if frontend['node_version_supported'] else 'nicht unterstuetzt'}, erforderlich {frontend['node_version_required']})",
+        )
+    )
+    lines.append(
+        "  - "
+        + _ui_text(
+            lang,
+            en=f"npm {frontend['npm_version'] or 'missing'} ({'ok' if frontend['npm_version_supported'] else 'unsupported'}, required {frontend['npm_version_required']})",
+            de=f"npm {frontend['npm_version'] or 'fehlt'} ({'ok' if frontend['npm_version_supported'] else 'nicht unterstuetzt'}, erforderlich {frontend['npm_version_required']})",
+        )
+    )
+    prerequisite_suggestions = _prerequisite_suggestions(runtime=runtime, frontend=frontend, language=lang)
+    if prerequisite_suggestions:
+        lines.append(
+            _ui_text(
+                lang,
+                en="- prerequisite suggestions:",
+                de="- Vorschlaege fuer lokale Voraussetzungen:",
+            )
+        )
+        for item in prerequisite_suggestions:
+            lines.append(f"  - {item}")
+    if not bool(summary.get("recommended_install_launchagent", True)):
+        lines.append(
+            "  - "
+            + _ui_text(
+                lang,
+                en=f"For periodic dreaming, summary catch-up, and background queue processing, install the {scheduler_name} after explicit approval.",
+                de=f"Fuer periodisches Dreaming, Summary-Catch-up und Hintergrund-Queue-Verarbeitung den {scheduler_name} nach ausdruecklicher Freigabe installieren.",
+            )
+        )
     lines.append("")
     lines.append(
         _ui_text(
@@ -1250,6 +1411,8 @@ def _effective_memory_root_for_plan(target_root: Path, args: argparse.Namespace,
 
 
 def _render_install_plan(summary: dict[str, object], args: argparse.Namespace, *, language: str) -> str:
+    from ....application.platform import current_platform_profile
+
     target_root = Path(str(args.target or summary["target_root"])).expanduser().resolve()
     memory_root = _effective_memory_root_for_plan(target_root, args, summary)
     prefix = install_wrapper_prefix(args)
@@ -1258,6 +1421,7 @@ def _render_install_plan(summary: dict[str, object], args: argparse.Namespace, *
     monitor_port = int(getattr(args, "monitor_port", None) or summary["recommended_monitor_port"])
     plan = _guided_install_plan(summary, args)
     install_launchagent = bool(plan.get("install_launchagent"))
+    scheduler_name = _scheduler_display_name(current_platform_profile())
     install_mode = str(plan.get("install_mode") or summary.get("recommended_install_mode") or "fresh_installation")
     linked_wrappers = list(plan.get("global_wrapper_links") or [])
     display_wrapper_links = [link_command_name(wrapper_name, prefix, suffix) for wrapper_name in linked_wrappers]
@@ -1276,7 +1440,7 @@ def _render_install_plan(summary: dict[str, object], args: argparse.Namespace, *
         + _ui_text(language, en="yes" if plan.get("bootstrap_runtime") else "no", de="ja" if plan.get("bootstrap_runtime") else "nein"),
         f"- {_ui_text(language, en='monitor startup after install', de='Monitorstart nach der Installation')}: "
         + _ui_text(language, en="yes" if plan.get("start_monitor") else "no", de="ja" if plan.get("start_monitor") else "nein"),
-        f"- {_ui_text(language, en='install launchagent now', de='LaunchAgent jetzt installieren')}: "
+        f"- {_ui_text(language, en=f'install {scheduler_name} now', de=f'{scheduler_name} jetzt installieren')}: "
         + _ui_text(language, en="yes" if install_launchagent else "later", de="ja" if install_launchagent else "spaeter"),
         f"- {_ui_text(language, en='existing global ACE links', de='Bestehende globale ACE-Links')}: "
         + _ui_text(
@@ -2129,6 +2293,33 @@ def _print_headless_guidance(client: str) -> None:
     if guidance.get("login_command"):
         print(f"  login hint: {guidance['login_command']}")
 
+
+def _runtime_bootstrap_failure_hint(exc: Exception) -> str:
+    detail = " ".join(
+        str(part or "")
+        for part in [
+            getattr(exc, "stderr", ""),
+            getattr(exc, "stdout", ""),
+            str(exc),
+        ]
+    ).lower()
+    if "certificate_verify_failed" in detail or "ssl:" in detail or "tls" in detail:
+        return " Check Python package trust/proxy settings for PyPI or use your approved internal package mirror before rerunning repair-installation."
+    return ""
+
+
+def _frontend_build_failure_hint(root: Path) -> str:
+    status = frontend_build_status(root)
+    if not status["node_path"]:
+        return f" Install Node.js {status['node_version_required']} and ensure `node`/`npm` are on PATH."
+    if not status["node_version_supported"]:
+        return f" Upgrade Node.js to {status['node_version_required']} before rerunning the frontend repair step."
+    if not status["npm_path"]:
+        return f" Install npm {status['npm_version_required']} and ensure it is on PATH."
+    if not status["npm_version_supported"]:
+        return f" Upgrade npm to {status['npm_version_required']} before rerunning the frontend repair step."
+    return ""
+
 def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict[str, object]:
     runtime = python_runtime_status(root)
     frontend = frontend_build_status(root)
@@ -2155,6 +2346,23 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
         manual_action_seen.add(command)
         manual_actions.append({"code": code, "message": message, "command": command})
 
+    if not runtime["python_version_supported"]:
+        findings.append(
+            {
+                "severity": "error",
+                "code": "python_version_unsupported",
+                "message": (
+                    f"Python {runtime['python_version']} is unsupported for this checkout; "
+                    f"required {runtime['python_version_required']}"
+                ),
+            }
+        )
+        add_manual_action(
+            code="install_supported_python",
+            message=f"Install a supported Python runtime ({runtime['python_version_required']}) and recreate `.venv`.",
+            command="Install Python 3.11+ and rerun install or repair-installation --apply.",
+        )
+
     if not runtime["venv_exists"]:
         findings.append({"severity": "warn", "code": "missing_venv", "message": f"Local runtime virtualenv is missing: {runtime['venv_path']}"})
         repair_actions.append({"code": "create_venv", "message": "Create `.venv` and install backend dependencies."})
@@ -2162,6 +2370,11 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
             code="create_venv",
             message="Create `.venv` and install backend dependencies.",
             command=f"{agent_memory_cli_for_root(root)} repair-installation --apply",
+        )
+        add_manual_action(
+            code="create_venv_direct",
+            message="Create the local `.venv` directly.",
+            command=f"{_quote_platform_path(sys.executable)} -m venv {_quote_platform_path(root / '.venv')}",
         )
     if not runtime["yaml_available"]:
         findings.append({"severity": "error", "code": "missing_pyyaml", "message": f"PyYAML is missing for the selected runtime python: {runtime['python_path']}"})
@@ -2171,7 +2384,70 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
             message="Install backend dependencies into `.venv` so monitor/OpenAPI imports work.",
             command=f"{agent_memory_cli_for_root(root)} repair-installation --apply",
         )
+        add_manual_action(
+            code="install_backend_dependencies_direct",
+            message="Install backend dependencies directly into the selected runtime environment.",
+            command=_direct_backend_dependency_command(runtime),
+        )
     if frontend["needs_build"]:
+        if not frontend["node_path"]:
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": "missing_node",
+                    "message": "Node.js is missing from PATH; the monitor frontend cannot be built.",
+                }
+            )
+            add_manual_action(
+                code="install_node",
+                message=f"Install Node.js {frontend['node_version_required']} and ensure `node`/`npm` are on PATH.",
+                command=f"Install Node.js {frontend['node_version_required']} and rerun install or repair-installation --apply --install-frontend-deps.",
+            )
+        elif not frontend["node_version_supported"]:
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": "node_version_unsupported",
+                    "message": (
+                        f"Node.js {frontend['node_version'] or 'unknown'} is unsupported for the monitor frontend; "
+                        f"required {frontend['node_version_required']}"
+                    ),
+                }
+            )
+            add_manual_action(
+                code="upgrade_node",
+                message=f"Upgrade Node.js to {frontend['node_version_required']} before rebuilding the monitor frontend.",
+                command=f"Upgrade Node.js to {frontend['node_version_required']} and rerun install or repair-installation --apply --install-frontend-deps.",
+            )
+        if not frontend["npm_path"]:
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": "missing_npm",
+                    "message": "npm is missing from PATH; the monitor frontend cannot install its dependencies.",
+                }
+            )
+            add_manual_action(
+                code="install_npm",
+                message=f"Install npm {frontend['npm_version_required']} or a Node.js distribution that provides it.",
+                command=f"Install npm {frontend['npm_version_required']} and rerun install or repair-installation --apply --install-frontend-deps.",
+            )
+        elif not frontend["npm_version_supported"]:
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": "npm_version_unsupported",
+                    "message": (
+                        f"npm {frontend['npm_version'] or 'unknown'} is unsupported for the monitor frontend; "
+                        f"required {frontend['npm_version_required']}"
+                    ),
+                }
+            )
+            add_manual_action(
+                code="upgrade_npm",
+                message=f"Upgrade npm to {frontend['npm_version_required']} before rebuilding the monitor frontend.",
+                command=f"Upgrade npm to {frontend['npm_version_required']} and rerun install or repair-installation --apply --install-frontend-deps.",
+            )
         findings.append(
             {
                 "severity": "warn" if frontend["dist_exists"] else "error",
@@ -2184,18 +2460,20 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
             }
         )
         repair_actions.append({"code": "build_frontend", "message": "Build the monitor frontend before restart."})
-        add_agent_action(
-            code="build_frontend",
-            message="Build the monitor frontend before restart.",
-            command=f"{agent_memory_cli_for_root(root)} repair-installation --apply --install-frontend-deps",
-        )
-        if not frontend["node_modules_exists"]:
-            repair_actions.append({"code": "install_frontend_dependencies", "message": "Install frontend dependencies before building the monitor UI."})
+        if frontend["build_prerequisites_ready"]:
             add_agent_action(
-                code="install_frontend_dependencies",
-                message="Install frontend dependencies before building the monitor UI.",
+                code="build_frontend",
+                message="Build the monitor frontend before restart.",
                 command=f"{agent_memory_cli_for_root(root)} repair-installation --apply --install-frontend-deps",
             )
+        if not frontend["node_modules_exists"]:
+            repair_actions.append({"code": "install_frontend_dependencies", "message": "Install frontend dependencies before building the monitor UI."})
+            if frontend["build_prerequisites_ready"]:
+                add_agent_action(
+                    code="install_frontend_dependencies",
+                    message="Install frontend dependencies before building the monitor UI.",
+                    command=f"{agent_memory_cli_for_root(root)} repair-installation --apply --install-frontend-deps",
+                )
 
     if not storage_status["writable"]:
         findings.append(
@@ -2429,11 +2707,22 @@ def _print_installation_check(payload: dict[str, object]) -> None:
     print(f"storage writable: {'yes' if storage['writable'] else 'no'}")
     print(f"storage mode: {'legacy-co-located' if storage['legacy_co_located'] else 'explicit'}")
     print(f"runtime python: {runtime['python_path']}")
+    print(f"runtime python version: {runtime['python_version']} (required {runtime['python_version_required']})")
     print(f"runtime venv: {'ok' if runtime['venv_exists'] else 'missing'} {runtime['venv_path']}")
     print(f"PyYAML: {'ok' if runtime['yaml_available'] else 'missing'}")
     print(f"monitor frontend dist: {'ok' if frontend['dist_exists'] else 'missing'} {frontend['dist_index']}")
     print(f"monitor frontend build status: {'needs build' if frontend['needs_build'] else 'current'}")
     print(f"monitor frontend deps: {'ok' if frontend['node_modules_exists'] else 'missing'}")
+    print(
+        f"node: {(frontend['node_version'] or 'missing')} "
+        + f"({'ok' if frontend['node_version_supported'] else 'unsupported'}) "
+        + f"required={frontend['node_version_required']}"
+    )
+    print(
+        f"npm: {(frontend['npm_version'] or 'missing')} "
+        + f"({'ok' if frontend['npm_version_supported'] else 'unsupported'}) "
+        + f"required={frontend['npm_version_required']}"
+    )
     monitor_profile = payload.get("monitor_profile") or {}
     launchagent_profile = payload.get("launchagent_profile") or {}
     print(
@@ -3443,11 +3732,14 @@ def cmd_install(args: argparse.Namespace) -> int:
             if use_suffix:
                 args.wrapper_suffix = str(summary["recommended_wrapper_suffix"])
         if getattr(args, "install_launchagent", True) and not bool(summary.get("recommended_install_launchagent", True)):
+            from ....application.platform import current_platform_profile
+
+            scheduler_name = _scheduler_display_name(current_platform_profile())
             args.install_launchagent = ask_yes_no(
                 _ui_text(
                     normalize_language(args.language),
-                    en="Install and load the LaunchAgent now?",
-                    de="LaunchAgent jetzt installieren und laden?",
+                    en=f"Install and load the {scheduler_name} now?",
+                    de=f"{scheduler_name} jetzt installieren und aktivieren?",
                 ),
                 default=False,
             )
@@ -3708,7 +4000,8 @@ def cmd_install(args: argparse.Namespace) -> int:
                 print(f"runtime bootstrap: {action}")
         except (RuntimeError, subprocess.CalledProcessError) as exc:
             print(
-                f"warn: runtime bootstrap failed; run `{agent_memory_cli_for_root(target)} repair-installation --apply` later: {exc}",
+                f"warn: runtime bootstrap failed; run `{agent_memory_cli_for_root(target)} repair-installation --apply` later: {exc}"
+                + _runtime_bootstrap_failure_hint(exc),
                 file=sys.stderr,
             )
     if os.environ.get("AGENT_MEMORY_TEST_SKIP_FRONTEND_BUILD", "") not in {"1", "true", "True", "yes"}:
@@ -3721,7 +4014,8 @@ def cmd_install(args: argparse.Namespace) -> int:
                 print(f"monitor frontend: {action}")
         except (RuntimeError, subprocess.CalledProcessError) as exc:
             print(
-                f"warn: monitor frontend build failed; run `{agent_memory_cli_for_root(target)} repair-installation --apply --install-frontend-deps` later: {exc}",
+                f"warn: monitor frontend build failed; run `{agent_memory_cli_for_root(target)} repair-installation --apply --install-frontend-deps` later: {exc}"
+                + _frontend_build_failure_hint(target),
                 file=sys.stderr,
             )
     instance_id = _default_instance_id_for_target(target, args)
@@ -3816,6 +4110,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     platform_profile = current_platform_profile()
     runtime_selection = runtime_selection_summary(platform_profile)
     scheduler_capability = platform_profile.capability("scheduler_backend")
+    scheduler_name = _scheduler_display_name(platform_profile)
     print(
         "platform profile: "
         + f"{platform_profile.profile_id} support={platform_profile.support_level.value} evidence={platform_profile.evidence.value}"
@@ -3864,35 +4159,30 @@ def cmd_install(args: argparse.Namespace) -> int:
     print(f"repo index: {repos_index}")
     for path in entrypoints:
         print(f"updated harness entrypoint: {path}")
-    if args.install_launchagent and scheduler_capability is not None and scheduler_capability.status == CapabilityStatus.SUPPORTED and scheduler_capability.implementation == "launchagent":
-        if not isolated_install:
+    if args.install_launchagent and scheduler_capability is not None and scheduler_capability.status == CapabilityStatus.SUPPORTED:
+        if not isolated_install and scheduler_capability.implementation == "launchagent":
             for action in _stop_superseded_launchagents_for_memory_root(target=target, memory_root=runtime_memory_root):
                 print(action)
-        launchagent = subprocess.run(
-            [
-                str(cli_path),
-                "install-launchagent",
-                "--label",
-                launchagent_label,
-                "--plist-path",
-                launchagent_path,
-                "--env-file",
-                launchagent_env_file,
-                "--load",
-            ],
+        scheduler_install = subprocess.run(
+            [str(cli_path), *_scheduler_install_subcommand_args(
+                profile=platform_profile,
+                launchagent_label=launchagent_label,
+                launchagent_path=launchagent_path,
+                launchagent_env_file=launchagent_env_file,
+            )],
             cwd=str(target),
             text=True,
             capture_output=True,
             check=False,
         )
-        if launchagent.returncode == 0:
-            print("installed and loaded LaunchAgent")
+        if scheduler_install.returncode == 0:
+            print(f"installed and loaded {scheduler_name}")
         else:
-            message = launchagent.stderr.strip() or launchagent.stdout.strip()
-            print(f"warn: LaunchAgent install failed; run manually if needed: {message}", file=sys.stderr)
+            message = scheduler_install.stderr.strip() or scheduler_install.stdout.strip()
+            print(f"warn: {scheduler_name} install failed; run manually if needed: {message}", file=sys.stderr)
     elif args.install_launchagent:
         print(
-            "warn: LaunchAgent install skipped on this platform profile: "
+            f"warn: {scheduler_name} install skipped on this platform profile: "
             + f"profile={platform_profile.profile_id} status={scheduler_capability.status.value if scheduler_capability else 'unsupported'} "
             + f"support={scheduler_capability.support_level.value if scheduler_capability else platform_profile.support_level.value} "
             + f"evidence={scheduler_capability.evidence.value if scheduler_capability else platform_profile.evidence.value}",
@@ -3901,8 +4191,13 @@ def cmd_install(args: argparse.Namespace) -> int:
     else:
         print(
             "next: run "
-            + f"{agent_memory_cli_for_root(target)} install-launchagent --label {launchagent_label} "
-            + f"--plist-path {_quote_platform_path(launchagent_path)} --env-file {_quote_platform_path(launchagent_env_file)} --load"
+            + _scheduler_install_command(
+                root=target,
+                profile=platform_profile,
+                launchagent_label=launchagent_label,
+                launchagent_path=launchagent_path,
+                launchagent_env_file=launchagent_env_file,
+            )
         )
     verification = _run_post_install_checks(target, language=language)
     if getattr(args, "start_monitor", True) and os.environ.get("AGENT_MEMORY_TEST_SKIP_MONITOR_START", "") not in {"1", "true", "True", "yes"}:

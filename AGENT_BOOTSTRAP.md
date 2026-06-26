@@ -308,7 +308,8 @@ binaries, keep the distinction explicit:
   `--monitor-runner`, `--dream-runner`, and `--query-expansion-runner`.
 - `check-installation` is the preferred follow-up because it also reports
   missing `.venv`/`PyYAML`, frontend build drift, missing external
-  workspace-root hook activation, and when GUI-only Codex/Claude/Cursor usage
+  workspace-root hook activation, unsupported local `node`/`npm` versions for
+  the checked-in frontend lockfile, and when GUI-only Codex/Claude/Cursor usage
   is insufficient for the stored workflow profile.
 - For external Codex/Claude/Gemini GUI workspaces, adapter rewrites should be
   treated carefully: Agent Context Engine now writes explicit absolute root/script

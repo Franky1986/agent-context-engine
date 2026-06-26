@@ -73,6 +73,8 @@ by default:
 - installed public CLI `agent-context-engine`, relinked to the chosen
   installation by default
 - default `.venv/` when `install` runs normally; use `--no-bootstrap-runtime` to skip it
+- local frontend build prerequisites; use `node >=20.19.0` or `>=22.12.0` and
+  `npm >=9.5.0` for fresh monitor dependency installs and rebuilds
 
 Central installation does not automatically activate every client in every other
 project folder.
@@ -205,6 +207,10 @@ LaunchAgent identity for the instance. By default user-scoped metadata lives in
 - `--launchagent-path <plist-path>`
 - `--launchagent-env-file <env-file>`
 
+The CLI flag names remain `launchagent-*` for compatibility, but on Windows the
+same install path drives the per-user Task Scheduler job instead of a macOS
+LaunchAgent.
+
 The `--memory-root` path is the persistent runtime storage root. It owns:
 
 - SQLite
@@ -333,6 +339,11 @@ Verification rules:
 Use `repair-installation --apply` after review when the check reports a missing
 `.venv`, missing `PyYAML`, stale/missing `frontend/dist`, or missing GUI
 workspace-root hook activation.
+
+If `check-installation` or `install-discovery` reports unsupported local
+`node`/`npm` versions, upgrade those prerequisites first; otherwise
+`repair-installation --apply --install-frontend-deps` will not be able to
+rebuild the monitor frontend.
 
 For external Codex/Claude/Gemini GUI workspaces, hook adapters must point back
 to the central Agent Context Engine root with explicit absolute `ROOT` and `SCRIPT`
