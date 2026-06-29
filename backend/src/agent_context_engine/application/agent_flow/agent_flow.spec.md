@@ -56,8 +56,8 @@ across installation, hook startup, and harness entrypoints.
   wording for the same retrieval workflow.
 - Repo/project routing guidance must prefer `repo-context` commands and treat
   `memory/knowledge/repos.md` as the canonical runtime repo index.
-- Public-CLI/PATH repair guidance and monitor startup defaults stay aligned
-  between the shared contract and the checked-in startup docs.
+- Public-CLI/PATH repair guidance stays in the fuller agent/project guidance,
+  not in the compact SessionStart block.
 - Session start guidance uses a one-time CLI prefix declaration followed by
   prefix-less subcommands for startup command families.
 - User-only `approve`/`firewall`/`workdir` controls are rendered conditionally
@@ -66,6 +66,9 @@ across installation, hook startup, and harness entrypoints.
 - Session start context uses a compact default and adds compact-on-demand enrichment
   only when context triggers it.
 - Startup commands in the compact SessionStart context stay focused on retrieval/handover paths and do not include hook-management commands by default.
+- Bare helper commands such as `search`, `retrieve`, `repo-context`,
+  `personal-context`, `retrieval-runs`, and `monitor` explain their own usage or
+  show a short current list when called without a target argument.
 
 ## Tests / Checks
 

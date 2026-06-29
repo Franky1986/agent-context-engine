@@ -32,18 +32,16 @@ Der gewünschte Endzustand ist:
   - `last --limit 10`
   - `use "<session|title|search terms>"`
   - `handover "<session|title|search terms>"`
-  - `retrieve "<frage oder suchtext>" --limit 10`
-  - `search "<begriff>" --limit 5`
+  - `retrieve`
+  - `search`
 
 Load extra context when needed:
 
 - `session-start-context`
-- `personal-context --list`
-- `personal-context <identifier>`
-- `repo-context --list`
-- `repo-context <identifier>`
-- `retrieval-runs --limit 10`
-- `retrieval-run <retrieval_run_id>`
+- `repo-context`
+- `personal-context`
+- `retrieval-runs`
+- `monitor`
 
 ## Session-Start-Ausgabekomposition
 
@@ -52,7 +50,7 @@ Aktuelle Reihenfolge in `memory_hooks_status_context` + `startup_entry_content`:
 1. Runtime-Status / Kontroll-Hinweise (`firewall`, `dream`, `pending`, `taint`, optional Cursor-Auth).
 2. Kompakter Quickstart.
 3. Optionale Dream-/Cursor/Firewall/taint/pendingspezifische Nachreichung.
-4. Monitor-Kommandoline.
+4. Bare Helper-Commands, die bei Aufruf ihre Details erklären.
 
 ## Trigger für zusätzliche Kontrollblöcke
 

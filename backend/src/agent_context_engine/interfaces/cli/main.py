@@ -436,7 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
     dream_v2_review_decide.set_defaults(func=cmd_dream_v2_review)
 
     search = sub.add_parser("search")
-    search.add_argument("query")
+    search.add_argument("query", nargs="?")
     search.add_argument("--project")
     search.add_argument("--intent")
     search.add_argument("--tag")
@@ -446,7 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
     search.set_defaults(func=cmd_search)
 
     retrieve = sub.add_parser("retrieve")
-    retrieve.add_argument("query")
+    retrieve.add_argument("query", nargs="?")
     retrieve.add_argument("--project")
     retrieve.add_argument("--workdir")
     retrieve.add_argument("--client")
@@ -470,8 +470,8 @@ def build_parser() -> argparse.ArgumentParser:
     retrieve.set_defaults(func=cmd_retrieve)
 
     retrieval_runs = sub.add_parser("retrieval-runs")
-    retrieval_runs.add_argument("--limit", type=int, default=20)
-    retrieval_runs.add_argument("--results", type=int, default=3)
+    retrieval_runs.add_argument("--limit", type=int)
+    retrieval_runs.add_argument("--results", type=int)
     retrieval_runs.add_argument("--query")
     retrieval_runs.add_argument("--project")
     retrieval_runs.add_argument("--client")
@@ -685,7 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
     repair_installation.set_defaults(func=cmd_repair_installation)
 
     monitor = sub.add_parser("monitor")
-    monitor.add_argument("--runner", required=True, choices=["codex", "claude", "cursor", "antigravity", "gemini", "opencode"])
+    monitor.add_argument("--runner", choices=["codex", "claude", "cursor", "antigravity", "gemini", "opencode"])
     monitor.add_argument("--runner-model")
     monitor.add_argument("--runner-timeout", type=int, default=120)
     monitor.add_argument("--host", default="127.0.0.1")

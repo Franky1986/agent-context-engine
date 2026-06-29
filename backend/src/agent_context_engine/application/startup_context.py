@@ -100,7 +100,14 @@ def cmd_personal_context(args: argparse.Namespace) -> int:
     print("# Personal Operating Memory Context")
     print("")
     identifiers = [title for title, _body in startup_safe_personal_entries()]
-    if args.list:
+    if args.list or not args.selector:
+        if not args.list:
+            print("Use personal context only when the user asks for preferences, writing style, personal standards, or similar operator-specific context.")
+            print("")
+            print("Use:")
+            print("- `personal-context --list`")
+            print("- `personal-context <identifier>`")
+            print("")
         print("## Available Identifiers")
         print("")
         print(_identifier_line("personal", identifiers))
@@ -114,7 +121,14 @@ def cmd_repo_context(args: argparse.Namespace) -> int:
     print("# Repository Knowledge Context")
     print("")
     identifiers = [name for name, _body in repo_index_entries()]
-    if args.list:
+    if args.list or not args.selector:
+        if not args.list:
+            print("Use repo context when the user mentions a local repo/project/folder by name or asks for side information about another project.")
+            print("")
+            print("Use:")
+            print("- `repo-context --list`")
+            print("- `repo-context <identifier>`")
+            print("")
         print("## Available Identifiers")
         print("")
         print(_identifier_line("repos", identifiers))

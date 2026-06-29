@@ -39,6 +39,16 @@ def local_time(value: Any) -> str:
 
 
 def cmd_retrieve(args: argparse.Namespace) -> int:
+    if not args.query:
+        print("# Retrieve")
+        print("")
+        print("Traceable memory retrieval with ranked results, provenance, and optional safety filtering.")
+        print("")
+        print("Use:")
+        print('- `retrieve "<question or search terms>" --limit 10`')
+        print('- `retrieve "<question>" --workdir <absolute-path> --client <runner>` to scope retrieval')
+        print('- `retrieval-runs --limit 10` to inspect recent retrievals')
+        return 0
     data = retrieve_memory_for_interface(
         args.query,
         project_id=args.project,
@@ -87,12 +97,29 @@ def cmd_retrieve(args: argparse.Namespace) -> int:
 
 
 def cmd_retrieval_runs(args: argparse.Namespace) -> int:
+    if (
+        args.limit is None
+        and args.results is None
+        and not args.query
+        and not args.project
+        and not args.client
+        and not args.json
+    ):
+        print("# Retrieval Runs")
+        print("")
+        print("Inspect previously persisted retrieval runs and their top results.")
+        print("")
+        print("Use:")
+        print("- `retrieval-runs --limit 10`")
+        print("- `retrieval-runs --query <search terms> --limit 10`")
+        print("- `retrieval-run <retrieval_run_id>` for one run")
+        return 0
     data = list_retrieval_runs(
         query=args.query,
         project_id=args.project,
         client=args.client,
-        limit=args.limit,
-        results=args.results,
+        limit=args.limit or 20,
+        results=args.results or 3,
     )
     if args.json:
         print(json_dumps({"runs": data}))

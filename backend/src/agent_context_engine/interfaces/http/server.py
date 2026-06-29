@@ -21,7 +21,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from ...infrastructure.config import MEMORY_DIR, ROOT, SKILL_ROOT
-from ...application.instance_profile import load_installation_profile, merge_installation_profile, record_monitor_runtime, resolve_storage_profile
+from ...application.instance_profile import (
+    load_installation_profile,
+    merge_installation_profile,
+    monitor_restart_command,
+    record_monitor_runtime,
+    resolve_monitor_profile,
+    resolve_storage_profile,
+)
 from ...application.monitoring.monitor.analysis import build_session_analysis_report_for_selector, write_session_analysis_report_html
 from ...application.diagnostics import run_doctor_checks
 from ...application.installation import ensure_monitor_frontend_build, frontend_build_status
@@ -880,6 +887,17 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
 
 def cmd_monitor(args: argparse.Namespace) -> int:
+    if not getattr(args, "runner", None):
+        profile = resolve_monitor_profile(ROOT)
+        restart_command = monitor_restart_command(ROOT)
+        print("# Monitor")
+        print("")
+        print("Starts the local Agent Context Engine monitor.")
+        print("")
+        print("Use:")
+        print(f"- `{restart_command}`")
+        print(f"- URL after start: `http://{profile['host']}:{profile['port']}/?lang={profile['language']}`")
+        return 0
     if args.runner not in {"codex", "claude", "cursor", "antigravity", "gemini", "opencode"}:
         print("--runner must be one of: codex, claude, cursor, antigravity, gemini, opencode")
         return 1

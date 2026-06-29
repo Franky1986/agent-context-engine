@@ -9493,7 +9493,7 @@ The session reconciled stale queue state and resumed pending dreams.
             payload = json.loads(second.stdout)
             context = payload["hookSpecificOutput"]["additionalContext"]
             self.assertIn("Agent Context Engine active root:", context)
-            self.assertIn("Agent Context Engine command prefix:", context)
+            self.assertIn("Prefix:", context)
             self.assertIn("# Session Start", context)
             self.assertIn("cd '", context)
             self.assertIn("&& ./docs/skills/agent-context-engine/scripts/agent-context-engine", context)
@@ -9641,8 +9641,8 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(context.returncode, 0, context.stderr)
             self.assertIn("Agent Context Engine Session Start Context", context.stdout)
             self.assertIn("./docs/skills/agent-context-engine/scripts/agent-context-engine session-start-context", context.stdout)
-            self.assertIn("./docs/skills/agent-context-engine/scripts/agent-context-engine personal-context --list", context.stdout)
-            self.assertIn("./docs/skills/agent-context-engine/scripts/agent-context-engine repo-context --list", context.stdout)
+            self.assertIn("./docs/skills/agent-context-engine/scripts/agent-context-engine personal-context", context.stdout)
+            self.assertIn("./docs/skills/agent-context-engine/scripts/agent-context-engine repo-context", context.stdout)
             self.assertIn("available personal identifiers", context.stdout)
             self.assertIn("available repo identifiers", context.stdout)
             self.assertIn("agent/behavior", context.stdout)
@@ -9677,7 +9677,8 @@ The session reconciled stale queue state and resumed pending dreams.
             personal = run_cli(root, "personal-context")
             self.assertEqual(personal.returncode, 0, personal.stderr)
             self.assertIn("Personal Operating Memory Context", personal.stdout)
-            self.assertIn("Agent Behavior", personal.stdout)
+            self.assertIn("personal-context <identifier>", personal.stdout)
+            self.assertIn("agent/behavior", personal.stdout)
             self.assertNotIn(str(root.resolve()), personal.stdout)
 
             personal_list = run_cli(root, "personal-context", "--list")
@@ -9693,7 +9694,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(repo.returncode, 0, repo.stderr)
             self.assertIn("Repository Knowledge Context", repo.stdout)
             self.assertIn("workManagement", repo.stdout)
-            self.assertIn("Tickets, roadmap, and delivery planning.", repo.stdout)
+            self.assertIn("repo-context <identifier>", repo.stdout)
             self.assertNotIn(str(root.resolve()), repo.stdout)
 
             repo_list = run_cli(root, "repo-context", "--list")
@@ -9703,6 +9704,22 @@ The session reconciled stale queue state and resumed pending dreams.
             repo_selected = run_cli(root, "repo-context", "workManagement")
             self.assertEqual(repo_selected.returncode, 0, repo_selected.stderr)
             self.assertIn("Tickets, roadmap, and delivery planning.", repo_selected.stdout)
+
+            search_help = run_cli(root, "search")
+            self.assertEqual(search_help.returncode, 0, search_help.stderr)
+            self.assertIn('search "<search terms>" --limit 5', search_help.stdout)
+
+            retrieve_help = run_cli(root, "retrieve")
+            self.assertEqual(retrieve_help.returncode, 0, retrieve_help.stderr)
+            self.assertIn('retrieve "<question or search terms>" --limit 10', retrieve_help.stdout)
+
+            monitor_help = run_cli(root, "monitor")
+            self.assertEqual(monitor_help.returncode, 0, monitor_help.stderr)
+            self.assertIn("monitor --runner", monitor_help.stdout)
+
+            retrieval_runs_help = run_cli(root, "retrieval-runs")
+            self.assertEqual(retrieval_runs_help.returncode, 0, retrieval_runs_help.stderr)
+            self.assertIn("retrieval-runs --limit 10", retrieval_runs_help.stdout)
 
     def test_repo_context_migrates_legacy_repo_index_into_runtime_storage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -9877,15 +9894,13 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertTrue(hook_entry.exists())
             hook_entry_text = hook_entry.read_text(encoding="utf-8")
             self.assertIn("# Session Start", hook_entry_text)
-            self.assertIn("Agent Context Engine command prefix:", hook_entry_text)
-            self.assertIn("Do not inspect `~/.cursor/projects/...`", hook_entry_text)
-            self.assertIn("use `last` first and stop there", hook_entry_text)
+            self.assertIn("Prefix:", hook_entry_text)
+            self.assertNotIn("Do not inspect `~/.cursor/projects/...`", hook_entry_text)
+            self.assertNotIn("use `last` first and stop there", hook_entry_text)
             self.assertIn("session-start-context", hook_entry_text)
-            self.assertIn("personal-context --list", hook_entry_text)
-            self.assertIn("personal-context <identifier>", hook_entry_text)
-            self.assertIn("repo-context --list", hook_entry_text)
-            self.assertIn("repo-context <identifier>", hook_entry_text)
-            self.assertIn('retrieve "<question or search terms>" --limit 10', hook_entry_text)
+            self.assertIn("personal-context", hook_entry_text)
+            self.assertIn("repo-context", hook_entry_text)
+            self.assertIn("retrieve", hook_entry_text)
             self.assertNotIn("BASE_PATH=", hook_entry_text)
             self.assertNotIn("Runtime env file", hook_entry_text)
             self.assertNotIn(str((root / "AGENTS.md").resolve()), hook_entry_text)
@@ -12966,12 +12981,10 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("use `last` first and stop there", target_agents)
             target_hook_entry = (target / "session-start-hook-entry.md").read_text(encoding="utf-8")
             self.assertIn(f"cd '{root.resolve()}' && ./docs/skills/agent-context-engine/scripts/agent-context-engine", target_hook_entry)
-            self.assertIn("Do not inspect `~/.cursor/projects/...`", target_hook_entry)
-            self.assertIn("use `last` first and stop there", target_hook_entry)
-            self.assertIn(
-                "monitor --runner codex --host 127.0.0.1 --port 8787 --language en --replace-existing --no-open",
-                target_hook_entry,
-            )
+            self.assertIn("Run subcommands with that prefix.", target_hook_entry)
+            self.assertIn("monitor", target_hook_entry)
+            self.assertNotIn("Do not inspect `~/.cursor/projects/...`", target_hook_entry)
+            self.assertNotIn("monitor --runner codex --host 127.0.0.1 --port 8787 --language en --replace-existing --no-open", target_hook_entry)
             target_status = run_cli(root, "cursor-status", "--target", str(target), extra_env=env)
             self.assertEqual(target_status.returncode, 0, target_status.stderr)
             self.assertIn("active events: 9/9", target_status.stdout)

@@ -13,6 +13,15 @@ from ....infrastructure.text import markdown_escape
 
 
 def cmd_search(args: argparse.Namespace) -> int:
+    if not args.query:
+        print("# Search")
+        print("")
+        print("Quick keyword lookup over indexed Agent Context Engine memory.")
+        print("")
+        print("Use:")
+        print('- `search "<search terms>" --limit 5`')
+        print('- `retrieve "<question or search terms>" --limit 10` for traceable retrieval with provenance')
+        return 0
     conn = connect()
     query_intent = classify_query_intent(query_terms(args.query))
     print(f"query_intent={query_intent['intent']} operational_budget={query_intent['operational_context_budget']}")

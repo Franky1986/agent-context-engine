@@ -51,7 +51,7 @@ def _default_startup_entry(command_prefix: str) -> str:
 
 _LEGACY_SESSION_ENTRY_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(
-        r"(?mi)^-\s*`(?:agent-context-engine\s+)?(last|use|handover|retrieve|search)\b",
+        r"(?mi)^-\s*`agent-context-engine\s+(last|use|handover|retrieve|search)\b",
     ),
     re.compile(r"(?mi)^-\s*`(?:agent-context-engine\s+)?(hooks-disable|hooks-enable|hooks-status)\b"),
     re.compile(r"(?ms)^`+User-only controls:`"),
