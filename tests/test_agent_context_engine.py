@@ -3855,6 +3855,35 @@ class AgentContextEngineEndToEndTests(AgentContextEngineTestCase):
             self.assertIn("control-plane firewall command redacted", event["prompt"])
             self.assertNotIn("deploy.example.com", event["payload_json"])
 
+    def test_invalid_direct_user_approve_command_explains_valid_forms(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            result = run_cli(
+                root,
+                "log-hook",
+                "--client",
+                "codex",
+                stdin={
+                    "session_id": "invalid-approve-command",
+                    "hook_event_name": "UserPromptSubmit",
+                    "cwd": str(root),
+                    "prompt": "approve git clone --depth 1 https://github.com/example/repo /tmp/repo",
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Invalid direct chat approval command", result.stdout)
+            self.assertIn("approve <risk_event_id> <nonce>", result.stdout)
+            self.assertIn("approve workdir /absolute/project/path", result.stdout)
+            self.assertIn("approve explain <reason>", result.stdout)
+            self.assertIn("approve <shell command>", result.stdout)
+            am = load_agent_memory(root)
+            conn = am.connect()
+            reset_count = conn.execute(
+                "select count(*) as count from session_taint_resets where session_id='invalid-approve-command'"
+            ).fetchone()["count"]
+            self.assertEqual(reset_count, 0)
+
     def test_firewall_rule_downgrades_matching_tainted_deploy_but_not_other_host(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

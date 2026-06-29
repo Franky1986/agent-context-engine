@@ -49,10 +49,13 @@ def _default_startup_entry(command_prefix: str) -> str:
 
 def _user_only_controls_block() -> str:
     return """User-only controls:
-- `approve ...`
+- `approve <risk_event_id> <nonce>` for one blocked tool retry
+- `approve workdir /absolute/project/path`
+- `approve explain <reason>`
 - `reset taint`
 - `firewall add ...`
 - `firewall disable session`
+- `firewall disable session 30m`
 - `firewall enable session`
 - `hooks-disable [--runner <runner>]`
 - `hooks-enable [--runner <runner>]`

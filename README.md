@@ -724,7 +724,8 @@ approve workdir /absolute/project/path
 - Prompt hooks surface still-pending chat approvals only when the user asks
   about blocks, approvals, risk, firewall, or open work. Each entry shows the
   command preview, user-facing intent, reason, not-executed impact, risk id, and
-  exact one-time `approve ...` line. An exact `approve ...` reply only returns
+  exact one-time `approve <risk_event_id> <nonce>` line. An exact
+  `approve <risk_event_id> <nonce>` reply only returns
   the approval confirmation plus a compact count of older hidden pending
   approvals, so old false positives do not flood every turn. Codex Stop hooks
   stay stdout-silent because Codex rejects injected Stop context as invalid stop

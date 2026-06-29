@@ -23,7 +23,8 @@ pre-action safety checks, and enqueue or persist events for later processing.
 - Distinguish local read-only file/context access from network reads so tainted
   local inspection can warn while remote fetches still block.
 - Return concrete user guidance for taint-driven blocks, including the
-  triggering risk ids and valid direct-chat control lines.
+  triggering risk ids and valid direct-chat control lines with exact syntax
+  where approval tokens are required.
 - Prefer the public `agent-context-engine` command in generated session-start
   and hook guidance when the active installation owns that global link.
 
@@ -32,8 +33,9 @@ pre-action safety checks, and enqueue or persist events for later processing.
 - Outputs: persisted event rows, queue files, allow/block hook responses.
   Block responses must explain whether the attempted action was read/write/
   network-like, cite active taint source ids when present, and surface valid
-  user-only follow-ups (`approve ...`, `reset taint`, session firewall
-  controls, hook control-plane commands) without requiring a second
+  user-only follow-ups (`approve <risk_event_id> <nonce>`, `approve workdir
+  /absolute/project/path`, `approve explain <reason>`, `reset taint`, session
+  firewall controls, hook control-plane commands) without requiring a second
   clarification turn.
 
 ## Dependencies / Ports

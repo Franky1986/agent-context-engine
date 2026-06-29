@@ -157,6 +157,10 @@ def blocking_reason(decision: Any) -> str:
     if flag_text:
         parts.append(f"Flags: {flag_text}")
     if approval_state == "required" and risk_event_id and approval_token:
+        parts.append(
+            "Only this exact one-time approval syntax is valid here. "
+            "Do not replace it with the blocked shell command or paraphrase it."
+        )
         parts.append("Copyable approval line for this exact blocked tool use:")
         parts.append(f"approve {risk_event_id} {approval_token}")
     return "\n\n".join(parts)
@@ -284,6 +288,25 @@ def user_prompt_approval(prompt: str | None) -> tuple[str, str] | None:
     return approvals[0] if approvals else None
 
 
+def invalid_user_prompt_approvals(prompt: str | None) -> list[str]:
+    invalid: list[str] = []
+    approve_once_pattern = re.compile(r"^\s*approve\s+(risk_[A-Za-z0-9]+)\s+((?:nonce_|approve:)[A-Fa-f0-9]+)\s*$", re.I)
+    approve_workdir_pattern = re.compile(r"^\s*approve\s+workdir\s+(.+?)\s*$", re.I)
+    approve_explain_pattern = re.compile(r"^\s*approve\s+explain\b.+$", re.I)
+    for line in (prompt or "").splitlines():
+        stripped = line.strip()
+        if not stripped or not re.match(r"^approve\b", stripped, re.I):
+            continue
+        if (
+            approve_once_pattern.fullmatch(stripped)
+            or approve_workdir_pattern.fullmatch(stripped)
+            or approve_explain_pattern.fullmatch(stripped)
+        ):
+            continue
+        invalid.append(stripped)
+    return invalid
+
+
 def user_prompt_workdir_approvals(prompt: str | None) -> list[str]:
     approvals: list[str] = []
     pattern = re.compile(r"^\s*approve\s+workdir\s+(.+?)\s*$", re.I)
@@ -326,6 +349,7 @@ def _record_taint_reset(conn: Any, session_id: str, *, event_seq: int | None, re
 
 def apply_user_prompt_approval(conn: Any, session_id: str, prompt: str | None, *, event_seq: int | None = None) -> str:
     risk_approvals = user_prompt_approvals(prompt)
+    invalid_approvals = invalid_user_prompt_approvals(prompt)
     workdir_approvals = user_prompt_workdir_approvals(prompt)
     reset_taint = user_prompt_taint_reset(prompt)
     try:
@@ -336,12 +360,23 @@ def apply_user_prompt_approval(conn: Any, session_id: str, prompt: str | None, *
         hook_lines = apply_direct_user_hook_state_commands(prompt)
     except ValueError as exc:
         hook_lines = [f"Hooks command rejected: {exc}"]
-    if not risk_approvals and not workdir_approvals and not reset_taint and not firewall_lines and not hook_lines:
+    if not risk_approvals and not invalid_approvals and not workdir_approvals and not reset_taint and not firewall_lines and not hook_lines:
         return ""
     lines: list[str] = []
     now = utc_now()
     lines.extend(hook_lines)
     lines.extend(firewall_lines)
+    for invalid_line in invalid_approvals:
+        lines.extend(
+            [
+                f"Invalid direct chat approval command: {invalid_line}",
+                "Valid direct chat approval forms are:",
+                "- `approve <risk_event_id> <nonce>` for exactly one blocked tool retry",
+                "- `approve workdir /absolute/project/path` for a local workdir in this session",
+                "- `approve explain <reason>` for short-lived classifier context",
+                "A line such as `approve <shell command>` is not valid and does not approve the blocked tool use.",
+            ]
+        )
     reset_recorded = False
     if any(
         line.startswith(
@@ -670,6 +705,7 @@ def pending_approvals_context(conn: Any, session_id: str, *, limit: int = 8) -> 
     lines = [
         f"Agent Context Engine pending blocked approvals: {len(rows)}{suffix} shown.",
         "Each listed tool use was not executed. Approve only the exact item you want retried.",
+        "Only these direct chat approval forms are valid: `approve <risk_event_id> <nonce>`, `approve workdir /absolute/project/path`, and `approve explain <reason>`. A line such as `approve <shell command>` is invalid.",
         "Commands are stored in the local risk audit/monitor only and are not injected into chat context.",
         "If these blocks only came from earlier tainted context and you reviewed it, the user can clear only the taint guard with this exact chat line; do not execute it as a tool:",
         "reset taint",

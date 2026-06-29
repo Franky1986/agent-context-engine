@@ -32,10 +32,13 @@ Load extra context when needed:
 - `agent-context-engine retrieval-run <retrieval_run_id>`
 
 User-only controls:
-- `approve ...`
+- `approve <risk_event_id> <nonce>` for one blocked tool retry
+- `approve workdir /absolute/project/path`
+- `approve explain <reason>`
 - `reset taint`
 - `firewall add ...`
 - `firewall disable session`
+- `firewall disable session 30m`
 - `firewall enable session`
 - `hooks-disable [--runner <runner>]`
 - `hooks-enable [--runner <runner>]`

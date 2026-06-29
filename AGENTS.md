@@ -128,11 +128,13 @@ agent-context-engine risk list --limit 20
 agent-context-engine risk show <risk_event_id>
 ```
 
-User-only controls such as `approve ...`, `reset taint`, `firewall add ...`,
-`firewall disable session`, `firewall disable session 30m`, and
-`firewall enable session`, `hooks-disable [--runner <runner>]`,
-`hooks-enable [--runner <runner>]`, and `hooks-status` must be sent by the
-user as chat messages. Do not execute those control lines as tools.
+User-only controls such as `approve <risk_event_id> <nonce>`,
+`approve workdir /absolute/project/path`, `approve explain <reason>`,
+`reset taint`, `firewall add ...`, `firewall disable session`,
+`firewall disable session 30m`, `firewall enable session`,
+`hooks-disable [--runner <runner>]`, `hooks-enable [--runner <runner>]`, and
+`hooks-status` must be sent by the user as chat messages. Do not execute those
+control lines as tools.
 
 ## Useful Development Checks
 
