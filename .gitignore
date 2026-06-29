@@ -68,6 +68,7 @@ analysis_reports/
 memory/analysis_reports/
 tmp/
 temp/
+videos/
 *.zip
 *.tar
 *.tar.gz

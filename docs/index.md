@@ -121,6 +121,7 @@ python3 scripts/update_docs_index.py --check
 - [Spec: Retrieval Application Boundary](../backend/src/agent_context_engine/application/retrieval.spec.md) - `backend/src/agent_context_engine/application/retrieval.spec.md`
 - [Spec: Risk Review Application Boundary](../backend/src/agent_context_engine/application/risk_api.spec.md) - `backend/src/agent_context_engine/application/risk_api.spec.md`
 - [Spec: Scheduler Application Boundary](../backend/src/agent_context_engine/application/scheduler.spec.md) - `backend/src/agent_context_engine/application/scheduler.spec.md`
+- [Spec: Session Handover Application Boundary](../backend/src/agent_context_engine/application/sessions/sessions.spec.md) - `backend/src/agent_context_engine/application/sessions/sessions.spec.md`
 - [Spec: Wrapper Publication Application Boundary](../backend/src/agent_context_engine/application/wrapper_publication/wrapper_publication.spec.md) - `backend/src/agent_context_engine/application/wrapper_publication/wrapper_publication.spec.md`
 - [Spec: Graph Domain Boundary](../backend/src/agent_context_engine/domain/graph.spec.md) - `backend/src/agent_context_engine/domain/graph.spec.md`
 - [Spec: Risk Domain Boundary](../backend/src/agent_context_engine/domain/risk.spec.md) - `backend/src/agent_context_engine/domain/risk.spec.md`

@@ -1,7 +1,7 @@
 # Current Status
 
 ## Date
-2026-06-26
+2026-06-29
 
 ## Public Snapshot
 
@@ -28,11 +28,14 @@ workflows. The current public slice includes:
   and where that knowledge is visible in the monitor,
 - explicit Windows experimental runtime adapters for command publication,
   PowerShell wrappers/hooks, Task Scheduler wiring, and diagnostics.
+- dream/monitor artifact inspection and CLI handover rendering now resolve
+  external runtime-memory roots consistently, including Dream-v2 summaries,
+  audit files, and dream-first session briefs.
 
 Versioned release snapshot:
 
-- Backend / product: `0.2.9`
-- Monitor: `0.6.7`
+- Backend / product: `0.2.10`
+- Monitor: `0.6.8`
 
 ## Installation State
 

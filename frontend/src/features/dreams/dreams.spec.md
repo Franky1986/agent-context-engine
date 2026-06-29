@@ -32,6 +32,10 @@ operator inspection.
 ## Failure Modes
 - Missing artifacts show an empty/recoverable state.
 - Invalid outputs are displayed as audit evidence, not hidden.
+- Dream artifacts stored under an external runtime memory root must still load
+  when persisted paths are absolute rather than repo-relative.
+- Handover detection in the dream detail follows the current v2 prompt contract,
+  including `## Current Deterministic Handover`.
 
 ## Acceptance Criteria
 - Stories cover successful, failed, and artifact-heavy states.
@@ -40,6 +44,11 @@ operator inspection.
 - A selected dream exposes status, short outcome summary, deterministic and
   semantic counts, and quick navigation to session/knowledge/control before raw
   artifacts dominate the screen.
+- Dream inspect continues to show narrative, prompt, audit, and stage artifact
+  content when the active installation stores runtime memory outside the repo
+  checkout.
+- The dream detail handover badge reflects current v2 prompt headings instead of
+  assuming the older `Current Session Handover` label only.
 
 ## Tests / Checks
 - `npm --prefix frontend run build`

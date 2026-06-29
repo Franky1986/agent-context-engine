@@ -30,8 +30,8 @@ Created and maintained by [Frank Richter](https://www.linkedin.com/in/frank-rich
 
 Current public versions:
 
-- Backend / product: `0.2.9`
-- Monitor: `0.6.7`
+- Backend / product: `0.2.10`
+- Monitor: `0.6.8`
 
 Platform support posture:
 

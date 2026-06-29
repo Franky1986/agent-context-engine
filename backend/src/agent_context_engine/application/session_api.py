@@ -21,6 +21,48 @@ REPORT_FILE_RE = re.compile(r"^analysis_(?P<session_slug>.+)_(?P<timestamp>\d{8}
 _FILTER_OPTIONS_CACHE: tuple[float, dict[str, Any]] | None = None
 
 
+def _runtime_allowed_roots() -> list[Path]:
+    roots: list[Path] = []
+    for candidate in (ROOT, MEMORY_DIR):
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def _resolve_runtime_path(path_value: str | None) -> Path | None:
+    if not path_value:
+        return None
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = ROOT / path
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    for allowed_root in _runtime_allowed_roots():
+        if resolved == allowed_root or allowed_root in resolved.parents:
+            return resolved
+    return None
+
+
+def _normalized_artifact_path(path_value: str | None) -> str:
+    return str(path_value or "").strip().replace("\\", "/")
+
+
+def _is_v2_dream_run_path(path_value: str | None) -> bool:
+    normalized = _normalized_artifact_path(path_value)
+    return bool(normalized) and "/dream/v2/runs/" in f"/{normalized}"
+
+
+def _is_v2_audit_path(path_value: str | None) -> bool:
+    normalized = _normalized_artifact_path(path_value)
+    return _is_v2_dream_run_path(normalized) and "/audit/" in f"/{normalized}"
+
+
 def parse_time(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -280,15 +322,15 @@ def _resolve_session_handover_from_v2(conn: Any, session_id: str) -> dict[str, A
     ).fetchone()
     if not run:
         return {}
-    summary_path = str(run["output_summary_path"] or "").strip().lstrip("/")
+    summary_path = str(run["output_summary_path"] or "").strip()
     if not summary_path:
-        normalized_output_paths = [str(path).strip().lstrip("/") for path in _parse_json_list(run["output_memory_paths_json"])]
+        normalized_output_paths = [str(path).strip() for path in _parse_json_list(run["output_memory_paths_json"])]
         for path in _parse_json_list(run["output_memory_paths_json"]):
-            normalized_path = str(path).strip().lstrip("/")
+            normalized_path = str(path).strip()
             if (
                 "/audit/" in f"/{normalized_path}"
                 and normalized_path.endswith("/summary.md")
-                and ("memory/dream/v2/runs/" in normalized_path or "memory/dream/v2/runs" in normalized_path)
+                and _is_v2_dream_run_path(normalized_path)
             ):
                 summary_path = normalized_path
                 break
@@ -388,9 +430,16 @@ def monitor_dreams(limit: int, status: str | None = None, runner: str | None = N
                 item["output_memory_paths"] = []
         else:
             item["output_memory_paths"] = []
+        files = _dream_file_items(item)
+        episode_short, episode_title = _dream_episode_short(files, item)
+        item["memory_files"] = files
         item["audit_files"] = _dream_audit_file_items(item)
         item["downstream_files"] = _dream_downstream_file_items(conn, item)
         _attach_v2_dream_details(conn, item)
+        item["episode_short"] = episode_short
+        item["episode_title"] = episode_title
+        item["episode_meta_short"] = _dream_meta_preview(conn, item)
+        item.update(_dream_count_preview(conn, item))
         dreams.append(item)
         totals["count"] += 1
         for key in ("duration_ms", "prompt_tokens", "cached_prompt_tokens", "completion_tokens", "reasoning_tokens", "total_tokens"):
@@ -507,16 +556,10 @@ def monitor_filter_options() -> dict[str, Any]:
 
 
 def _read_relative_text(path_value: str | None, max_chars: int = 200_000) -> str:
-    if not path_value:
+    resolved = _resolve_runtime_path(path_value)
+    if resolved is None:
         return ""
-    path = Path(path_value)
-    if not path.is_absolute():
-        path = ROOT / path
     try:
-        resolved = path.resolve()
-        root_resolved = ROOT.resolve()
-        if root_resolved not in resolved.parents and resolved != root_resolved:
-            return ""
         with resolved.open("r", encoding="utf-8", errors="replace") as handle:
             return handle.read(max_chars)
     except OSError:
@@ -524,16 +567,10 @@ def _read_relative_text(path_value: str | None, max_chars: int = 200_000) -> str
 
 
 def _relative_file_metadata(path_value: str | None) -> dict[str, Any]:
-    if not path_value:
+    resolved = _resolve_runtime_path(path_value)
+    if resolved is None:
         return {}
-    path = Path(path_value)
-    if not path.is_absolute():
-        path = ROOT / path
     try:
-        resolved = path.resolve()
-        root_resolved = ROOT.resolve()
-        if root_resolved not in resolved.parents and resolved != root_resolved:
-            return {}
         stat = resolved.stat()
         return {"size_bytes": stat.st_size, "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")}
     except OSError:
@@ -764,7 +801,7 @@ def _dream_audit_file_items(row: dict[str, Any]) -> list[dict[str, str]]:
     for path in _parse_json_list(row.get("output_memory_paths_json")):
         if path in paths:
             continue
-        if "/memory/dream/v2/runs/" in path and "/audit/" in path:
+        if _is_v2_audit_path(path):
             paths.append(path)
             continue
         if pipeline_version == 2:
@@ -799,9 +836,9 @@ def _dream_audit_file_items(row: dict[str, Any]) -> list[dict[str, str]]:
             kind = "prompt"
         elif path.endswith("response.md") or path.endswith("-output.json"):
             kind = "response"
-        elif "/memory/dream/v2/runs/" in path and "/audit/" in path:
+        elif _is_v2_audit_path(path):
             kind = _v2_audit_kind(path)
-        elif "/memory/dream/v2/runs/" in path:
+        elif _is_v2_dream_run_path(path):
             kind = "v2_stage_file"
         else:
             kind = "response"
@@ -829,7 +866,7 @@ def _dream_downstream_file_items(conn: Any, row: dict[str, Any]) -> list[dict[st
     pipeline_version = int(row.get("pipeline_version") or 1)
     if pipeline_version == 2:
         for path in _parse_json_list(row.get("output_memory_paths_json")):
-            if "/memory/dream/v2/runs/" not in path:
+            if not _is_v2_dream_run_path(path):
                 continue
             if path in {item.get("path") for item in items}:
                 continue

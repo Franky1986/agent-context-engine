@@ -13,6 +13,29 @@ The entries below document the changes added since that initial public release.
 
 - no unreleased entries currently
 
+## Monitor 0.6.8
+
+### Fixed
+
+- Dream inspect now keeps external runtime-memory audit and stage artifacts
+  readable in the monitor, deduplicates repeated artifact rows, and recognizes
+  the current deterministic-handover prompt heading in Dream-v2 detail views
+
+## Backend 0.2.10
+
+### Changed
+
+- `agent-context-engine handover` now surfaces a concise dream-first session
+  brief, shows the active summary kind explicitly, and keeps current session
+  summary vs. latest dream memory distinct for fresh-session continuation
+
+### Fixed
+
+- session handover fallback and Dream-v2 summary/audit resolution now preserve
+  absolute external runtime-memory paths instead of rewriting them under the
+  repo root
+- external runtime-memory project memory no longer crashes CLI handover output
+
 ## Monitor 0.6.7
 
 ### Changed

@@ -53,6 +53,19 @@ function records(value: unknown): Record<string, unknown>[] {
   return list(value).map(record).filter((item) => Object.keys(item).length > 0);
 }
 
+function dedupeFilesByPath(files: Record<string, unknown>[]) {
+  const seen = new Set<string>();
+  const result: Record<string, unknown>[] = [];
+  files.forEach((file) => {
+    const path = filePath(file);
+    const key = path || pretty(file);
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(file);
+  });
+  return result;
+}
+
 function parseJson(value: unknown): unknown {
   if (value && typeof value === 'object') return value;
   if (typeof value !== 'string' || !value.trim()) return undefined;
@@ -174,7 +187,7 @@ function handoverUsage(stages: Record<string, unknown>[]) {
     .find((file) => text(file.kind, '') === 'prompt' || /prompt\.md$/.test(filePath(file)));
   const prompt = text(fileContent(promptFile ?? {}), '');
   if (!prompt) return 'unknown';
-  if (/Current Session Handover/i.test(prompt) && !/_No current handover available\._/i.test(prompt)) {
+  if (/Current (Session|Deterministic) Handover/i.test(prompt) && !/_No current handover available\._/i.test(prompt)) {
     return 'yes';
   }
   if (/_No current handover available\._/i.test(prompt)) {
@@ -373,7 +386,7 @@ export function DreamArtifactsPanel({
   const downstreamFiles = list(record(selectedDream).downstream_files);
   const outputPaths = list(record(selectedDream).output_memory_paths ?? record(selectedDream).output_memory_paths_json);
   const artifactFiles = list(record(selectedDream).v2_artifacts);
-  const allFiles = [...auditFiles, ...downstreamFiles, ...artifactFiles].map(record);
+  const allFiles = dedupeFilesByPath([...auditFiles, ...downstreamFiles, ...artifactFiles].map(record));
   const stages = records(record(selectedDream).v2_stages).sort((left, right) => {
     return Number(left.stage_order ?? 0) - Number(right.stage_order ?? 0);
   });

@@ -8180,6 +8180,149 @@ exit 0
             self.assertEqual(dream["session_total_tokens"], 135)
             self.assertEqual(dream["output_memory_paths"], ["memory/memories/dreams/demoProject/dream-monitor-1.md"])
 
+    def test_monitor_dreams_loads_external_memory_root_artifacts_and_episode_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "checkout"
+            root.mkdir(parents=True, exist_ok=True)
+            memory_root = base / "runtime-memory"
+            run_dir = memory_root / "dream" / "v2" / "runs" / "dream-external"
+            narrative_dir = run_dir / "01-dream-narrative"
+            audit_dir = run_dir / "audit"
+            narrative_dir.mkdir(parents=True, exist_ok=True)
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            dream_md = narrative_dir / "dream.md"
+            prompt_md = narrative_dir / "prompt.md"
+            raw_output_md = narrative_dir / "raw-output.md"
+            audit_summary_md = audit_dir / "summary.md"
+            dream_md.write_text(
+                "# Dream Memory Update\n"
+                "## Startup Brief\n"
+                "External memory dream brief.\n\n"
+                "## Compact Summary\n"
+                "External memory summary.\n",
+                encoding="utf-8",
+            )
+            prompt_md.write_text("## Current Session Handover\nA short handover exists.\n", encoding="utf-8")
+            raw_output_md.write_text("Dream output body.\n", encoding="utf-8")
+            audit_summary_md.write_text("# Audit Summary\nExternal audit summary.\n", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"AGENT_CONTEXT_ENGINE_STORAGE_ROOT": str(memory_root)}, clear=False):
+                am = load_agent_memory(root)
+                from agent_context_engine.application.monitoring.monitor.session import monitor_dreams
+
+                conn = am.connect()
+                with conn:
+                    conn.execute(
+                        """
+                        insert into sessions (
+                          session_id, client_type, thread_name, project_id, cwd,
+                          started_at, last_event_at, status, last_event_seq
+                        ) values ('dream-external-session', 'codex', 'External Dream', 'demoProject', ?, ?, ?, 'stopped', 3)
+                        """,
+                        (str(root), "2026-05-12T09:00:00+00:00", "2026-05-12T09:10:00+00:00"),
+                    )
+                    conn.execute(
+                        """
+                        insert into dream_runs (
+                          dream_run_id, session_id, client_type, runner, runner_model,
+                          started_at, finished_at, status, pipeline_version, pipeline_status,
+                          input_event_seq_from, input_event_seq_to, input_event_count,
+                          output_summary_path, output_memory_paths_json, created_by, duration_ms,
+                          prompt_tokens, cached_prompt_tokens, completion_tokens,
+                          reasoning_tokens, total_tokens
+                        ) values (
+                          'dream-external', 'dream-external-session', 'codex', 'codex', 'gpt-5.4-mini',
+                          '2026-05-12T09:11:00+00:00', '2026-05-12T09:11:05+00:00', 'succeeded', 2, 'succeeded',
+                          1, 3, 3, ?, ?, 'unit_test', 5000, 1000, 100, 200, 50, 1250
+                        )
+                        """,
+                        (str(audit_summary_md), json.dumps([str(dream_md), str(audit_summary_md)])),
+                    )
+                    conn.execute(
+                        """
+                        insert into dream_stage_runs (
+                          stage_run_id, dream_run_id, session_id, stage_name, stage_order,
+                          runner, model, status, started_at, finished_at, duration_ms,
+                          prompt_path, raw_output_path, parsed_output_path, created_by
+                        ) values (
+                          'stage-dream-external-narrative', 'dream-external', 'dream-external-session',
+                          'dream_narrative', 1, 'codex', 'gpt-5.4-mini', 'succeeded',
+                          '2026-05-12T09:11:00+00:00', '2026-05-12T09:11:05+00:00', 5000,
+                          ?, ?, ?, 'unit_test'
+                        )
+                        """,
+                        (str(prompt_md), str(raw_output_md), str(dream_md)),
+                    )
+
+                data = monitor_dreams(10)
+                dream = next(item for item in data["dreams"] if item["dream_run_id"] == "dream-external")
+                self.assertEqual(dream["episode_short"], "External memory dream brief.")
+                self.assertEqual(dream["episode_title"], "External memory dream brief.")
+                self.assertTrue(any(str(file["path"]) == str(dream_md) for file in dream["memory_files"]))
+                audit_file = next(file for file in dream["audit_files"] if str(file["path"]) == str(audit_summary_md))
+                self.assertEqual(audit_file["kind"], "audit_summary")
+                stage = next(item for item in dream["v2_stages"] if item["stage_name"] == "dream_narrative")
+                prompt_file = next(file for file in stage["files"] if file["kind"] == "prompt")
+                parsed_file = next(file for file in stage["files"] if file["kind"] == "parsed_output")
+                self.assertIn("Current Session Handover", prompt_file["content"])
+                self.assertIn("External memory dream brief.", parsed_file["content"])
+
+    def test_monitor_session_detail_reads_external_v2_summary_without_summary_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "checkout"
+            root.mkdir(parents=True, exist_ok=True)
+            memory_root = base / "runtime-memory"
+            summary_path = memory_root / "dream" / "v2" / "runs" / "dream-detail" / "audit" / "summary.md"
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            summary_path.write_text("# Audit Summary\n\nExternal detail summary.\n", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"AGENT_CONTEXT_ENGINE_STORAGE_ROOT": str(memory_root)}, clear=False):
+                am = load_agent_memory(root)
+                from agent_context_engine.application.monitoring.monitor.session import monitor_session_detail, monitor_sessions
+
+                conn = am.connect()
+                with conn:
+                    conn.execute(
+                        """
+                        insert into sessions (
+                          session_id, client_type, thread_name, project_id, cwd,
+                          started_at, last_event_at, status, last_event_seq,
+                          summary_status, dream_status, last_summary_event_seq, last_dream_event_seq
+                        ) values (
+                          'detail-external-session', 'codex', 'Detail External', 'demoProject', ?,
+                          '2026-05-12T09:00:00+00:00', '2026-05-12T09:10:00+00:00',
+                          'stopped', 3, 'summary_pending', 'dreamed', 0, 3
+                        )
+                        """,
+                        (str(root),),
+                    )
+                    conn.execute(
+                        """
+                        insert into dream_runs (
+                          dream_run_id, session_id, client_type, runner, runner_model,
+                          started_at, finished_at, status, pipeline_version, pipeline_status,
+                          input_event_seq_from, input_event_seq_to, input_event_count,
+                          output_summary_path, output_memory_paths_json, created_by
+                        ) values (
+                          'detail-external-dream', 'detail-external-session', 'codex', 'codex', 'gpt-5.4-mini',
+                          '2026-05-12T09:11:00+00:00', '2026-05-12T09:11:05+00:00', 'succeeded', 2, 'succeeded',
+                          1, 3, 3, ?, ?, 'unit_test'
+                        )
+                        """,
+                        (str(summary_path), json.dumps([str(summary_path)])),
+                    )
+
+                sessions = monitor_sessions(limit=10)
+                session = next(item for item in sessions["sessions"] if item["session_id"] == "detail-external-session")
+                self.assertIn("External detail summary.", session["summary_preview"])
+
+                detail = monitor_session_detail("detail-external-session", include="summary")
+                self.assertEqual(detail["summary"]["summary_kind"], "dream_pipeline_v2")
+                self.assertEqual(detail["summary"]["summary_path"], str(summary_path))
+                self.assertIn("External detail summary.", detail["summary"]["content"])
+
     def test_monitor_session_detail_exposes_semantic_mutation_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -10950,8 +11093,8 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(instance_metadata["instance_id"], "install-root")
             self.assertEqual(instance_metadata["installation_root"], str(install_root.resolve()))
             self.assertEqual(instance_metadata["memory_root"], str(memory_root.resolve()))
-            self.assertEqual(instance_metadata["product_version"], "0.2.9")
-            self.assertEqual(instance_metadata["monitor_version"], "0.6.7")
+            self.assertEqual(instance_metadata["product_version"], "0.2.10")
+            self.assertEqual(instance_metadata["monitor_version"], "0.6.8")
             self.assertEqual(instance_metadata["monitor_port"], 8899)
             self.assertEqual(instance_metadata["wrapper_suffix"], "-ace")
             self.assertTrue(str(instance_metadata["installed_at"]))
@@ -14247,6 +14390,107 @@ print("{}")
             self.assertIn("summarize-sessions", status.stdout)
             self.assertIn("summarize-windows", status.stdout)
             self.assertIn("dream", status.stdout)
+
+    def test_handover_prefers_dream_brief_and_reads_external_memory_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "checkout"
+            root.mkdir(parents=True, exist_ok=True)
+            (root / "docs" / "knowledge").mkdir(parents=True, exist_ok=True)
+            (root / "docs" / "knowledge" / "repos.md").write_text("", encoding="utf-8")
+            memory_root = base / "runtime-memory"
+            run_dir = memory_root / "dream" / "v2" / "runs" / "handover-dream"
+            audit_dir = run_dir / "audit"
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            dream_memory_path = memory_root / "memories" / "dreams" / "demoProject" / "handover-dream.md"
+            dream_memory_path.parent.mkdir(parents=True, exist_ok=True)
+            project_memory_path = memory_root / "memories" / "projects" / "demoProject.md"
+            project_memory_path.parent.mkdir(parents=True, exist_ok=True)
+            summary_path = audit_dir / "summary.md"
+            summary_path.write_text("# Audit Summary\n\nDream audit summary for the new session handover.\n", encoding="utf-8")
+            dream_memory_path.write_text(
+                "# Dream Memory Update\n\n"
+                "## Startup Brief\n"
+                "The session migrated the handover flow to use the dream brief first.\n\n"
+                "## Compact Summary\n"
+                "Longer detail for the resumed agent.\n",
+                encoding="utf-8",
+            )
+            project_memory_path.write_text("# demoProject\n\nProject memory context.\n", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"AGENT_CONTEXT_ENGINE_STORAGE_ROOT": str(memory_root)}, clear=False):
+                am = load_agent_memory(root)
+                conn = am.connect()
+                with conn:
+                    conn.execute(
+                        """
+                        insert into sessions (
+                          session_id, client_type, thread_name, project_id, cwd,
+                          started_at, last_event_at, status, last_event_seq,
+                          summary_status, dream_status, last_summary_event_seq, last_dream_event_seq
+                        ) values (
+                          'handover-quality-session', 'codex', 'Handover Quality', 'demoProject', ?,
+                          '2026-06-29T08:00:00+00:00', '2026-06-29T08:05:00+00:00', 'stopped', 4,
+                          'summarized', 'dreamed', 4, 4
+                        )
+                        """,
+                        (str(root),),
+                    )
+                    conn.execute(
+                        """
+                        insert into summaries (
+                          session_id, summary_path, created_at, input_event_seq_to,
+                          input_event_count, summary_kind
+                        ) values (
+                          'handover-quality-session', ?, '2026-06-29T08:05:00+00:00', 4, 4, 'dream_pipeline_v2'
+                        )
+                        """,
+                        (str(summary_path),),
+                    )
+                    conn.execute(
+                        """
+                        insert into dream_runs (
+                          dream_run_id, session_id, client_type, runner, runner_model,
+                          started_at, finished_at, status, pipeline_version, pipeline_status,
+                          input_event_seq_from, input_event_seq_to, input_event_count,
+                          output_summary_path, output_memory_paths_json, created_by
+                        ) values (
+                          'handover-dream', 'handover-quality-session', 'codex', 'codex', 'gpt-5.4-mini',
+                          '2026-06-29T08:04:00+00:00', '2026-06-29T08:05:00+00:00', 'succeeded', 2, 'succeeded',
+                          1, 4, 4, ?, ?, 'unit_test'
+                        )
+                        """,
+                        (str(summary_path), json.dumps([str(dream_memory_path), str(summary_path)])),
+                    )
+                    conn.execute(
+                        """
+                        insert into events (
+                          session_id, seq, event_name, recorded_at, client_type,
+                          cwd, project_id, prompt, last_assistant_message, payload_json
+                        ) values (
+                          'handover-quality-session', 1, 'UserPromptSubmit', '2026-06-29T08:01:00+00:00',
+                          'codex', ?, 'demoProject', 'Prepare the next session handover', 'Done', '{}'
+                        )
+                        """,
+                        (str(root),),
+                    )
+
+            handover = run_cli(
+                root,
+                "handover",
+                "handover-quality-session",
+                extra_env={"AGENT_CONTEXT_ENGINE_STORAGE_ROOT": str(memory_root)},
+            )
+            self.assertEqual(handover.returncode, 0, handover.stderr)
+            self.assertIn("## Session Brief", handover.stdout)
+            self.assertIn("The session migrated the handover flow to use the dream brief first.", handover.stdout)
+            self.assertIn("active_summary_kind: `dream_pipeline_v2`", handover.stdout)
+            self.assertIn("## Current Session Summary", handover.stdout)
+            self.assertIn("Dream audit summary for the new session handover.", handover.stdout)
+            self.assertIn("## Latest Dream Memory", handover.stdout)
+            self.assertIn("- project_memory: `", handover.stdout)
+            self.assertIn("runtime-memory/memories/projects/demoProject.md`", handover.stdout)
+            self.assertNotIn("## Deterministic Summary", handover.stdout)
 
     def test_pending_dream_repairs_missing_graph_patch_for_succeeded_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

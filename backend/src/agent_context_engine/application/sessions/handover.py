@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..instance_profile import resolve_runner_wrapper_name
+from ..dreaming.memory import extract_session_brief
 from ...infrastructure.config import MEMORY_DIR, ROOT
 from ...infrastructure.db import connect, resolve_session, session_events
 from ...infrastructure.metrics import session_metrics
@@ -100,7 +101,8 @@ def cmd_context(args: argparse.Namespace) -> int:
     if session is None:
         print(f"No session found for selector: {args.selector}", file=sys.stderr)
         return 1
-    summary = conn.execute("select * from summaries where session_id = ?", (session["session_id"],)).fetchone()
+    dream = latest_dream_for_session(conn, session["session_id"])
+    summary = _resolve_active_summary(conn, session["session_id"], dream)
     events = session_events(conn, session["session_id"])
     tools = [event for event in events if event["tool_name"]]
     print(f"Session: {session['session_id']}")
@@ -113,7 +115,7 @@ def cmd_context(args: argparse.Namespace) -> int:
     print(f"Last event: {local_time(session['last_event_at']) or '-'}")
     print(f"Last summary: {local_time(session['last_summary_at']) or '-'}")
     print(f"Last dream: {local_time(session['last_dream_at']) or '-'}")
-    print(f"Summary: {summary['summary_path'] if summary else '-'}")
+    print(f"Summary: {summary.get('summary_path') if summary else '-'}")
     print(f"Transcript: {session['transcript_path'] or '-'}")
     print(f"Exact resume: {resume_command(session)}")
     print("")
@@ -149,11 +151,11 @@ def cmd_context(args: argparse.Namespace) -> int:
     if not tools:
         print("- None")
     if summary and args.show_handover:
-        path = ROOT / summary["summary_path"]
-        if path.exists():
+        content = read_existing_rel(str(summary.get("summary_path") or ""), 200_000)
+        if content:
             print("")
             print("Handover:")
-            print(path.read_text(encoding="utf-8", errors="replace"))
+            print(content)
     return 0
 
 
@@ -170,15 +172,134 @@ def latest_dream_for_session(conn: sqlite3.Connection, session_id: str) -> sqlit
     ).fetchone()
 
 
-def read_existing_rel(path_value: str | None, limit: int) -> str:
+def _runtime_allowed_roots() -> list[Path]:
+    roots: list[Path] = []
+    for candidate in (ROOT, MEMORY_DIR):
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def _resolve_runtime_path(path_value: str | None) -> Path | None:
     if not path_value:
-        return ""
+        return None
     path = Path(path_value)
     if not path.is_absolute():
         path = ROOT / path
-    if not path.exists():
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    for allowed_root in _runtime_allowed_roots():
+        if resolved == allowed_root or allowed_root in resolved.parents:
+            return resolved
+    return None
+
+
+def _display_path(path_value: str | Path | None) -> str:
+    if not path_value:
+        return ""
+    candidate = Path(path_value)
+    if candidate.is_absolute():
+        try:
+            return str(candidate.relative_to(ROOT))
+        except ValueError:
+            return str(candidate)
+    return str(candidate)
+
+
+def read_existing_rel(path_value: str | None, limit: int) -> str:
+    path = _resolve_runtime_path(path_value)
+    if path is None:
+        return ""
+    if not path.exists() or not path.is_file():
         return ""
     return path.read_text(encoding="utf-8", errors="replace")[:limit]
+
+
+def _row_dict(row: sqlite3.Row | None) -> dict[str, Any]:
+    return {key: row[key] for key in row.keys()} if row is not None else {}
+
+
+def _parse_json_list(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if isinstance(item, (str, Path))]
+    if not isinstance(value, str):
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if isinstance(item, (str, Path))]
+
+
+def _resolve_summary_from_latest_dream(dream: sqlite3.Row | None) -> dict[str, Any]:
+    if dream is None:
+        return {}
+    output_summary_path = str(dream["output_summary_path"] or "").strip()
+    if output_summary_path:
+        return {
+            "summary_path": output_summary_path,
+            "summary_kind": "dream_pipeline_v2",
+            "created_at": dream["finished_at"] or dream["started_at"],
+            "input_event_count": int(dream["input_event_count"] or 0),
+        }
+    for path in _parse_json_list(dream["output_memory_paths_json"]):
+        normalized = str(path).strip()
+        if normalized.endswith("/summary.md") and "/audit/" in normalized:
+            return {
+                "summary_path": normalized,
+                "summary_kind": "dream_pipeline_v2",
+                "created_at": dream["finished_at"] or dream["started_at"],
+                "input_event_count": int(dream["input_event_count"] or 0),
+            }
+    return {}
+
+
+def _resolve_active_summary(conn: sqlite3.Connection, session_id: str, dream: sqlite3.Row | None) -> dict[str, Any]:
+    summary = _row_dict(conn.execute("select * from summaries where session_id = ?", (session_id,)).fetchone())
+    if summary.get("summary_path") and read_existing_rel(str(summary["summary_path"]), 1):
+        return summary
+    fallback = _resolve_summary_from_latest_dream(dream)
+    if fallback.get("summary_path") and read_existing_rel(str(fallback["summary_path"]), 1):
+        return fallback
+    return summary or fallback
+
+
+def _latest_dream_memory_path(dream: sqlite3.Row | None) -> str:
+    if dream is None:
+        return ""
+    preferred = ""
+    for path in _parse_json_list(dream["output_memory_paths_json"]):
+        normalized = str(path).strip()
+        if not normalized.endswith(".md"):
+            continue
+        if "/memories/dreams/" in normalized:
+            return normalized
+        if "/audit/" in normalized:
+            continue
+        if not preferred:
+            preferred = normalized
+    return preferred
+
+
+def _summary_brief(text: str) -> str:
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        line = line.removeprefix("-").strip()
+        if line:
+            return line[:240]
+    return ""
 
 
 def project_memory_path(project_id: str | None) -> Path:
@@ -198,8 +319,16 @@ def cmd_handover(args: argparse.Namespace) -> int:
     if session is None:
         print(f"No session found for selector: {args.selector}", file=sys.stderr)
         return 1
-    summary = conn.execute("select * from summaries where session_id = ?", (session["session_id"],)).fetchone()
     dream = latest_dream_for_session(conn, session["session_id"])
+    summary = _resolve_active_summary(conn, session["session_id"], dream)
+    summary_text = read_existing_rel(str(summary.get("summary_path") or ""), args.summary_chars).strip()
+    dream_memory_path = _latest_dream_memory_path(dream)
+    dream_memory_text = read_existing_rel(dream_memory_path, args.dream_chars).strip()
+    session_brief = (
+        extract_session_brief(dream_memory_text)
+        or str(session["session_brief"] or "").strip()
+        or _summary_brief(summary_text)
+    )
     metrics = session_metrics(conn, session["session_id"])
     workdir = session["last_workdir"] or session["cwd"] or str(ROOT)
     events = session_events(conn, session["session_id"])
@@ -224,6 +353,7 @@ def cmd_handover(args: argparse.Namespace) -> int:
     print(f"- events: `{session['last_event_seq']}`")
     print(f"- last_event_at: `{local_time(session['last_event_at'])}`")
     print(f"- summary_status: `{session['summary_status']}`")
+    print(f"- active_summary_kind: `{summary.get('summary_kind') or ''}`")
     print(f"- last_summary_at: `{local_time(session['last_summary_at'])}`")
     print(f"- new_events_since_summary: `{max(int(session['last_event_seq']) - int(session['last_summary_event_seq']), 0)}`")
     print(f"- dream_status: `{session['dream_status']}`")
@@ -246,11 +376,11 @@ def cmd_handover(args: argparse.Namespace) -> int:
     print("")
     print("## Artifacts")
     print("")
-    print(f"- summary: `{summary['summary_path'] if summary else ''}`")
+    print(f"- summary: `{summary.get('summary_path') or ''}` kind=`{summary.get('summary_kind') or ''}`")
     if dream:
         print(f"- dream_memory: `{dream['output_memory_paths_json'] or ''}`")
     project_memory = project_memory_path(session["project_id"])
-    print(f"- project_memory: `{project_memory.relative_to(ROOT) if project_memory.exists() else ''}`")
+    print(f"- project_memory: `{_display_path(project_memory) if project_memory.exists() else ''}`")
     graph_rows = list(
         conn.execute(
             """
@@ -284,22 +414,20 @@ def cmd_handover(args: argparse.Namespace) -> int:
         print("_No AGENTS.md found for this workdir._")
     print("")
 
-    if summary:
-        print("## Deterministic Summary")
+    if session_brief:
+        print("## Session Brief")
         print("")
-        print(read_existing_rel(summary["summary_path"], args.summary_chars).strip() or "_Summary file missing or empty._")
+        print(session_brief)
         print("")
-    if dream and dream["output_memory_paths_json"]:
-        print("## Dream Memory")
+    if summary.get("summary_path"):
+        print("## Current Session Summary")
         print("")
-        try:
-            paths = "[]" if not dream["output_memory_paths_json"] else dream["output_memory_paths_json"]
-            for path_value in json.loads(paths):
-                if str(path_value).endswith(".md") and "/dreams/" in str(path_value):
-                    print(read_existing_rel(str(path_value), args.dream_chars).strip() or "_Dream file missing or empty._")
-                    break
-        except Exception:  # noqa: BLE001
-            print("_Could not parse dream output paths._")
+        print(summary_text or "_Summary file missing or empty._")
+        print("")
+    if dream_memory_path and dream_memory_text and dream_memory_path != str(summary.get("summary_path") or ""):
+        print("## Latest Dream Memory")
+        print("")
+        print(dream_memory_text or "_Dream file missing or empty._")
         print("")
     if args.include_project_memory and project_memory.exists():
         print("## Project Memory")

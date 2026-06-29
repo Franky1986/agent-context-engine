@@ -30,11 +30,33 @@ def _safe_rel(path: Path | str) -> str:
     return str(candidate)
 
 
-def _read_rel(path: str | None, limit: int = 200_000) -> str:
+def _resolve_artifact_path(path: str | None) -> Path | None:
     if not path:
-        return ""
-    abs_path = ROOT / path
-    if not abs_path.exists() or not abs_path.is_file():
+        return None
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return None
+    allowed_roots: list[Path] = []
+    for allowed in (ROOT, MEMORY_DIR):
+        try:
+            allowed_resolved = allowed.resolve()
+        except OSError:
+            continue
+        if allowed_resolved not in allowed_roots:
+            allowed_roots.append(allowed_resolved)
+    for allowed in allowed_roots:
+        if resolved == allowed or allowed in resolved.parents:
+            return resolved
+    return None
+
+
+def _read_rel(path: str | None, limit: int = 200_000) -> str:
+    abs_path = _resolve_artifact_path(path)
+    if abs_path is None or not abs_path.exists() or not abs_path.is_file():
         return ""
     text = abs_path.read_text(encoding="utf-8", errors="replace")
     return text[:limit] + ("\n...[truncated]" if len(text) > limit else "")

@@ -53,7 +53,7 @@ export const Evaluation: Story = {
           model: 'gpt-5.4-mini',
           total_tokens: 5000,
           duration_ms: 12000,
-          files: [{ kind: 'prompt', path: 'memory/dream/v2/runs/dream-a/01-dream-narrative/prompt.md', content: '## Current Session Handover\nA short handover exists.' }],
+          files: [{ kind: 'prompt', path: 'memory/dream/v2/runs/dream-a/01-dream-narrative/prompt.md', content: '## Current Deterministic Handover\nA short handover exists.' }],
         },
       ],
     },

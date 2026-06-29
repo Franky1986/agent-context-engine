@@ -501,10 +501,13 @@ Example:
 13. Takeover install
 14. Isolated install
 
-## 2026-06-26 Update Snapshot
+## 2026-06-29 Update Snapshot
 
-- backend version `0.2.9`
-- monitor version `0.6.7`
+- backend version `0.2.10`
+- monitor version `0.6.8`
+- handover and Dream-v2 monitor surfaces now load summaries/audit artifacts from
+  external runtime-memory roots and expose a dream-first session brief for fresh
+  continuation
 - cursor activation now persists configured background runner and launch workdir on hook
   generation
 - session list and session detail now expose both origin client and background dream
@@ -554,8 +557,8 @@ Most important regressions:
 
 Change set under test:
 
-- backend version `0.2.9`
-- monitor version `0.6.7`
+- backend version `0.2.10`
+- monitor version `0.6.8`
 - installation and integration command surface updated around `--installation-root`
 - isolated install flow updated around deterministic local memory and wrapper behavior
 - installation integration tests are now a separate `install-integration-suite`
