@@ -62,9 +62,10 @@ across installation, hook startup, and harness entrypoints.
   prefix-less subcommands for startup command families.
 - User-only `approve`/`firewall`/`workdir` controls are rendered conditionally
   based on active block/taint/firewall context and not included as permanent
-  startup noise.
-- Session start context supports staged injection: compact default + trigger-based
-  enrichment on demand.
+  startup noise in SessionStart output.
+- Session start context uses a compact default and adds compact-on-demand enrichment
+  only when context triggers it.
+- Startup commands in the compact SessionStart context stay focused on retrieval/handover paths and do not include hook-management commands by default.
 
 ## Tests / Checks
 

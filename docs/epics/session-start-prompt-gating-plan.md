@@ -15,18 +15,18 @@ Der gewünschte Endzustand ist:
    - Der CLI-Prefix (`agent-context-engine`, ggf. projektabhängige Wrapper-Variante) wird einmal am Anfang kommuniziert.
    - Danach werden Subcommands ohne Präfix aufgelistet.
 
-2. **Zweistufiger Startflow**
-   - Stage 1: kompakter Default-Startkontext.
-   - Stage 2: zielgenaue Kontextergänzung nach Intent oder Event-Trigger.
+2. **Kondensierter Basiskontext**
+   - Der Standard-Sessionstart bleibt kompakt.
+   - Kontextergänzung erfolgt nur bei konkretem Trigger/Bedarf im laufenden Dialog.
 
 3. **Konditionale User-Only Controls**
-   - `approve`-/`firewall`-/`workdir`-Kontrollzeilen nur anzeigen, wenn der Kontext sie wirklich verlangt.
-   - `hooks-*` bleiben in der Stage-1-Referenz als Schnellzugriff erhalten.
+  - `approve`-/`firewall`-/`workdir`-Kontrollzeilen nur anzeigen, wenn der Kontext sie wirklich verlangt.
+  - `hooks-*` bleiben nicht im Basiskontext enthalten; sie sind weiterhin über `session-start-context` oder explizit zugänglich.
 
 4. **`session-start-context` bleibt als Fallback/Detailpfad**
    - Vollständige Kommandoliste bleibt abrufbar, aber nicht im Default-Startblock.
 
-## Soll-Darstellung (kompakte Stage-1-Form)
+## Soll-Darstellung (kompakter Basiskontext)
 
 - `agent-context-engine`
   - `last --limit 10`
@@ -34,9 +34,6 @@ Der gewünschte Endzustand ist:
   - `handover "<session|title|search terms>"`
   - `retrieve "<frage oder suchtext>" --limit 10`
   - `search "<begriff>" --limit 5`
-  - `hooks-disable [--runner <runner>]`
-  - `hooks-enable [--runner <runner>]`
-  - `hooks-status`
 
 Load extra context when needed:
 
@@ -57,7 +54,7 @@ Aktuelle Reihenfolge in `memory_hooks_status_context` + `startup_entry_content`:
 3. Optionale Dream-/Cursor/Firewall/taint/pendingspezifische Nachreichung.
 4. Monitor-Kommandoline.
 
-## Trigger für zusätzliche Kontrollblöcke (Stage 2)
+## Trigger für zusätzliche Kontrollblöcke
 
 - **Pending-Approvals vorhanden**
   - `Pending blocked approvals: n...`
@@ -76,7 +73,7 @@ Aktuelle Reihenfolge in `memory_hooks_status_context` + `startup_entry_content`:
   - Cursor-spezifische Auth-Notiz bei ersten relevanten Schritten.
 
 - **Block-/Workdir-/Explain-Kontexte**
-  - bleiben im passenden User-Prompt-/Tool-Kontext aktiv; werden nicht im Stage-1-Block dauerhaft angezeigt.
+  - bleiben im passenden User-Prompt-/Tool-Kontext aktiv; werden nicht im Basiskontext dauerhaft angezeigt.
 
 ## Umsetzung in Code (Ist-Stand)
 
@@ -98,12 +95,12 @@ Aktuelle Reihenfolge in `memory_hooks_status_context` + `startup_entry_content`:
 
 5. **Normative Spezifikation**
    - `backend/src/agent_context_engine/application/agent_flow/agent_flow.spec.md`
-   - Akzeptanzkriterien: prefix-once + staged injection + conditional controls.
+  - Akzeptanzkriterien: prefix-once + konditionaler Zusatzkontext + conditional controls.
 
 ## Risiken / offene Punkte
 
 - Wenn `hooks-*` dauerhaft nicht mehr erscheinen, geht schneller Zugriff auf Hook-Management verloren.
-  - Empfehlung: die drei Basis-Hooks weiterhin in Stage-1 behalten.
+  - Empfehlung: `session-start-context` als dokumentierten Detailpfad für diese Befehle nutzen.
 
 - Die Trigger-Heuristik darf kein Kontext-Regression erzeugen.
   - Bei jedem relevanten Event neu evaluieren, ob der Kontrollblock angehängt werden muss.
@@ -115,7 +112,7 @@ Aktuelle Reihenfolge in `memory_hooks_status_context` + `startup_entry_content`:
 
 - Default-Sessionstart zeigt keine dauerhaften `User-only controls`.
 - Der Prefix wird einmalig angezeigt, Subcommands sind präfixfrei.
-- Kompaktmodus bleibt kurz; Stage-2-Zeilen erscheinen nur konditional.
+- Kompaktmodus bleibt kurz; Zusatzblöcke erscheinen nur konditional.
 - `session-start-context` liefert bei Nachfrage den vollständigen Kontext.
 - Kein Verlust an Hook-/Monitor- und Repo-/Personal-Kontext-Fähigkeit.
 - Pending/Taint/Firewall/Dream-Hinweise erscheinen bei aktueller Relevanz.
@@ -123,7 +120,7 @@ Aktuelle Reihenfolge in `memory_hooks_status_context` + `startup_entry_content`:
 ## Review-Hinweis
 
 Bei aktiver Dream-Auswertung sollen Trigger-Logiken nicht mit Dream-Hook-Events kollidieren.
-Der Triggerpfad sollte vor Stage-2-Enhancements und nach der Dream-Fehlermeldung geprüft werden.
+Der Triggerpfad sollte vor Zusatz-Erweiterungen und nach der Dream-Fehlermeldung geprüft werden.
 
 ## Umsetzungsstand (2026-06-29)
 
@@ -134,6 +131,6 @@ Der Triggerpfad sollte vor Stage-2-Enhancements und nach der Dream-Fehlermeldung
   - Taint-Hinweis (`reset taint`)
   - Firewall-Enable-Hinweis bei deaktiviertem Modus
   - Dream-Fehlerwarnung
-- ✅ `hooks-disable`, `hooks-enable`, `hooks-status` als Stage-1-Explorationsbefehle aufgenommen.
+- ✅ `hooks-disable`, `hooks-enable`, `hooks-status` als auf Nachfrage verfügbare Zusatzbefehle aufgenommen.
 - ✅ `session-start-context` bleibt als vollständiger Detailpfad mit Prefix.
-- ✅ Stage-2/Stage-1-Fassung gegen Fixtures und bestehende End-to-End-Tests verifiziert.
+- ✅ Basiskontext und kontextsensitive Ergänzungen gegen Fixtures und bestehende End-to-End-Tests verifiziert.

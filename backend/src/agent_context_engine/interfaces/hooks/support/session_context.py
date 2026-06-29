@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 from pathlib import Path
@@ -48,12 +49,28 @@ def _default_startup_entry(command_prefix: str) -> str:
     return render_session_start_hook_entry(contract)
 
 
+_LEGACY_SESSION_ENTRY_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"(?mi)^-\s*`(?:agent-context-engine\s+)?(last|use|handover|retrieve|search)\b",
+    ),
+    re.compile(r"(?mi)^-\s*`(?:agent-context-engine\s+)?(hooks-disable|hooks-enable|hooks-status)\b"),
+    re.compile(r"(?ms)^`+User-only controls:`"),
+)
+
+
+def _has_legacy_startup_entry_content(text: str) -> bool:
+    return any(pattern.search(text) for pattern in _LEGACY_SESSION_ENTRY_PATTERNS)
+
+
 def startup_entry_content() -> str:
     default = _default_startup_entry(agent_memory_command_prefix())
     if not SESSION_START_HOOK_ENTRY.exists():
         return default
     try:
-        return SESSION_START_HOOK_ENTRY.read_text(encoding="utf-8", errors="replace").strip()
+        text = SESSION_START_HOOK_ENTRY.read_text(encoding="utf-8", errors="replace").strip()
+        if _has_legacy_startup_entry_content(text):
+            return default
+        return text
     except OSError:
         return default
 
@@ -545,6 +562,7 @@ def memory_hooks_status_context(
     project_id: str | None = None,
     include_dream_notice: bool = True,
     include_cursor_auth_notice: bool = False,
+    include_user_only_controls: bool = False,
 ) -> str:
     lines = [
         f"Agent Context Engine active in `{ROOT}`",
@@ -575,14 +593,15 @@ def memory_hooks_status_context(
         (session_id,),
     ).fetchone()
     before_seq = int(session_row["last_event_seq"]) + 1 if session_row and session_row["last_event_seq"] is not None else 10**9
-    user_only_controls = _conditional_user_only_controls(
-        conn,
-        session_id=session_id,
-        current_folder=current_folder,
-        before_seq=before_seq,
-    )
-    if user_only_controls:
-        lines.append(user_only_controls)
+    if include_user_only_controls:
+        user_only_controls = _conditional_user_only_controls(
+            conn,
+            session_id=session_id,
+            current_folder=current_folder,
+            before_seq=before_seq,
+        )
+        if user_only_controls:
+            lines.append(user_only_controls)
     if include_dream_notice:
         dream_context = dream_failure_context(
             conn,

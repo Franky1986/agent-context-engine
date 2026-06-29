@@ -271,6 +271,7 @@ def _build_user_prompt_context(
         agent_name=thread_name,
         thread_name=thread_name,
         project_id=project_id,
+        include_user_only_controls=True,
         include_cursor_auth_notice=include_cursor_auth_notice,
     )
     firewall_suggestion = pending_firewall_rule_suggestion_context(conn, session_id, original_prompt)
@@ -1057,6 +1058,7 @@ def log_payload(
                 agent_name=thread_name,
                 thread_name=thread_name,
                 project_id=project_id,
+                include_user_only_controls=True,
                 include_cursor_auth_notice=include_cursor_auth_notice,
             )
             control_plane_messages = apply_direct_user_firewall_commands(

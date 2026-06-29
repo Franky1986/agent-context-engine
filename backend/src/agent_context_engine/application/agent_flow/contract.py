@@ -87,9 +87,6 @@ def render_session_start_hook_entry(contract: AgentFlowContract) -> str:
         'handover "<session|title|search terms>"',
         'retrieve "<question or search terms>" --limit 10',
         'search "<search terms>" --limit 5',
-        "hooks-disable [--runner <runner>]",
-        "hooks-enable [--runner <runner>]",
-        "hooks-status",
     ]
     extra_context_commands = [
         "session-start-context",

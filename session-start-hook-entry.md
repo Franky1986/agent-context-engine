@@ -21,9 +21,6 @@ Start here for previous work:
 - `handover "<session|title|search terms>"`
 - `retrieve "<question or search terms>" --limit 10`
 - `search "<search terms>" --limit 5`
-- `hooks-disable [--runner <runner>]`
-- `hooks-enable [--runner <runner>]`
-- `hooks-status`
 
 Load extra context when needed:
 - `session-start-context`
