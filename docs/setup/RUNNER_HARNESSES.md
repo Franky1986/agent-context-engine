@@ -56,6 +56,10 @@ instead of silently keeping the older checkout default.
 uses that same discovery context. In interactive use it guides the remaining
 choices, shows a final install-plan confirmation before writing files, and in
 non-interactive use it prints the recommended explicit command.
+For agent-driven installs, sandbox/tool approval is not user consent for the
+install itself. Agents must present the discovery or final install plan in chat
+and wait for explicit user approval before running a mutating install command or
+answering `yes` to the final installer prompt.
 
 Central installation into the chosen target root prepares these local artifacts
 by default. Hook artifacts and GUI workspace hooks are activated only as the
@@ -350,6 +354,8 @@ Agent rule:
 - prefer discovery-driven defaults over asking for raw CLI flags
 - summarize suggested target, memory root, monitor port, wrapper naming, and
   refresh mode, then wait for explicit user approval before applying them
+- treat sandbox/tool escalation approval as separate from install approval; do
+  not answer the installer's final `yes/no` prompt on the user's behalf
 - mention whether repo/folder entries are already known from the active memory
   root, where the runtime repo index lives, that the monitor exposes it under
   `Personal -> Repo-Index`, and that agents can add further repo/folder entries

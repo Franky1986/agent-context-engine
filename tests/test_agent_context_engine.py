@@ -11730,6 +11730,8 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertNotIn("--no-install-launchagent", result.stdout)
             self.assertNotIn(f"--target '{source_root.resolve()}'", result.stdout)
             self.assertIn("Nutzerfreigabe erforderlich", result.stdout)
+            self.assertIn("Agent-Freigabegrenze", result.stdout)
+            self.assertIn("ausdrueckliche Chat-Freigabe", result.stdout)
 
     def test_install_discovery_uses_environment_language_before_saved_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -12289,8 +12291,37 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("Installations-Discovery", discovery.stdout)
             self.assertIn("Vorgeschlagenes Ziel", discovery.stdout)
             self.assertIn("Nutzerfreigabe erforderlich", discovery.stdout)
+            self.assertIn("Agent-Freigabegrenze", discovery.stdout)
             self.assertIn("Monitor-Ansicht fuer Repo-Wissen", discovery.stdout)
             self.assertIn("Spaetere Repo-/Ordner-Ergaenzungen", discovery.stdout)
+
+            load_agent_memory(public_root)
+            from agent_context_engine.interfaces.cli.commands.installation import _discovery_summary, _render_install_plan
+
+            summary = _discovery_summary(start=public_root, target_hint=public_root, language_hint="de")
+            plan_text = _render_install_plan(
+                summary,
+                argparse.Namespace(
+                    target=str(public_root),
+                    memory_root=None,
+                    language="de",
+                    monitor_host=None,
+                    monitor_port=None,
+                    command_prefix=None,
+                    wrapper_prefix=None,
+                    wrapper_suffix=None,
+                    instance_name=None,
+                    isolated=False,
+                    install_launchagent=False,
+                    replace_existing_global_links=False,
+                    bootstrap_runtime=True,
+                    start_monitor=True,
+                    link_dir=None,
+                ),
+                language="de",
+            )
+            self.assertIn("Agent-Freigabegrenze", plan_text)
+            self.assertIn("finalen Installationsprompt", plan_text)
 
             install = run_cli(
                 public_root,

@@ -73,6 +73,10 @@ should be treated as inconclusive until rerun with the required access.
 Include the monitor-port caveat explicitly in the approval summary: the shown
 port is a discovery default and is revalidated again immediately before config
 is written.
+Sandbox/tool escalation approval is not install consent. After presenting the
+install discovery or final install plan, stop and wait for an explicit user chat
+approval before running the mutating install command or before answering `yes`
+to the installer's final confirmation prompt.
 
 ## Integration Management Context
 

@@ -29,6 +29,9 @@ agent should:
 5. Summarize the suggested target root, memory root, monitor port, wrapper
    naming, and refresh mode, then wait for the user's approval before any
    install or refresh mutation.
+   Sandbox/tool escalation approval is not sufficient. If the installer later
+   shows a final `yes/no` confirmation prompt, agents must not answer `yes`
+   unless the user already gave explicit chat approval for that exact plan.
    That summary should explicitly say that the proposed monitor port is only a
    discovery default and will be revalidated again immediately before config is
    written.

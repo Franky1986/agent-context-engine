@@ -1049,6 +1049,12 @@ def _render_install_discovery(summary: dict[str, object], *, language: str | Non
         f"- {_ui_text(lang, en='monitor startup after install', de='Monitorstart nach der Installation')}: {_ui_text(lang, en='yes', de='ja')}",
         f"- {_ui_text(lang, en='user confirmation required', de='Nutzerfreigabe erforderlich')}: "
         + _ui_text(lang, en="yes", de="ja"),
+        f"- {_ui_text(lang, en='agent approval boundary', de='Agent-Freigabegrenze')}: "
+        + _ui_text(
+            lang,
+            en="agents must stop after presenting this plan and wait for an explicit user chat approval before running or confirming install",
+            de="Agenten muessen nach diesem Plan stoppen und vor Ausfuehrung oder Bestaetigung der Installation eine ausdrueckliche Chat-Freigabe des Nutzers abwarten",
+        ),
     ]
     if summary.get("detected_source_checkout"):
         lines.append(
@@ -1539,6 +1545,14 @@ def _render_install_plan(summary: dict[str, object], args: argparse.Namespace, *
             language,
             en="agents can update the Repo-Index in the monitor later; install also accepts repeated --project name=/absolute/path",
             de="Agents koennen den Repo-Index spaeter im Monitor aktualisieren; die Installation akzeptiert ausserdem wiederholte --project name=/absoluter/pfad",
+        )
+    )
+    lines.append(
+        f"- {_ui_text(language, en='agent approval boundary', de='Agent-Freigabegrenze')}: "
+        + _ui_text(
+            language,
+            en="agents must stop here and get explicit user chat approval before answering yes to the final install prompt",
+            de="Agenten muessen hier stoppen und vor einem Ja zum finalen Installationsprompt eine ausdrueckliche Chat-Freigabe des Nutzers einholen",
         )
     )
     if isolated:
@@ -4271,8 +4285,8 @@ def cmd_install(args: argparse.Namespace) -> int:
         proceed = ask_yes_no(
             _ui_text(
                 language,
-                en="Proceed with this installation plan?",
-                de="Diesen Installationsplan jetzt ausfuehren?",
+                en="Proceed with this installation plan? Agents: answer yes only after explicit user chat approval.",
+                de="Diesen Installationsplan jetzt ausfuehren? Agenten: Ja nur nach ausdruecklicher Chat-Freigabe des Nutzers.",
             ),
             default=False,
         )
