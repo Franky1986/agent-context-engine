@@ -92,6 +92,10 @@ activation:
   checked-in monitor frontend lockfile and rely on `install-discovery` /
   `check-installation` for the exact currently required version floor
 
+Monitor status uses a fast integration summary. It reports wrapper and hook
+state without blocking `/api/status` on external runner authentication or model
+discovery; full readiness probes remain explicit integration checks.
+
 Central installation does not automatically activate every client in every other
 project folder.
 
@@ -144,6 +148,11 @@ Optional global wrappers can be linked into `~/.local/bin`:
 - `opencode-ace`
 
 On Windows, publication uses generated `.cmd` shims instead of symlinks.
+Python-entrypoint shims must prefer `AGENT_CONTEXT_ENGINE_PYTHON`, then
+`AGENT_MEMORY_PYTHON`, then the installation-local `.venv\Scripts\python.exe`
+before falling back to PATH Python or `py -3`. This prevents global commands
+from bypassing the runtime environment that contains the installed backend
+dependencies.
 
 The default public installation behavior is to relink these shared commands to
 the chosen installation. If a previous installation already owns them, discovery
@@ -226,6 +235,24 @@ LaunchAgent identity for the instance. By default user-scoped metadata lives in
 The CLI flag names remain `launchagent-*` for compatibility, but on Windows the
 same install path drives the per-user Task Scheduler job instead of a macOS
 LaunchAgent.
+
+Monitor startup is also platform-specific. On Windows, long-running monitor
+startup should be hosted through `cmd.exe /c start "ace-monitor" /min ...` with
+`AGENT_CONTEXT_ENGINE_ROOT` and `AGENT_CONTEXT_ENGINE_STORAGE_ROOT` set for the
+child process. A detached `python.exe` process can exit immediately after
+printing the monitor banner, so verification must check the bound port and
+`/api/status`.
+
+If the command-host launch does not expose a stable port from an agent-run
+install, Windows autostart falls back to a per-user Task Scheduler launcher
+script under `<memory-root>\local\windows-monitor-start.cmd`. That fallback is
+specifically for transient agent tool processes that clean up child processes
+after command completion.
+
+For manual recovery, run `scripts\start-monitor-windows.ps1 -ReplaceExisting`
+or `scripts\start-monitor-windows.cmd -ReplaceExisting` from a normal Windows
+terminal. The helper records stdout/stderr under the active memory-root logs
+directory and waits for both status and firewall endpoints.
 
 Scheduler setup is part of the default install contract because background
 dreaming depends on periodic catch-up. Operators may skip it only with an

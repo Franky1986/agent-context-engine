@@ -826,6 +826,7 @@ const en = {
   'pilot.firewall': 'Firewall',
   'pilot.firewallEnabled': 'active',
   'pilot.firewallDisabled': 'inactive',
+  'pilot.firewallUnknown': 'unknown',
   'pilot.scopedOverrides': 'Scoped overrides',
   'pilot.activeOverrideSingular': 'active override',
   'pilot.activeOverridePlural': 'active overrides',

@@ -46,6 +46,8 @@ export function MonitorPilot({ initialStatus, initialFirewall, language = 'en' }
   }, [initialStatus, initialFirewall]);
 
   const effectiveFirewall = firewall ?? status?.firewall;
+  const firewallKnown = Boolean(effectiveFirewall);
+  const firewallEnabled = effectiveFirewall?.enabled === true;
   const overrides = effectiveFirewall?.overrides ?? [];
 
   return (
@@ -73,9 +75,15 @@ export function MonitorPilot({ initialStatus, initialFirewall, language = 'en' }
           <span>{t(language, 'pilot.pendingDreams')}</span>
           <strong>{valueText(status?.pending_dreams)}</strong>
         </article>
-        <article className="metric-card firewall-card" data-enabled={effectiveFirewall?.enabled ? 'true' : 'false'}>
+        <article className="metric-card firewall-card" data-enabled={firewallKnown ? String(firewallEnabled) : 'unknown'}>
           <span>{t(language, 'pilot.firewall')}</span>
-          <strong>{effectiveFirewall?.enabled ? t(language, 'pilot.firewallEnabled') : t(language, 'pilot.firewallDisabled')}</strong>
+          <strong>
+            {!firewallKnown
+              ? t(language, state === 'loading' ? 'common.loading' : 'pilot.firewallUnknown')
+              : firewallEnabled
+                ? t(language, 'pilot.firewallEnabled')
+                : t(language, 'pilot.firewallDisabled')}
+          </strong>
         </article>
       </div>
 

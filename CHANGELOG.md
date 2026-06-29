@@ -11,7 +11,30 @@ The entries below document the changes added since that initial public release.
 
 ## Unreleased
 
-- no unreleased entries currently
+### Changed
+
+- Documented native Windows smoke-run learnings for `.cmd` shim Python
+  selection, monitor process hosting, external storage-root environment, PID
+  probing, scheduler wording, and Dream queue interpretation.
+- Monitor status now uses a fast integration summary for the dashboard path
+  instead of blocking on external runner auth or model-discovery probes.
+- Added Windows monitor start helpers that resolve the local runtime, set the
+  storage root, write logs, and wait for both status and firewall endpoints.
+- Windows monitor autostart now falls back to a Task Scheduler launcher when
+  command-host startup does not expose a stable port from an agent-run install.
+
+### Fixed
+
+- Windows `.cmd` shims for Python entrypoints now prefer the installation
+  runtime Python before falling back to global Python.
+- Windows monitor autostart now uses a command-host launch path and verifies the
+  bound monitor port instead of assuming a detached Python process stayed alive.
+- Monitor status and storage inspection now tolerate Windows/user-state metadata
+  write failures and stale PID probe errors.
+- Direct monitor status calls without HTTP monitor context no longer fail while
+  building monitor process metadata.
+- The monitor status pilot no longer renders missing or still-loading firewall
+  state as inactive.
 
 ## Monitor 0.6.8
 

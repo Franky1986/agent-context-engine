@@ -61,9 +61,24 @@ For the Windows experimental slice, keep two layers separate:
 
 Current Windows setup validation has covered native `.cmd` command shims,
 PowerShell hook/wrapper rendering, Task Scheduler script generation,
-wrapper PATH resolution, gated monitor startup, late hook activation, and
-frontend production build on a Windows host. Full runner-to-retrieval evidence
-for a fresh external Windows project remains tracked by the matrix below.
+wrapper PATH resolution, gated monitor startup, late hook activation, monitor
+status/firewall endpoints, and frontend production build on a Windows host.
+Full runner-to-retrieval evidence for a fresh external Windows project remains
+tracked by the matrix below.
+
+Windows smoke-run lessons to preserve in future tests:
+
+- Python-entrypoint `.cmd` shims must use the installation runtime before
+  falling back to global Python.
+- Monitor startup should be validated through the bound port and `/api/status`;
+  a launcher process returning successfully is not sufficient evidence.
+- External runtime storage requires `AGENT_CONTEXT_ENGINE_STORAGE_ROOT` for
+  direct CLI, scheduler, dream, and monitor invocations outside the installed
+  wrapper context.
+- PID liveness probes can fail differently on Windows and must not break monitor
+  status.
+- Empty Dreams UI needs queue/pending verification before being treated as a
+  pipeline failure.
 
 ### Windows Retrieval Validation Matrix
 
@@ -528,7 +543,8 @@ Example:
   `integrations-status`, `launchagent-status --verbose`, and
   `dream-queue-status`
 - the focused Windows experimental runtime contract slice is green on the
-  development host (`10/10` focused tests)
+  development host, including command shims, PID probing, monitor metadata sync
+  tolerance, and command-host monitor autostart
 - canonical repo knowledge now resolves from `memory/knowledge/repos.md` with
   legacy docs-path import fallback, and focused tests cover rebuild-index
   searchability plus install-discovery repo-index reporting
@@ -583,7 +599,11 @@ Status legend:
 - [x] isolated installs in recent `test27`, `test28`, and `test29` runs revalidated the monitor port before writing config.
 - [x] runtime bootstrap, monitor start, and LaunchAgent load completed in recent isolated install runs.
 - [x] `session-start-hook-entry.md` now points at `agent-context-engine` instead of stale installation-only paths.
-- [ ] the current public checkout install still reports LaunchAgent drift (`installed: no`, `loaded: no`) and no active local monitor runtime on the default port.
+- [x] native Windows monitor smoke returned `/api/status` on `127.0.0.1:8787`
+  after command-host startup and reported backend `0.2.10`, monitor `0.6.8`,
+  the external memory root, and active session count.
+- [ ] scheduler diagnostics still use some `LaunchAgent` compatibility wording
+  on Windows and should be made scheduler-neutral in a follow-up.
 - [x] `python3 scripts/check_agent_context_engine.py --skip-tests --skip-runtime-db` now completes the fresh-install smoke path without the previous interactive install stall.
 - [ ] fresh deterministic takeover-install regression after the latest install changes still needs one clean scripted pass.
 - [ ] `repair-installation` still needs a targeted break-and-repair validation pass.
@@ -661,7 +681,10 @@ Status legend:
 - [x] `dream-queue-status` in `refactor-2` reported `queued=0 running=0 failed=0 terminal_failed=0 succeeded=3` after the isolated validation runs.
 - [x] `test29` monitor API confirmed the activated Cursor project and its hook state.
 - [ ] `curl -sf http://127.0.0.1:8788/api/status` failed during this pass because no local monitor process was running for the public checkout root.
-- [ ] a fresh `/api/status` drift audit after the latest monitor UI changes is still open.
+- [x] `/api/status`, `/api/integrations`, `/api/dreams`, `/api/dream-queue`,
+  and `/api/firewall-state` answered on the active Windows monitor; firewall
+  backend state was enabled and the empty Dream view matched `No sessions to
+  dream`.
 - [ ] the Sessions UI change and the Cursor aggregate card should still be checked visually in a live monitor session.
 
 ### I. Repair And Reinstall

@@ -12,10 +12,11 @@ import sys
 import threading
 import time
 import webbrowser
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
-from ....infrastructure.config import DEFAULT_STORAGE_SCHEMA_VERSION, ROOT, ROOT_ENV_VAR, SKILL_ROOT, ensure_repos_index as ensure_runtime_repos_index, legacy_repos_index_path, safe_slug, write_repos_index_text
+from ....infrastructure.config import DEFAULT_STORAGE_SCHEMA_VERSION, ROOT, ROOT_ENV_VAR, SKILL_ROOT, STORAGE_ROOT_ENV_VAR, ensure_repos_index as ensure_runtime_repos_index, legacy_repos_index_path, safe_slug, write_repos_index_text
 from ....application.installation import (
     ensure_monitor_frontend_build,
     ensure_runtime_venv,
@@ -1726,6 +1727,10 @@ def _default_launchagent_profile_for_target(
 
 def _monitor_start_command(target: Path, *, runner: str, host: str, port: int, language: str) -> list[str]:
     cli_path = agent_memory_cli_path_for_root(target)
+    if os.name == "nt":
+        cli_path_obj = Path(cli_path)
+        if not cli_path_obj.is_absolute():
+            cli_path = str((target / cli_path_obj).resolve())
     return [
         str(cli_path),
         "monitor",
@@ -1788,6 +1793,88 @@ def _stop_superseded_launchagents_for_memory_root(*, target: Path, memory_root: 
     return stop_superseded_platform_schedulers(target=target, memory_root=memory_root)
 
 
+def _windows_monitor_task_name(target: Path) -> str:
+    return f"AgentContextEngine\\Monitor-{safe_slug(target.name)}"
+
+
+def _write_windows_monitor_start_script(target: Path, command: list[str], memory_root: Path) -> Path:
+    script_path = memory_root / "local" / "windows-monitor-start.cmd"
+    log_dir = memory_root / "logs"
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stdout = log_dir / "monitor-windows-task.out.log"
+    stderr = log_dir / "monitor-windows-task.err.log"
+    script_path.write_text(
+        "\r\n".join(
+            [
+                "@echo off",
+                "setlocal",
+                f"cd /d \"{target}\"",
+                f"set {ROOT_ENV_VAR}={target}",
+                f"set {STORAGE_ROOT_ENV_VAR}={memory_root}",
+                f"{subprocess.list2cmdline(command)} >> \"{stdout}\" 2>> \"{stderr}\"",
+                "exit /b %ERRORLEVEL%",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return script_path
+
+
+def _autostart_monitor_via_windows_task(
+    target: Path,
+    *,
+    command: list[str],
+    host: str,
+    port: int,
+    memory_root: Path,
+) -> tuple[bool, str]:
+    scheduler_bin = shutil.which("schtasks")
+    if not scheduler_bin:
+        scheduler_bin = str(Path(os.environ.get("SystemRoot", r"C:\\Windows")) / "System32" / "schtasks.exe")
+    if not os.path.exists(scheduler_bin):
+        return False, "Windows Task Scheduler command `schtasks` is unavailable"
+    script_path = _write_windows_monitor_start_script(target, command, memory_root)
+    task_name = _windows_monitor_task_name(target)
+    start_time = (datetime.now() + timedelta(minutes=1)).strftime("%H:%M")
+    create = subprocess.run(
+        [
+            scheduler_bin,
+            "/Create",
+            "/TN",
+            task_name,
+            "/SC",
+            "ONCE",
+            "/ST",
+            start_time,
+            "/RL",
+            "LIMITED",
+            "/TR",
+            f'"{script_path}"',
+            "/F",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if create.returncode != 0:
+        detail = (create.stderr or create.stdout).strip() or f"schtasks create exit {create.returncode}"
+        return False, f"Windows Task Scheduler monitor task create failed: {detail}"
+    run = subprocess.run([scheduler_bin, "/Run", "/TN", task_name], text=True, capture_output=True, check=False)
+    if run.returncode != 0:
+        detail = (run.stderr or run.stdout).strip() or f"schtasks run exit {run.returncode}"
+        return False, f"Windows Task Scheduler monitor task run failed: {detail}"
+    deadline = time.time() + 20.0
+    while time.time() < deadline:
+        if _port_accepting(host, port):
+            time.sleep(1.5)
+            if _port_accepting(host, port):
+                return True, f"launched via Windows Task Scheduler task={task_name} script={script_path}"
+        time.sleep(0.5)
+    return False, f"Windows Task Scheduler monitor task did not expose port {host}:{port} task={task_name} script={script_path}"
+
+
 def _autostart_monitor_after_install(
     target: Path,
     *,
@@ -1799,10 +1886,66 @@ def _autostart_monitor_after_install(
 ) -> tuple[bool, str]:
     stop_actions = _stop_superseded_monitors_for_memory_root(target=target, memory_root=memory_root)
     command = _monitor_start_command(target, runner=runner, host=host, port=port, language=language)
+    env = {**os.environ, ROOT_ENV_VAR: str(target), STORAGE_ROOT_ENV_VAR: str(memory_root)}
+    if os.name == "nt":
+        cmdline = 'cmd.exe /c start "ace-monitor" /min ' + subprocess.list2cmdline(command)
+        process = subprocess.Popen(
+            cmdline,
+            cwd=str(target),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            shell=False,
+        )
+        time.sleep(1.5)
+        if process.poll() is None:
+            if _port_accepting(host, port):
+                time.sleep(1.5)
+                if not _port_accepting(host, port):
+                    detail = (
+                        f"windows monitor accepted briefly but did not stay running; "
+                        f"launcher_pid={process.pid} launcher_exit={process.returncode}"
+                    )
+                    if stop_actions:
+                        detail += " superseded_monitors=" + "; ".join(stop_actions)
+                    return False, detail
+                detail = f"launcher_pid={process.pid} via cmd.exe start command={monitor_restart_command(target, runner=runner)}"
+                if stop_actions:
+                    detail += " superseded_monitors=" + "; ".join(stop_actions)
+                return True, detail
+        if _port_accepting(host, port):
+            time.sleep(1.5)
+            if not _port_accepting(host, port):
+                detail = f"windows monitor accepted briefly but did not stay running; launcher exit {process.returncode}"
+                if stop_actions:
+                    detail += " superseded_monitors=" + "; ".join(stop_actions)
+                return False, detail
+            detail = f"launched via cmd.exe start command={monitor_restart_command(target, runner=runner)}"
+            if stop_actions:
+                detail += " superseded_monitors=" + "; ".join(stop_actions)
+            return True, detail
+        task_started, task_detail = _autostart_monitor_via_windows_task(
+            target,
+            command=command,
+            host=host,
+            port=port,
+            memory_root=memory_root,
+        )
+        if task_started:
+            detail = task_detail
+            if stop_actions:
+                detail += " superseded_monitors=" + "; ".join(stop_actions)
+            return True, detail
+        detail = f"windows monitor launcher exit {process.returncode}; {task_detail}"
+        if stop_actions:
+            detail += " superseded_monitors=" + "; ".join(stop_actions)
+        return False, detail
     process = subprocess.Popen(
         command,
         cwd=str(target),
-        env={**os.environ, ROOT_ENV_VAR: str(target)},
+        env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -2252,6 +2395,10 @@ def _port_conflict_status(host: str, port: int) -> dict[str, object]:
         except OSError:
             pass
     return {"available": True, "error": ""}
+
+
+def _port_accepting(host: str, port: int) -> bool:
+    return not bool(_port_conflict_status(host, port).get("available"))
 
 
 def _default_storage_root_for_install(target: Path, args: argparse.Namespace) -> Path:

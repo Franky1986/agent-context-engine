@@ -9,6 +9,7 @@ from ....adapters.sqlite.request_db import connect
 from ....infrastructure.config import DB_PATH, MEMORY_DIR, ROOT
 from ...instance_profile import (
     instance_metadata_path_for_root,
+    load_instance_metadata,
     load_installation_profile,
     load_storage_profile,
     resolve_storage_profile,
@@ -172,7 +173,12 @@ def monitor_storage_inspect() -> dict[str, Any]:
     install_profile = load_installation_profile(ROOT)
     storage = resolve_storage_profile(ROOT)
     runtime_storage_profile = load_storage_profile(MEMORY_DIR)
-    instance_metadata = sync_instance_metadata(ROOT)
+    instance_metadata_sync_error = ""
+    try:
+        instance_metadata = sync_instance_metadata(ROOT)
+    except OSError as exc:
+        instance_metadata_sync_error = str(exc)
+        instance_metadata = load_instance_metadata(str(install_profile.get("instance_id") or ROOT.name))
     db_related = tuple(path for path in [DB_PATH, Path(str(DB_PATH) + "-wal"), Path(str(DB_PATH) + "-shm")] if path.exists())
     categories = [
         _file_category("SQLite database files", "sqlite", DB_PATH.parent, "Main SQLite database plus WAL/SHM files."),
@@ -215,6 +221,7 @@ def monitor_storage_inspect() -> dict[str, Any]:
         "user_config_path": str(user_config_path()),
         "instance_metadata_path": str(instance_metadata_path_for_root(ROOT)),
         "instance_metadata": instance_metadata,
+        "instance_metadata_sync_error": instance_metadata_sync_error,
         "total": memory_total,
         "categories": categories,
         "sqlite": {

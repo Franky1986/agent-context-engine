@@ -30,11 +30,17 @@ def _render_cmd_shim(target: Path) -> str:
     resolved_target = str(target.resolve())
     suffix = target.suffix.lower()
     if suffix == ".py":
+        root = target.resolve().parent.parent
+        venv_python = root / ".venv" / "Scripts" / "python.exe"
         invocation = (
             f'{SHIM_MARKER}\n'
             "@echo off\n"
             "setlocal\n"
-            f'python "{resolved_target}" %*\n'
+            "set \"PYTHON_BIN=%AGENT_CONTEXT_ENGINE_PYTHON%\"\n"
+            "if \"%PYTHON_BIN%\"==\"\" set \"PYTHON_BIN=%AGENT_MEMORY_PYTHON%\"\n"
+            f'if "%PYTHON_BIN%"=="" if exist "{venv_python}" set "PYTHON_BIN={venv_python}"\n'
+            "if \"%PYTHON_BIN%\"==\"\" set \"PYTHON_BIN=python\"\n"
+            f'"%PYTHON_BIN%" "{resolved_target}" %*\n'
             "if not %ERRORLEVEL% EQU 9009 exit /b %ERRORLEVEL%\n"
             f'py -3 "{resolved_target}" %*\n'
             "exit /b %ERRORLEVEL%\n"

@@ -54,6 +54,12 @@ assumptions.
 - Capabilities based on static knowledge must not report `tested` evidence.
 - Scaffolded or unsupported profiles must not select mutation-capable command
   publication, scheduler, or shell-runtime adapters as if they were active.
+- Host-specific PID probing failures, including Windows `os.kill(pid, 0)`
+  `SystemError` cases, must be treated as non-live process evidence instead of
+  breaking monitor status payload generation.
+- Monitor status must not block on external runner authentication or model
+  discovery. The fast status path may report installed-but-not-probed readiness;
+  explicit integration checks can still run full external probes.
 
 ## Acceptance Criteria
 
@@ -66,6 +72,11 @@ assumptions.
   application policy code.
 - Shell-path quoting and executable-permission behavior are selected through
   explicit platform adapters instead of inline `sh_quote` / `chmod` policy.
+- Windows `.cmd` command shims for Python entrypoints prefer
+  `AGENT_CONTEXT_ENGINE_PYTHON`, then `AGENT_MEMORY_PYTHON`, then the
+  installation-local `.venv\Scripts\python.exe`, before falling back to PATH
+  Python. This keeps global commands aligned with the runtime bootstrap used by
+  the monitor and diagnostics.
 - Runtime selection for scaffolded/unsupported profiles stays explicit about
   support/evidence and defaults to non-active adapter behavior.
 

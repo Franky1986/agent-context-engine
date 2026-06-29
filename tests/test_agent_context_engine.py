@@ -10371,7 +10371,9 @@ The session reconciled stale queue state and resumed pending dreams.
 
             self.assertEqual(link.name, "agent-context-engine.cmd")
             self.assertIn("agent-context-engine command shim v1", content)
-            self.assertIn('python "', content)
+            self.assertIn("AGENT_CONTEXT_ENGINE_PYTHON", content)
+            self.assertIn(".venv", content)
+            self.assertIn('"%PYTHON_BIN%" "', content)
             self.assertIn("9009", content)
             self.assertIn('py -3 "', content)
             self.assertIn(str(target.resolve()), content)
@@ -10907,6 +10909,74 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn(exit_code, {0, 1})
             output = "\n".join(lines)
             self.assertIn("warn  instance metadata sync skipped: metadata locked", output)
+
+    def test_monitor_status_survives_instance_metadata_sync_permission_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application import monitor as monitor_app
+            from agent_context_engine.application.monitor import monitor_status
+            from agent_context_engine.infrastructure.db import connect, init_schema
+
+            conn = connect()
+            try:
+                init_schema(conn)
+                with mock.patch.object(monitor_app, "sync_instance_metadata", side_effect=PermissionError("metadata locked")):
+                    payload = monitor_status(conn, "codex", root, monitor_version="test", monitor_context={})
+                self.assertEqual(payload["root"], str(root))
+                self.assertEqual(payload["instance_metadata_sync_error"], "metadata locked")
+            finally:
+                conn.close()
+
+    def test_monitor_status_allows_missing_monitor_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.monitor import monitor_status
+            from agent_context_engine.infrastructure.db import connect, init_schema
+
+            conn = connect()
+            try:
+                init_schema(conn)
+                payload = monitor_status(conn, "codex", root, monitor_version="test")
+                self.assertEqual(payload["monitor_process"]["host"], "")
+                self.assertEqual(payload["monitor_process"]["language"], "")
+            finally:
+                conn.close()
+
+    def test_monitor_status_uses_fast_integration_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application import integrations
+            from agent_context_engine.application.monitor import monitor_status
+            from agent_context_engine.infrastructure.db import connect, init_schema
+
+            conn = connect()
+            try:
+                init_schema(conn)
+                with mock.patch.object(integrations, "runner_auth_status", side_effect=AssertionError("auth probe should not run")), mock.patch.object(
+                    integrations,
+                    "discover_opencode_models",
+                    side_effect=AssertionError("opencode model probe should not run"),
+                ), mock.patch.object(
+                    integrations,
+                    "discover_ollama_models",
+                    side_effect=AssertionError("ollama model probe should not run"),
+                ):
+                    payload = monitor_status(conn, "codex", root, monitor_version="test", monitor_context={})
+                self.assertEqual(payload["integrations"]["total"], 6)
+            finally:
+                conn.close()
+
+    def test_pid_alive_treats_windows_systemerror_as_not_alive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application import instance_profile
+
+            with mock.patch.object(instance_profile.os, "kill", side_effect=SystemError("bad pid")):
+                self.assertFalse(instance_profile._pid_alive(12345))
 
     def test_log_hook_skips_when_workspace_binding_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -11890,6 +11960,108 @@ The session reconciled stale queue state and resumed pending dreams.
                 memory_root=(test_home_root(root) / ".agent-context-engine" / "memory").resolve(),
             )
             howto_mock.assert_called_once_with(host="127.0.0.1", port=8787, runner="codex", language="en")
+
+    def test_windows_monitor_autostart_uses_cmd_start_and_storage_root_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_root = root / "runtime-memory"
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands import installation as installation_cmd
+
+            process = mock.Mock()
+            process.poll.return_value = 0
+            process.returncode = 0
+            with mock.patch.object(installation_cmd.os, "name", "nt"), mock.patch.object(
+                installation_cmd, "_stop_superseded_monitors_for_memory_root", return_value=[]
+            ), mock.patch.object(installation_cmd, "_port_accepting", return_value=True), mock.patch.object(
+                installation_cmd.subprocess, "Popen", return_value=process
+            ) as popen_mock:
+                started, detail = installation_cmd._autostart_monitor_after_install(
+                    root,
+                    runner="codex",
+                    host="127.0.0.1",
+                    port=8787,
+                    language="en",
+                    memory_root=memory_root,
+                )
+
+            self.assertTrue(started)
+            command = popen_mock.call_args.args[0]
+            self.assertIn('cmd.exe /c start "ace-monitor" /min', command)
+            self.assertIn(" monitor --runner codex ", command)
+            self.assertIn("--replace-existing --no-open", command)
+            env = popen_mock.call_args.kwargs["env"]
+            self.assertEqual(env["AGENT_CONTEXT_ENGINE_ROOT"], str(root))
+            self.assertEqual(env["AGENT_CONTEXT_ENGINE_STORAGE_ROOT"], str(memory_root))
+            self.assertIn("cmd.exe start", detail)
+
+    def test_windows_monitor_autostart_rejects_brief_port_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_root = root / "runtime-memory"
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands import installation as installation_cmd
+
+            process = mock.Mock()
+            process.poll.return_value = 0
+            process.returncode = 0
+            with mock.patch.object(installation_cmd.os, "name", "nt"), mock.patch.object(
+                installation_cmd, "_stop_superseded_monitors_for_memory_root", return_value=[]
+            ), mock.patch.object(installation_cmd, "_port_accepting", side_effect=[True, False]), mock.patch.object(
+                installation_cmd.subprocess, "Popen", return_value=process
+            ):
+                started, detail = installation_cmd._autostart_monitor_after_install(
+                    root,
+                    runner="codex",
+                    host="127.0.0.1",
+                    port=8787,
+                    language="en",
+                    memory_root=memory_root,
+                )
+
+            self.assertFalse(started)
+            self.assertIn("accepted briefly but did not stay running", detail)
+
+    def test_windows_monitor_autostart_falls_back_to_task_scheduler(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_root = root / "runtime-memory"
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands import installation as installation_cmd
+
+            process = mock.Mock()
+            process.poll.return_value = 0
+            process.returncode = 0
+            completed = subprocess.CompletedProcess(["schtasks"], 0, "ok", "")
+            with mock.patch.object(installation_cmd.os, "name", "nt"), mock.patch.object(
+                installation_cmd, "_stop_superseded_monitors_for_memory_root", return_value=[]
+            ), mock.patch.object(installation_cmd, "_port_accepting", side_effect=[False, False, True, True]), mock.patch.object(
+                installation_cmd.subprocess, "Popen", return_value=process
+            ), mock.patch.object(
+                installation_cmd.subprocess, "run", return_value=completed
+            ) as run_mock, mock.patch.object(
+                installation_cmd.shutil, "which", return_value="schtasks.exe"
+            ), mock.patch.object(installation_cmd.os.path, "exists", return_value=True):
+            ):
+                started, detail = installation_cmd._autostart_monitor_after_install(
+                    root,
+                    runner="codex",
+                    host="127.0.0.1",
+                    port=8787,
+                    language="en",
+                    memory_root=memory_root,
+                )
+
+            self.assertTrue(started)
+            self.assertIn("Windows Task Scheduler", detail)
+            commands = [call.args[0] for call in run_mock.call_args_list]
+            self.assertEqual(commands[0][1:4], ["/Create", "/TN", "AgentContextEngine\\Monitor-" + root.name])
+            self.assertEqual(commands[1][1:4], ["/Run", "/TN", "AgentContextEngine\\Monitor-" + root.name])
+            script_path = memory_root / "local" / "windows-monitor-start.cmd"
+            script = script_path.read_text(encoding="utf-8")
+            self.assertIn("AGENT_CONTEXT_ENGINE_ROOT=", script)
+            self.assertIn("AGENT_CONTEXT_ENGINE_STORAGE_ROOT=", script)
+            self.assertIn("monitor --runner codex", script)
 
     def test_install_runs_final_doctor_after_monitor_start_and_hook_activation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

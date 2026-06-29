@@ -26,6 +26,10 @@ inspect the database manually.
 ## Failure Modes
 - Network/API errors render a usable error state.
 - Missing optional fields render as unknown, not broken layout.
+- Missing or still-loading firewall state must not be rendered as inactive.
+- Slow `/api/status` integration probes must not cause the pilot to render a
+  false firewall inactive state while the dedicated firewall endpoint is still
+  loading or already reports enabled.
 
 ## Acceptance Criteria
 - Storybook status stories remain representative.

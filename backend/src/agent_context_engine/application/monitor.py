@@ -95,8 +95,8 @@ def _monitor_process_status(
         "argv": list(monitor_context.get("argv") or sys.argv) if monitor_context else list(sys.argv),
         "started_at_epoch": started_at_epoch,
         "port": int(monitor_context.get("port") or 0) if monitor_context else 0,
-        "host": str(monitor_context.get("host") or ""),
-        "language": str(monitor_context.get("language") or ""),
+        "host": str(monitor_context.get("host") or "") if monitor_context else "",
+        "language": str(monitor_context.get("language") or "") if monitor_context else "",
         "latest_runtime_change_epoch": latest_runtime_change_epoch,
         "stale": stale,
         "restart_command": monitor_restart_command(root, runner=runner),
@@ -142,7 +142,13 @@ def monitor_status(
     launchagent_env_file = launchagent_profile["env_file"]
     storage = resolve_storage_profile(root)
     runtime_storage_profile = load_storage_profile(Path(str(storage.get("memory_root") or root / "memory")))
-    instance_metadata = sync_instance_metadata(root)
+    instance_metadata_sync_error = ""
+    try:
+        instance_metadata = sync_instance_metadata(root)
+    except OSError as exc:
+        instance_metadata_sync_error = str(exc)
+        profile_instance_id = str(profile.get("instance_id") or root.name)
+        instance_metadata = load_instance_metadata(profile_instance_id)
     active_monitor_entries = active_monitor_runtime_entries()
     current_monitor_entry = next(
         (
@@ -173,6 +179,7 @@ def monitor_status(
         "user_config_path": str(user_config_path()),
         "instance_metadata_path": str(instance_metadata_path_for_root(root)),
         "instance_metadata": instance_metadata,
+        "instance_metadata_sync_error": instance_metadata_sync_error,
         "installed_at": str(instance_metadata.get("installed_at") or ""),
         "installed_by_version": str(instance_metadata.get("installed_by_version") or ""),
         "last_updated_at": str(instance_metadata.get("last_updated_at") or ""),
@@ -193,7 +200,7 @@ def monitor_status(
         ),
         "firewall": firewall_status(conn),
         "hooks": hooks_control_status(root=root),
-        "integrations": integration_summary(root=root, probe_gemini=False),
+        "integrations": integration_summary(root=root, probe_gemini=False, external_probes=False),
         "monitor_process": _monitor_process_status(runner=runner, root=root, monitor_version=monitor_version, monitor_context=monitor_context),
         "monitor_runtime_registry": {
             "current": current_monitor_entry,

@@ -66,6 +66,9 @@ The current install flow now supports:
 - `antigravity`, `gemini`, and `opencode` are global-only bridge flows.
 - Windows now uses native `.cmd` publication plus PowerShell-based hooks and
   wrappers while remaining explicitly below `supported`.
+- Monitor dashboard status uses a fast integration summary; slow external
+  runner auth and model-discovery probes are reserved for explicit integration
+  checks so `/api/status` does not make the overview appear unavailable.
 - missing or stale workspace bindings are surfaced in diagnostics and the
   monitor instead of being treated as silently valid.
 - Cursor activation now persists configured background runner and project launch
@@ -99,11 +102,23 @@ Recent validation for the Windows experimental slice confirmed:
 - runtime selection surfaces Windows-specific publisher, wrapper, hook,
   scheduler, quoting, process-launch, workspace-binding, and system-open
   adapters,
-- focused Windows contract tests are green on the development host,
+- focused Windows contract tests are green on the development host, including
+  `.cmd` shim runtime-Python selection, stale PID handling, monitor metadata
+  sync tolerance, and Windows monitor autostart command hosting,
 - global wrapper publication now verifies `.cmd` shim paths and resolves
   `codex-ace` from `PATH`,
 - `codex-ace --version` completed through the generated wrapper on Windows,
 - monitor frontend typecheck/build completed with the Windows Node toolchain,
+- a native Windows monitor smoke confirmed `/api/status`, `/api/integrations`,
+  `/api/dreams`, `/api/dream-queue`, and `/api/firewall-state`; firewall state
+  reported enabled from the backend while the frontend pilot needed an
+  `unknown/loading` state fix to avoid showing missing data as inactive,
+- detached monitor startup through raw `python.exe` / PowerShell proved
+  unreliable on Windows; the operational path now uses `cmd.exe /c start
+  "ace-monitor" /min ...` with explicit install and storage-root environment,
+- `dream --pending --runner deterministic` against the active Windows runtime
+  returned `No sessions to dream`, so an empty Dreams view was confirmed as an
+  empty-work state rather than a broken Dream endpoint,
 - interrupted dream state was cleaned to an empty dream queue and no running
   dream runs,
 - the Windows Task Scheduler job is installed and ready rather than stuck
@@ -148,3 +163,6 @@ confirmed:
 - continued public curation of older internal design history,
 - one real Windows machine validation pass before any support-level increase
   beyond `experimental`.
+- Windows diagnostics and monitor UI should continue replacing macOS-specific
+  `LaunchAgent` wording with scheduler-neutral or Windows Task
+  Scheduler-specific wording.

@@ -826,6 +826,7 @@ const de = {
   'pilot.firewall': 'Firewall',
   'pilot.firewallEnabled': 'aktiv',
   'pilot.firewallDisabled': 'inaktiv',
+  'pilot.firewallUnknown': 'unbekannt',
   'pilot.scopedOverrides': 'Aktive Ausnahmen',
   'pilot.activeOverrideSingular': 'aktive Ausnahme',
   'pilot.activeOverridePlural': 'aktive Ausnahmen',

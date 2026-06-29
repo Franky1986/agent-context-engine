@@ -211,7 +211,7 @@ def _global_wrapper_status(command_name: str) -> dict[str, Any]:
     }
 
 
-def _headless_runner_candidate_status(runner: str) -> dict[str, Any]:
+def _headless_runner_candidate_status(runner: str, *, probe_auth: bool = True) -> dict[str, Any]:
     executable = shutil.which(runner)
     login_command = "claude auth login" if runner == "claude" else f"{runner} login"
     if not executable:
@@ -223,6 +223,17 @@ def _headless_runner_candidate_status(runner: str) -> dict[str, Any]:
             "auth_status": "missing_executable",
             "readiness_status": "missing_executable",
             "detail": f"{runner} executable is missing.",
+            "login_command": login_command,
+        }
+    if not probe_auth:
+        return {
+            "runner": runner,
+            "path": executable,
+            "installed": True,
+            "auth_ready": False,
+            "auth_status": "not_probed",
+            "readiness_status": "installed_unprobed",
+            "detail": f"{runner} executable is installed; auth was not probed for this fast status view.",
             "login_command": login_command,
         }
     auth_ready, detail = runner_auth_status(runner)
@@ -238,8 +249,8 @@ def _headless_runner_candidate_status(runner: str) -> dict[str, Any]:
     }
 
 
-def cursor_background_runner_status(*, preferred_runner: str | None = None) -> dict[str, Any]:
-    candidates = [_headless_runner_candidate_status("codex"), _headless_runner_candidate_status("claude")]
+def cursor_background_runner_status(*, preferred_runner: str | None = None, probe_auth: bool = True) -> dict[str, Any]:
+    candidates = [_headless_runner_candidate_status("codex", probe_auth=probe_auth), _headless_runner_candidate_status("claude", probe_auth=probe_auth)]
     candidates_by_runner = {str(item["runner"]): item for item in candidates}
     requested_runner = str(preferred_runner or "").strip().lower()
     if requested_runner:
@@ -286,11 +297,11 @@ def cursor_background_runner_status(*, preferred_runner: str | None = None) -> d
     }
 
 
-def cursor_project_background_runner_status(root: Path, *, expected_memory_root: Path | None = None) -> dict[str, Any]:
+def cursor_project_background_runner_status(root: Path, *, expected_memory_root: Path | None = None, probe_auth: bool = True) -> dict[str, Any]:
     binding_status = workspace_binding_status("cursor", root=root, expected_memory_root=expected_memory_root)
     configured_runner = str(binding_status.get("hook_binding_background_runner") or "").strip().lower()
     return {
-        **cursor_background_runner_status(preferred_runner=configured_runner or None),
+        **cursor_background_runner_status(preferred_runner=configured_runner or None, probe_auth=probe_auth),
         "configured_background_runner": configured_runner,
         **binding_status,
     }
@@ -1739,10 +1750,10 @@ def ensure_gemini_project(root: Path = ROOT) -> dict[str, Path]:
     }
 
 
-def opencode_status(root: Path = ROOT) -> dict[str, Any]:
+def opencode_status(root: Path = ROOT, *, probe_models: bool = True) -> dict[str, Any]:
     paths = opencode_project_paths(root)
-    discovered = discover_opencode_models()
-    ollama = discover_ollama_models()
+    discovered = discover_opencode_models() if probe_models else {"ok": False, "client": "opencode", "reason": "not_probed", "models": []}
+    ollama = discover_ollama_models() if probe_models else {"ok": False, "provider": "ollama", "reason": "not_probed", "models": []}
     selected_model = OPENCODE_DEFAULT_MODEL
     selected_small_model = OPENCODE_DEFAULT_SMALL_MODEL
     if paths["config"].exists():
@@ -1755,7 +1766,8 @@ def opencode_status(root: Path = ROOT) -> dict[str, Any]:
     ollama_ids = {item["id"] for item in ollama.get("models", [])}
     dream_provider_id, dream_provider_model = _opencode_dream_provider_details()
     runtime_ready = shutil.which("opencode") is not None
-    dream_ready = runtime_ready and shutil.which(dream_provider_id) is not None and dream_provider_model in ollama_ids
+    dream_provider_available = shutil.which(dream_provider_id) is not None
+    dream_ready = probe_models and runtime_ready and dream_provider_available and dream_provider_model in ollama_ids
     hook_status = _opencode_hook_status(root=root)
     wrapper_status = _simple_wrapper_state(executable_name="opencode", wrapper_command="./scripts/opencode-ace", root=root)
     global_wrapper_name = _resolved_global_wrapper_name("opencode", root=root)
@@ -1777,7 +1789,7 @@ def opencode_status(root: Path = ROOT) -> dict[str, Any]:
         "selected_small_model": selected_small_model,
         "dream_model": OPENCODE_DREAM_MODEL,
         "dream_model_ready": dream_ready,
-        "dream_readiness_status": "ready" if dream_ready else "model_missing" if runtime_ready and shutil.which(dream_provider_id) else "missing_executable",
+        "dream_readiness_status": "ready" if dream_ready else "not_probed" if runtime_ready and not probe_models else "model_missing" if runtime_ready and dream_provider_available else "missing_executable",
         "project_config_exists": paths["config"].exists(),
         "plugin_exists": paths["plugin_file"].exists(),
         "paths": {key: str(value) for key, value in paths.items()},
@@ -1893,13 +1905,13 @@ def gemini_status(*, root: Path = ROOT, probe: bool = False) -> dict[str, Any]:
     }, client="gemini", root=root)
 
 
-def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False) -> list[dict[str, Any]]:
+def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False, external_probes: bool = True) -> list[dict[str, Any]]:
     codex_hooks = _shell_hook_status("codex", root=root)
     claude_hooks = _shell_hook_status("claude", root=root)
     cursor_hooks = _cursor_status_with_hooks(root=root)
-    codex_candidate = _headless_runner_candidate_status("codex")
-    claude_candidate = _headless_runner_candidate_status("claude")
-    cursor_background = cursor_background_runner_status()
+    codex_candidate = _headless_runner_candidate_status("codex", probe_auth=external_probes)
+    claude_candidate = _headless_runner_candidate_status("claude", probe_auth=external_probes)
+    cursor_background = cursor_background_runner_status(probe_auth=external_probes)
     codex_wrapper = _shell_wrapper_state(
         executable_name="codex",
         wrapper_command="./scripts/codex-ace",
@@ -2009,13 +2021,13 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
         },
         gemini_status(root=root, probe=probe_gemini),
         {
-            **opencode_status(root),
+            **opencode_status(root, probe_models=external_probes),
         },
     ]
 
 
-def integration_summary(*, root: Path = ROOT, probe_gemini: bool = False) -> dict[str, Any]:
-    items = static_integration_statuses(root=root, probe_gemini=probe_gemini)
+def integration_summary(*, root: Path = ROOT, probe_gemini: bool = False, external_probes: bool = True) -> dict[str, Any]:
+    items = static_integration_statuses(root=root, probe_gemini=probe_gemini, external_probes=external_probes)
     for item in items:
         client = str(item.get("client") or "").strip().lower()
         history = integration_history(root=root, client=client, limit=10)

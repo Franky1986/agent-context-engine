@@ -31,9 +31,19 @@ Windows installations need:
 - the desired runner CLIs, such as `codex` or `claude`, installed and
   authenticated for headless workflows
 
-The generated Windows launchers prefer `python` and fall back to `py -3`.
-PowerShell is used for hook and wrapper runtime behavior; POSIX shell semantics
-must not be required on Windows.
+The generated Windows launchers for Python entrypoints must prefer the active
+runtime in this order:
+
+1. `AGENT_CONTEXT_ENGINE_PYTHON`
+2. `AGENT_MEMORY_PYTHON`
+3. `<installation-root>\.venv\Scripts\python.exe`
+4. `python` from `PATH`
+5. `py -3` only as the final fallback
+
+This keeps `agent-context-engine`, `ace`, and any global `.cmd` shim aligned
+with the backend dependencies installed during runtime bootstrap. PowerShell is
+used for hook and wrapper runtime behavior; POSIX shell semantics must not be
+required on Windows.
 
 ## Install Order
 
@@ -54,7 +64,11 @@ The install command follows this order:
    job whose action points to a generated short `windows-scheduler-run.cmd`
    script, avoiding `schtasks /TR` command-length limits.
 9. Start the monitor only when the runtime, frontend build, and scheduler
-   prerequisites are clean.
+   prerequisites are clean. On Windows, monitor autostart should launch through
+   `cmd.exe /c start "ace-monitor" /min ...` and must pass
+   `AGENT_CONTEXT_ENGINE_ROOT` plus `AGENT_CONTEXT_ENGINE_STORAGE_ROOT` to the
+   child process. Detached `python.exe` / `Start-Process` launches can exit
+   immediately after the startup banner even though foreground startup works.
 10. Activate hook configs, GUI workspace hooks, and global-only integration
     hooks as the final step.
 11. Run post-install verification after the final hook activation.
@@ -75,6 +89,48 @@ Wrapper shims delegate to PowerShell wrapper scripts. The wrapper script:
 The install verification must check the actual `.cmd` path on Windows and the
 plain symlink path on POSIX systems.
 
+For Python entrypoints, the `.cmd` shim is part of the runtime contract. It must
+not accidentally use a different global Python than the one used to install
+backend dependencies into `.venv`.
+
+For long-running monitor processes, prefer the Windows command-host launch path
+over a detached Python process:
+
+```powershell
+cmd.exe /c start "ace-monitor" /min <venv-python> <root>\scripts\agent_context_engine.py monitor ...
+```
+
+The monitor process should then be verified by probing `/api/status`, not just
+by checking that the launcher command returned.
+
+If that command-host launch does not expose a stable port from an agent-run
+install, the installer falls back to a short per-user Windows Task Scheduler
+launcher. The fallback writes `<memory-root>\local\windows-monitor-start.cmd`
+with the resolved runtime command and storage-root environment, then runs it
+outside the transient agent tool process tree. This keeps fresh Windows installs
+agentic even when the agent's own process supervisor cleans up child processes
+after a tool call.
+
+For manual recovery or diagnosis on Windows, run the helper from a normal
+PowerShell or Command Prompt session:
+
+```powershell
+.\scripts\start-monitor-windows.ps1 -ReplaceExisting
+```
+
+or:
+
+```cmd
+scripts\start-monitor-windows.cmd -ReplaceExisting
+```
+
+The helper resolves the installation-local Python runtime, sets
+`AGENT_CONTEXT_ENGINE_ROOT` and `AGENT_CONTEXT_ENGINE_STORAGE_ROOT`, writes logs
+under `<memory-root>\logs`, waits for the listener, and requires both
+`/api/status` and `/api/firewall-state` to answer before reporting success.
+This avoids treating delayed Windows startup as either immediately healthy or
+immediately failed.
+
 ## Hooks And Monitor Safety
 
 Hooks are intentionally late-bound. A partial install must not write active
@@ -86,6 +142,46 @@ The monitor is also gated. Starting a frontend without a successful build, or
 starting a monitor against an unusable backend, is treated as an incomplete
 install. The operator should run `repair-installation --apply` or rerun
 `install` after fixing prerequisites.
+
+Windows runtime probes must be defensive:
+
+- PID checks such as `os.kill(pid, 0)` can raise Windows-specific
+  `SystemError` / `WinError 87` for stale or inaccessible process IDs. Treat
+  those as non-live process evidence instead of failing monitor status.
+- User-state writes under `%USERPROFILE%\.agent-context-engine` can be blocked
+  by filesystem ownership or sandbox rules. Monitor status and storage
+  inspection should return usable payloads with a sync warning instead of
+  failing the whole endpoint.
+- External runtime storage roots require `AGENT_CONTEXT_ENGINE_STORAGE_ROOT`
+  when invoking diagnostics, scheduler, dream, or monitor commands outside the
+  installed wrapper context.
+- The main monitor status response must not block on external runner
+  authentication or model-discovery subprocesses. On Windows those probes can
+  add several seconds to `/api/status`, so the dashboard uses a fast integration
+  summary and leaves full readiness checks to explicit integration workflows.
+- The frontend must render missing or still-loading firewall state as
+  `loading`/`unknown`, never as `inactive`; `/api/firewall-state` remains the
+  source of truth for actual firewall state.
+
+## Lessons From Native Windows Smoke Runs
+
+The first native Windows repair/install smoke surfaced these practical rules:
+
+- Build-time Node may need to come from the installation-managed toolchain even
+  when the system `node` is too old. Keep `PATH` explicit for build and repair
+  commands.
+- `pip install -e backend` can fail on corporate or local certificate stores
+  before any project code runs. Treat SSL trust failures as prerequisite issues,
+  not backend failures; use an approved mirror or explicit temporary trust
+  override according to local policy.
+- Do not infer Dream failure from an empty Dreams tab. Verify
+  `dream --pending` and scheduler status against the active storage root; an
+  empty queue with `No sessions to dream` means there is currently no pending
+  dream work.
+- Diagnostics that still say `LaunchAgent` on Windows are compatibility
+  wording for the shared CLI surface. The active backend is Windows Task
+  Scheduler, and documentation/UI should prefer scheduler-neutral or
+  Task-Scheduler-specific wording when possible.
 
 ## macOS Impact
 
