@@ -81,55 +81,55 @@ def render_session_start_hook_entry(contract: AgentFlowContract) -> str:
     if contract.monitor_no_open:
         monitor_args.append("--no-open")
     monitor_command = " ".join(monitor_args)
-    return f"""# Session Start
-
-Agent Context Engine command prefix: `{contract.command_prefix}`
-
-The installed public CLI is expected to resolve from `PATH`. If `{contract.command_prefix}`
-is missing, treat that as an installation/linking problem and repair the active
-installation instead of falling back silently to stale repo-local shortcuts.
-
-- For session list/count/today questions, use `last --limit 10` first and answer from that result. Do not open session, summary, or dream files unless the user explicitly asks for details.
-- For session list/count/today questions, use `last` first and stop there unless the user explicitly asks for deeper detail.
-- Do not inspect `~/.cursor/projects/...`, local Cursor transcripts, or terminal metadata for session-history questions while the Agent Context Engine CLI is available.
-- If the user mentions a local repo/project/folder by name, or asks for side information about another project, resolve it via one of these — do not browse the filesystem:
-  - `repo-context --list` — overview of known repos
-  - `repo-context <identifier>` — targeted context for a specific repo
-  - the canonical runtime repo index lives under `{contract.repo_context_path}` in the active memory root
-- Load personal context only on demand, e.g. for "my preferences", "as usual", writing style, language, or personal standards.
-
-Start here for previous work:
-- `{contract.command_prefix} last --limit 10`
-- `{contract.command_prefix} use "<session|title|search terms>"`
-- `{contract.command_prefix} handover "<session|title|search terms>"`
-- `{contract.command_prefix} retrieve "<question or search terms>" --limit 10`
-- `{contract.command_prefix} search "<search terms>" --limit 5`
-
-Load extra context when needed:
-- `{contract.command_prefix} session-start-context`
-- `{contract.command_prefix} personal-context --list`
-- `{contract.command_prefix} personal-context <identifier>`
-- `{contract.command_prefix} repo-context --list`
-- `{contract.command_prefix} repo-context <identifier>`
-- `{contract.command_prefix} retrieval-runs --limit 10`
-- `{contract.command_prefix} retrieval-run <retrieval_run_id>`
-
-User-only controls:
-- `approve <risk_event_id> <nonce>` for one blocked tool retry
-- `approve workdir /absolute/project/path`
-- `approve explain <reason>`
-- `reset taint`
-- `firewall add ...`
-- `firewall disable session`
-- `firewall disable session 30m`
-- `firewall enable session`
-- `hooks-disable [--runner <runner>]`
-- `hooks-enable [--runner <runner>]`
-- `hooks-status`
-
-Monitor:
-- `{monitor_command}`
-"""
+    quick_start_commands = [
+        "last --limit 10",
+        'use "<session|title|search terms>"',
+        'handover "<session|title|search terms>"',
+        'retrieve "<question or search terms>" --limit 10',
+        'search "<search terms>" --limit 5',
+        "hooks-disable [--runner <runner>]",
+        "hooks-enable [--runner <runner>]",
+        "hooks-status",
+    ]
+    extra_context_commands = [
+        "session-start-context",
+        "personal-context --list",
+        'personal-context <identifier>',
+        "repo-context --list",
+        'repo-context <identifier>',
+        "retrieval-runs --limit 10",
+        "retrieval-run <retrieval_run_id>",
+    ]
+    return "\n".join(
+        [
+            "# Session Start",
+            "",
+            f"Agent Context Engine command prefix: `{contract.command_prefix}`",
+            "",
+            "The installed public CLI is expected to resolve from `PATH`. "
+            f"If `{contract.command_prefix}` is missing, treat that as an installation/linking problem and repair the active "
+            "installation instead of falling back silently to stale repo-local shortcuts.",
+            "",
+            "- For session list/count/today questions, use `last --limit 10` first and answer from that result. Do not open session, summary, or dream files unless the user explicitly asks for details.",
+            "- For session list/count/today questions, use `last` first and stop there unless the user explicitly asks for deeper detail.",
+            "- Do not inspect `~/.cursor/projects/...`, local Cursor transcripts, or terminal metadata for session-history questions while the Agent Context Engine CLI is available.",
+            "- If the user mentions a local repo/project/folder by name, or asks for side information about another project, resolve it via one of these — do not browse the filesystem:",
+            "  - `repo-context --list` — overview of known repos",
+            "  - `repo-context <identifier>` — targeted context for a specific repo",
+            f"  - the canonical runtime repo index lives under `{contract.repo_context_path}` in the active memory root",
+            "- Load personal context only on demand, e.g. for \"my preferences\", \"as usual\", writing style, language, or personal standards.",
+            "",
+            "Start here for previous work:",
+            *[f"- `{command}`" for command in quick_start_commands],
+            "",
+            "Load extra context when needed:",
+            *[f"- `{command}`" for command in extra_context_commands],
+            "",
+            "Monitor:",
+            f"- `{monitor_command}`",
+            "",
+        ]
+    )
 
 
 def render_claude_entrypoint() -> str:

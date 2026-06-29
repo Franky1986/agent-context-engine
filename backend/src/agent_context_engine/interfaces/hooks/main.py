@@ -276,13 +276,17 @@ def _build_user_prompt_context(
     firewall_suggestion = pending_firewall_rule_suggestion_context(conn, session_id, original_prompt)
     if firewall_suggestion:
         prompt_context = _join_hook_context_blocks(prompt_context, firewall_suggestion)
+
+    def _contains_pending_summary(context_text: str) -> bool:
+        return "Pending blocked approvals:" in context_text
+
     if should_show_pending_approvals(original_prompt):
         remaining_approvals = pending_approvals_summary_context(conn, session_id)
-        if remaining_approvals:
+        if remaining_approvals and not _contains_pending_summary(prompt_context):
             prompt_context = _join_hook_context_blocks(prompt_context, remaining_approvals)
     else:
         remaining = pending_approvals_count(conn, session_id)
-        if remaining:
+        if remaining and not _contains_pending_summary(prompt_context):
             prompt_context = _join_hook_context_blocks(prompt_context, pending_approvals_summary_context(conn, session_id))
     return 0, prompt_context, ""
 

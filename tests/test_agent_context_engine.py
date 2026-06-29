@@ -5973,7 +5973,7 @@ exit 0
             self.assertNotIn("chmod +x scripts/deploy.sh", context)
             self.assertNotIn("mkdir -p build/output", context)
             self.assertIn("Details and exact commands are available in agent-monitor", context)
-            self.assertIn("User-only controls:", context)
+            self.assertNotIn("User-only controls:", context)
             self.assertNotIn("Copyable approval lines for the shown blocked tool uses:", context)
             self.assertNotIn("\nreset taint\n", context)
             self.assertEqual(context.count("approve once: `approve risk_"), 0)
@@ -9498,7 +9498,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("cd '", context)
             self.assertIn("&& ./docs/skills/agent-context-engine/scripts/agent-context-engine", context)
             self.assertIn("session-start-context", context)
-            self.assertIn("User-only controls:", context)
+            self.assertNotIn("User-only controls:", context)
             self.assertNotIn("not injected into the visible chat", context)
             self.assertNotIn("folder=1", context)
             self.assertNotIn("recent-session-1", context)
@@ -9610,7 +9610,7 @@ The session reconciled stale queue state and resumed pending dreams.
             )
             self.assertEqual(prompt.returncode, 0, prompt.stderr)
             context = json.loads(prompt.stdout)["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("User-only controls:", context)
+            self.assertNotIn("User-only controls:", context)
             self.assertNotIn("Session Start Hook Entry", context)
             self.assertNotIn("agent-memory session-start-context", context)
 

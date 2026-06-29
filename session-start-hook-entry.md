@@ -16,33 +16,23 @@ installation instead of falling back silently to stale repo-local shortcuts.
 - Load personal context only on demand, e.g. for "my preferences", "as usual", writing style, language, or personal standards.
 
 Start here for previous work:
-- `agent-context-engine last --limit 10`
-- `agent-context-engine use "<session|title|search terms>"`
-- `agent-context-engine handover "<session|title|search terms>"`
-- `agent-context-engine retrieve "<question or search terms>" --limit 10`
-- `agent-context-engine search "<search terms>" --limit 5`
-
-Load extra context when needed:
-- `agent-context-engine session-start-context`
-- `agent-context-engine personal-context --list`
-- `agent-context-engine personal-context <identifier>`
-- `agent-context-engine repo-context --list`
-- `agent-context-engine repo-context <identifier>`
-- `agent-context-engine retrieval-runs --limit 10`
-- `agent-context-engine retrieval-run <retrieval_run_id>`
-
-User-only controls:
-- `approve <risk_event_id> <nonce>` for one blocked tool retry
-- `approve workdir /absolute/project/path`
-- `approve explain <reason>`
-- `reset taint`
-- `firewall add ...`
-- `firewall disable session`
-- `firewall disable session 30m`
-- `firewall enable session`
+- `last --limit 10`
+- `use "<session|title|search terms>"`
+- `handover "<session|title|search terms>"`
+- `retrieve "<question or search terms>" --limit 10`
+- `search "<search terms>" --limit 5`
 - `hooks-disable [--runner <runner>]`
 - `hooks-enable [--runner <runner>]`
 - `hooks-status`
+
+Load extra context when needed:
+- `session-start-context`
+- `personal-context --list`
+- `personal-context <identifier>`
+- `repo-context --list`
+- `repo-context <identifier>`
+- `retrieval-runs --limit 10`
+- `retrieval-run <retrieval_run_id>`
 
 Monitor:
 - `agent-context-engine monitor --runner codex --host 127.0.0.1 --port 8787 --language de --replace-existing --no-open`

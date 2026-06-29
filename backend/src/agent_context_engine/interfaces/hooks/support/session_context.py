@@ -10,6 +10,7 @@ from ....application.integrations import cursor_project_background_runner_status
 from ....infrastructure.config import ROOT, json_dumps, session_short
 from ....application.personal import PERSONAL_ROOT, parse_frontmatter, personal_files, startup_safe_personal_context
 from ....application.firewall import active_firewall_override, firewall_status
+from .risk_gate import pending_approvals_count, pending_approvals_summary_context, recent_taint_context
 from .payloads import normalized_path, one_line
 from ....application.instance_profile import preferred_agent_memory_cli_for_root
 
@@ -45,21 +46,6 @@ def _default_startup_entry(command_prefix: str) -> str:
         monitor_runner=monitor_runner,
     )
     return render_session_start_hook_entry(contract)
-
-
-def _user_only_controls_block() -> str:
-    return """User-only controls:
-- `approve <risk_event_id> <nonce>` for one blocked tool retry
-- `approve workdir /absolute/project/path`
-- `approve explain <reason>`
-- `reset taint`
-- `firewall add ...`
-- `firewall disable session`
-- `firewall disable session 30m`
-- `firewall enable session`
-- `hooks-disable [--runner <runner>]`
-- `hooks-enable [--runner <runner>]`
-- `hooks-status`"""
 
 
 def startup_entry_content() -> str:
@@ -512,6 +498,42 @@ def cursor_dream_auth_block_message(
     )
 
 
+def _pending_approval_context(session_id: str, conn: Any) -> str:
+    pending_count = pending_approvals_count(conn, session_id)
+    if pending_count <= 0:
+        return ""
+    summary = pending_approvals_summary_context(conn, session_id)
+    if summary:
+        return summary
+    return f"Pending blocked approvals: {pending_count}."
+
+
+def _has_recent_taint(conn: Any, session_id: str, *, before_seq: int) -> bool:
+    return bool(recent_taint_context(conn, session_id, before_seq=before_seq, limit=1))
+
+
+def _conditional_user_only_controls(
+    conn: Any,
+    *,
+    session_id: str,
+    current_folder: str = "",
+    before_seq: int = 10**9,
+) -> str:
+    lines: list[str] = []
+    pending_summary = _pending_approval_context(session_id, conn)
+    if pending_summary:
+        lines.append(pending_summary)
+    if _has_recent_taint(conn, session_id, before_seq=before_seq):
+        lines.append("You are in taint-aware mode after recent high-risk context.")
+        lines.append("- `reset taint`")
+    firewall = firewall_status(conn).get("enabled", True)
+    if not firewall:
+        lines.append("- `firewall enable session`")
+    if not lines:
+        return ""
+    return "\n".join(line if line.startswith("- ") else f"- {line}" for line in lines)
+
+
 def memory_hooks_status_context(
     conn: Any,
     *,
@@ -548,7 +570,19 @@ def memory_hooks_status_context(
         reason = one_line(override.get("reason") or "", 180)
         suffix = f" Reason: {reason}" if reason else ""
         lines.append(f"Firewall override active for {_format_firewall_target(override)} until `{until}`.{suffix}")
-    lines.append(_user_only_controls_block())
+    session_row = conn.execute(
+        "select coalesce(last_event_seq, 0) as last_event_seq from sessions where session_id = ?",
+        (session_id,),
+    ).fetchone()
+    before_seq = int(session_row["last_event_seq"]) + 1 if session_row and session_row["last_event_seq"] is not None else 10**9
+    user_only_controls = _conditional_user_only_controls(
+        conn,
+        session_id=session_id,
+        current_folder=current_folder,
+        before_seq=before_seq,
+    )
+    if user_only_controls:
+        lines.append(user_only_controls)
     if include_dream_notice:
         dream_context = dream_failure_context(
             conn,
