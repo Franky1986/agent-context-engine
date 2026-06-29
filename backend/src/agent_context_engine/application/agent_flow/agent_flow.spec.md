@@ -58,6 +58,13 @@ across installation, hook startup, and harness entrypoints.
   `memory/knowledge/repos.md` as the canonical runtime repo index.
 - Public-CLI/PATH repair guidance and monitor startup defaults stay aligned
   between the shared contract and the checked-in startup docs.
+- Session start guidance uses a one-time CLI prefix declaration followed by
+  prefix-less subcommands for startup command families.
+- User-only `approve`/`firewall`/`workdir` controls are rendered conditionally
+  based on active block/taint/firewall context and not included as permanent
+  startup noise.
+- Session start context supports staged injection: compact default + trigger-based
+  enrichment on demand.
 
 ## Tests / Checks
 
@@ -69,3 +76,5 @@ across installation, hook startup, and harness entrypoints.
 - Do not duplicate agent-flow wording in separate render paths when the shared
   contract can express it.
 - Do not claim unsupported platform/runtime behavior through rendered guidance.
+- Do not keep permanent `User-only controls` in startup contexts that are not
+  actually actionable for that session state.

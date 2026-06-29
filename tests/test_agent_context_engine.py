@@ -11975,7 +11975,9 @@ The session reconciled stale queue state and resumed pending dreams.
                 installation_cmd, "_stop_superseded_monitors_for_memory_root", return_value=[]
             ), mock.patch.object(installation_cmd, "_port_accepting", return_value=True), mock.patch.object(
                 installation_cmd.subprocess, "Popen", return_value=process
-            ) as popen_mock:
+            ) as popen_mock, mock.patch.object(
+                installation_cmd, "monitor_restart_command", return_value="monitor --runner codex --host 127.0.0.1 --port 8787"
+            ):
                 started, detail = installation_cmd._autostart_monitor_after_install(
                     root,
                     runner="codex",
@@ -12009,6 +12011,8 @@ The session reconciled stale queue state and resumed pending dreams.
                 installation_cmd, "_stop_superseded_monitors_for_memory_root", return_value=[]
             ), mock.patch.object(installation_cmd, "_port_accepting", side_effect=[True, False]), mock.patch.object(
                 installation_cmd.subprocess, "Popen", return_value=process
+            ), mock.patch.object(
+                installation_cmd, "monitor_restart_command", return_value="monitor --runner codex --host 127.0.0.1 --port 8787"
             ):
                 started, detail = installation_cmd._autostart_monitor_after_install(
                     root,
@@ -12040,9 +12044,10 @@ The session reconciled stale queue state and resumed pending dreams.
             ), mock.patch.object(
                 installation_cmd.subprocess, "run", return_value=completed
             ) as run_mock, mock.patch.object(
+                installation_cmd, "monitor_restart_command", return_value="monitor --runner codex --host 127.0.0.1 --port 8787"
+            ), mock.patch.object(
                 installation_cmd.shutil, "which", return_value="schtasks.exe"
             ), mock.patch.object(installation_cmd.os.path, "exists", return_value=True):
-            ):
                 started, detail = installation_cmd._autostart_monitor_after_install(
                     root,
                     runner="codex",
