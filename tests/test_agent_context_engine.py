@@ -10984,6 +10984,51 @@ The session reconciled stale queue state and resumed pending dreams.
             finally:
                 conn.close()
 
+    def test_monitor_runtime_persistence_error_does_not_stop_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch.dict(os.environ, {"AGENT_CONTEXT_ENGINE_ROOT": str(root)}, clear=False):
+                from agent_context_engine.interfaces.http import server
+
+                with mock.patch.object(
+                    server,
+                    "merge_installation_profile",
+                    side_effect=PermissionError("installation profile read-only"),
+                ), mock.patch.object(server, "resolve_storage_profile", return_value={"memory_root": str(root / "memory")}), mock.patch.object(
+                    server,
+                    "record_monitor_runtime",
+                    side_effect=PermissionError("runtime registry read-only"),
+                ), mock.patch.object(
+                    server,
+                    "load_installation_profile",
+                    return_value={"instance_id": "test", "monitor": {}},
+                ):
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        server._persist_monitor_runtime_state(
+                            host="127.0.0.1",
+                            port=8787,
+                            runner="codex",
+                            language="en",
+                            status="running",
+                            url="http://127.0.0.1:8787/",
+                        )
+            self.assertIn("warn  monitor runtime persistence skipped:", output.getvalue())
+
+    def test_user_state_root_falls_back_to_storage_root_when_home_state_root_is_unwritable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            blocked_home = root / "blocked-home"
+            blocked_home.parent.mkdir(parents=True, exist_ok=True)
+            blocked_home.write_text("blocked", encoding="utf-8")
+            storage_root = root / "writable-storage"
+            with mock.patch.dict(os.environ, {"AGENT_CONTEXT_ENGINE_STORAGE_ROOT": str(storage_root)}, clear=False):
+                from agent_context_engine.application.instance_profile import user_state_root
+
+                state_root = user_state_root(home=blocked_home)
+
+            self.assertEqual(state_root, (storage_root / ".agent-context-engine").resolve())
+
     def test_pid_alive_treats_windows_systemerror_as_not_alive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

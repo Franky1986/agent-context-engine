@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from ..adapters.launchagent import DEFAULT_ENV_FILE, DEFAULT_LABEL, launch_agent_path
-from ..infrastructure.config import DEFAULT_STORAGE_SCHEMA_VERSION, MEMORY_DIR, ROOT
+from ..infrastructure.config import (
+    DEFAULT_STORAGE_SCHEMA_VERSION,
+    MEMORY_DIR,
+    ROOT,
+    STORAGE_ROOT_ENV_VAR,
+)
 from ..interfaces.http.version import MONITOR_VERSION, PRODUCT_VERSION
 
 INSTALLATION_PROFILE_RELATIVE_PATH = Path("memory") / "local" / "installation-profile.json"
@@ -68,7 +73,29 @@ def normalize_launchagent_profile(payload: dict[str, Any] | None) -> dict[str, s
 
 
 def user_state_root(home: Path | None = None) -> Path:
-    return ((home or Path.home()).expanduser() / USER_STATE_ROOT_NAME).resolve()
+    explicit_home = (home or Path.home()).expanduser() / USER_STATE_ROOT_NAME
+    candidates: list[Path] = [explicit_home]
+
+    storage_override = os.environ.get(STORAGE_ROOT_ENV_VAR)
+    if storage_override:
+        candidates.append((Path(storage_override).expanduser() / USER_STATE_ROOT_NAME))
+
+    fallback_needed = False
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            return candidate.resolve()
+        except OSError:
+            fallback_needed = True
+            continue
+
+    # Last fallback: keep contract-level path even if it's not currently writable.
+    # This allows callers to surface operational errors at write time rather than
+    # silently choosing an unrelated location.
+    if fallback_needed:
+        # Keep behavior stable by still returning a deterministic fallback.
+        return explicit_home
+    return explicit_home
 
 
 def default_user_storage_root(home: Path | None = None) -> Path:

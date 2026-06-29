@@ -106,51 +106,54 @@ def _persist_monitor_runtime_state(
     status: str,
     url: str,
 ) -> None:
-    profile = load_installation_profile(ROOT)
-    instance_id = str(profile.get("instance_id") or ROOT.name)
-    storage = resolve_storage_profile(ROOT)
-    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    monitor_update = {
-        "host": host,
-        "port": port,
-        "language": language,
-        "last_seen_at": now_iso,
-        "last_known_url": url,
-    }
-    if status == "running":
-        monitor_update.update(
-            {
-                "last_started_at": now_iso,
-                "last_started_by": "monitor",
-                "last_known_pid": os.getpid(),
-            }
+    try:
+        profile = load_installation_profile(ROOT)
+        instance_id = str(profile.get("instance_id") or ROOT.name)
+        storage = resolve_storage_profile(ROOT)
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        monitor_update = {
+            "host": host,
+            "port": port,
+            "language": language,
+            "last_seen_at": now_iso,
+            "last_known_url": url,
+        }
+        if status == "running":
+            monitor_update.update(
+                {
+                    "last_started_at": now_iso,
+                    "last_started_by": "monitor",
+                    "last_known_pid": os.getpid(),
+                }
+            )
+        elif status in {"stopped", "stale"}:
+            monitor_update.update(
+                {
+                    "last_stopped_at": now_iso,
+                    "last_known_pid": 0,
+                }
+            )
+        merge_installation_profile(ROOT, monitor=monitor_update)
+        record_monitor_runtime(
+            instance_id=instance_id,
+            installation_root=ROOT,
+            memory_root=Path(str(storage.get("memory_root") or ROOT / "memory")),
+            configured_host=host,
+            configured_port=port,
+            active_host=host if status == "running" else "",
+            active_port=port if status == "running" else 0,
+            pid=os.getpid() if status == "running" else 0,
+            status=status,
+            runner=runner,
+            language=language,
+            monitor_version=MONITOR_VERSION,
+            product_version=PRODUCT_VERSION,
+            started_at=now_iso if status == "running" else "",
+            stopped_at=now_iso if status in {"stopped", "stale"} else "",
+            last_known_url=url,
         )
-    elif status in {"stopped", "stale"}:
-        monitor_update.update(
-            {
-                "last_stopped_at": now_iso,
-                "last_known_pid": 0,
-            }
-        )
-    merge_installation_profile(ROOT, monitor=monitor_update)
-    record_monitor_runtime(
-        instance_id=instance_id,
-        installation_root=ROOT,
-        memory_root=Path(str(storage.get("memory_root") or ROOT / "memory")),
-        configured_host=host,
-        configured_port=port,
-        active_host=host if status == "running" else "",
-        active_port=port if status == "running" else 0,
-        pid=os.getpid() if status == "running" else 0,
-        status=status,
-        runner=runner,
-        language=language,
-        monitor_version=MONITOR_VERSION,
-        product_version=PRODUCT_VERSION,
-        started_at=now_iso if status == "running" else "",
-        stopped_at=now_iso if status in {"stopped", "stale"} else "",
-        last_known_url=url,
-    )
+    except Exception as exc:  # noqa: BLE001
+        print(f"warn  monitor runtime persistence skipped: {exc}")
 
 
 def _parse_report_filename(filename: str) -> tuple[str, str] | None:

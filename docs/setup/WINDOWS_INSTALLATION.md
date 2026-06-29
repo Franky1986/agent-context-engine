@@ -131,6 +131,15 @@ under `<memory-root>\logs`, waits for the listener, and requires both
 This avoids treating delayed Windows startup as either immediately healthy or
 immediately failed.
 
+If the runtime is started from a restrictive shell or sandbox where `%USERPROFILE%\.agent-context-engine`
+is not writable, startup stays usable:
+
+- `AGENT_CONTEXT_ENGINE_STORAGE_ROOT` is still required.
+- The monitor writes runtime user-state under `<AGENT_CONTEXT_ENGINE_STORAGE_ROOT>\.agent-context-engine`
+  when home-state writes are blocked.
+- Verify with `http://127.0.0.1:8787/api/status` after launch; a running monitor is
+  valid even if user-state writes fall back.
+
 ## Hooks And Monitor Safety
 
 Hooks are intentionally late-bound. A partial install must not write active

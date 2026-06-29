@@ -253,6 +253,10 @@ script under `<memory-root>\local\windows-monitor-start.cmd`. That fallback is
 specifically for transient agent tool processes that clean up child processes
 after command completion.
 
+In shells where `%USERPROFILE%\.agent-context-engine` is not writable, set
+`AGENT_CONTEXT_ENGINE_STORAGE_ROOT` when launching so user-runtime state can be
+kept in `<AGENT_CONTEXT_ENGINE_STORAGE_ROOT>\.agent-context-engine` instead.
+
 For manual recovery, run `scripts\start-monitor-windows.ps1 -ReplaceExisting`
 or `scripts\start-monitor-windows.cmd -ReplaceExisting` from a normal Windows
 terminal. The helper records stdout/stderr under the active memory-root logs
