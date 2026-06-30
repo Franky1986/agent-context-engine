@@ -154,6 +154,13 @@ python3 scripts/agent_context_engine.py install --plan-json /tmp/agent-context-i
 gespeicherte Plan-Datei vor der Freigabe gemeinsam mit dem Nutzer pruefen und
 anschliessend den dazu passenden Installationsbefehl unveraendert ausfuehren.
 
+Voraussetzung fuer Headless-Runner:
+
+- Reine GUI-Apps reichen fuer shell-getriebene Agent-Context-Engine-Workflows nicht aus.
+- Wenn das Setup `codex-ace`, `claude-ace`, Monitor-Ask, Dreaming, Query-Expansion oder Cursor-Hintergrund-Workflows nutzen soll, muss die passende Terminal-CLI ebenfalls installiert und authentifiziert sein.
+- Die Codex-App bzw. ein Codex-Editor-Workspace ersetzt die `codex`-CLI nicht. Claude Desktop ersetzt die `claude`-CLI nicht.
+- Pruefe diese Bereitschaft mit `codex login status` oder `claude auth status`; authentifiziere dich bei Bedarf mit `codex login` oder `claude auth login`, bevor der erste Headless-Lauf startet.
+
 Wenn Discovery bereits auf das zentrale Default-Ziel
 `~/.agent-context-engine/install` zeigt, bleibt das der Standardplan, auch wenn
  der aktuelle Checkout ein frischer Clone ist. Der Checkout selbst bleibt
@@ -212,8 +219,9 @@ Uebergabe praktisch:
 
 1. `install-discovery` aus dem ausgecheckten Source-Tree ausfuehren und den erzeugten Plan per `--plan-json` speichern, damit exakt sichtbar ist, was geaendert werden soll.
 2. Diese erzeugte Plan-Datei gemeinsam mit dem Nutzer pruefen und die explizite Freigabe im Chat einholen.
-3. `install --plan-json` ausfuehren und danach `doctor` plus `check-installation` laufen lassen.
-4. Anschliessend an den Monitor-Workflow (`agent-context-engine status` bzw. Monitor-URL) fuer den laufenden Produktivbetrieb uebergeben.
+3. Klaeren, ob als Headless-Runner `codex` oder `claude` vorgesehen ist, und pruefen, dass die passende Terminal-CLI installiert und authentifiziert ist. Die Codex-App allein oder Claude Desktop allein reicht fuer Headless-Workflows nicht aus.
+4. `install --plan-json` ausfuehren und danach `doctor` plus `check-installation` laufen lassen.
+5. Anschliessend an den Monitor-Workflow (`agent-context-engine status` bzw. Monitor-URL) fuer den laufenden Produktivbetrieb uebergeben.
 
 Mit Wrapper-Link-Flags können zusätzlich entstehen:
 

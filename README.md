@@ -152,6 +152,13 @@ python3 scripts/agent_context_engine.py install --plan-json /tmp/agent-context-i
 plan file with the user before requesting approval and then execute the matching
 install command unchanged.
 
+Headless runner prerequisite:
+
+- GUI apps alone are not enough for shell-driven Agent Context Engine workflows.
+- If the intended setup should use `codex-ace`, `claude-ace`, monitor ask, dreaming, query expansion, or Cursor background workflows, the matching terminal CLI must be installed and authenticated as well.
+- Codex app/editor usage does not replace the `codex` CLI. Claude Desktop does not replace the `claude` CLI.
+- Verify that readiness with `codex login status` or `claude auth status`; authenticate with `codex login` or `claude auth login` before the first headless run.
+
 If discovery points at the central default target
 `~/.agent-context-engine/install`, that is the default installation plan even
 when the current checkout is a fresh clone. In that mode the checkout stays
@@ -212,8 +219,9 @@ When someone says "installier das", a practical external-agent handoff is:
 
 1. run `install-discovery` from the checked-out source and store the generated plan (`--plan-json`) to show exactly what will be changed.
 2. review that generated plan file with the user and get explicit approval in chat.
-3. run `install --plan-json` and then run `doctor` + `check-installation`.
-4. hand over to the monitor workflow (`agent-context-engine status` / monitor URL) for ongoing production trust.
+3. confirm whether the intended headless runner is `codex` or `claude`, and verify that the matching terminal CLI is installed and authenticated. Codex app alone or Claude Desktop alone is not sufficient for headless workflows.
+4. run `install --plan-json` and then run `doctor` + `check-installation`.
+5. hand over to the monitor workflow (`agent-context-engine status` / monitor URL) for ongoing production trust.
 
 With wrapper link flags, it can also create:
 

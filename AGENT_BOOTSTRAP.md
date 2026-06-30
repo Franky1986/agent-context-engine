@@ -41,6 +41,11 @@ agent should:
    the active memory root, where the runtime repo index lives, that the monitor
    exposes it under `Personal -> Repo-Index`, and that agents can add later
    repo/folder entries there.
+   If the intended workflow uses `codex` or `claude` for wrappers, monitor
+   ask, dream runs, query expansion, or Cursor background work, that summary
+   must also state whether the matching terminal CLI is installed and
+   authenticated. Codex app/editor usage alone and Claude Desktop alone do not
+   satisfy that requirement.
 6. If discovery points to the central default install root
    `~/.agent-context-engine/install`, treat that as the default plan even when
    the current checkout itself is fresh. State clearly that the checkout stays
@@ -81,6 +86,8 @@ defaults before writing files:
 - Preferred interaction language: default to English for public setups unless the user asked in another language.
 - Harnesses: Codex, Claude Code, Cursor IDE, Antigravity CLI (`agy`), Gemini
   CLI, OpenCode, or a subset.
+- Headless runner readiness: whether `codex` and/or `claude` is installed and
+  authenticated on the machine when the chosen workflow depends on it.
 - Workspace roots: the actual folders opened by Codex GUI, Claude/Claude Code,
   and Cursor when they differ from the central Agent Context Engine root.
 - Global commands: whether to keep the shared public command names on this
@@ -103,7 +110,8 @@ Reasonable defaults:
   checkout language.
 - Harnesses: prepare Codex, Claude, Antigravity, and Gemini in the central
   root; enable Cursor and OpenCode per project only when requested. Cursor
-  activation requires `codex` or `claude` for background LLM workflows.
+  activation requires `codex` or `claude` for background LLM workflows. Do not
+  treat Codex app usage or Claude Desktop as a substitute for those CLIs.
 - Global commands: relink the shared public commands to the chosen
   installation by default; switch to `--instance-name` or explicit prefixes only
   when the user wants side-by-side isolated commands.

@@ -127,6 +127,9 @@ Rules:
 
 - Codex GUI hooks can be prepared in another workspace root via
   `--codex-workspace-root`.
+- Codex integration still depends on the `codex` CLI for wrappers, monitor
+  ask, dreaming, query expansion, and other shell-driven flows. Codex app or
+  editor usage alone is not a sufficient Agent Context Engine runtime.
 - Claude integration still depends on the `claude` CLI. Claude Desktop alone is
   not a sufficient Agent Context Engine runtime.
 - Cursor project hooks can be prepared separately, but headless flows still
@@ -135,6 +138,12 @@ Rules:
 - Cursor itself provides the IDE-side hook/session capture; Codex or Claude
   handles firewall classification, dreaming, query expansion, and other
   background LLM workflows.
+- When `codex` or `claude` is selected as the monitor runner, dream runner,
+  query-expansion runner, or Cursor background runner, that CLI must be
+  installed and authenticated on the machine before the setup is treated as
+  headless-ready.
+- Use `codex login status` for Codex and `claude auth status` for Claude Code
+  as the terminal-side readiness checks.
 - `install` should also record the intended workflow runners via
   `--monitor-runner`, `--dream-runner`, and `--query-expansion-runner`, because
   those choices determine whether a GUI-only setup is sufficient later.
