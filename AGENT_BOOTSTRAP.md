@@ -26,6 +26,8 @@ agent should:
    If the user later switches the install conversation language, rerun
    discovery with an explicit `--language de` or `--language en`, and carry
    that same explicit language into the final install command.
+   If execution should be delegated, use `install-discovery --plan-json <file>`
+   and keep the resulting file unchanged until explicit user approval.
 5. Summarize the suggested target root, memory root, monitor port, wrapper
    naming, and refresh mode, then wait for the user's approval before any
    install or refresh mutation.

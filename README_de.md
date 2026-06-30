@@ -87,6 +87,7 @@ agent-context-engine launchagent-status
 - [Activation Model](docs/setup/activation-model.md)
 - [Central Installation Mode](docs/setup/central-installation-mode.md)
 - [Runner And Harness Guide](docs/setup/RUNNER_HARNESSES.md)
+- [Windows Installation Flow](docs/setup/WINDOWS_INSTALLATION.md)
 - [Build And Checks](docs/setup/BUILD_AND_CHECKS.md)
 - [Monitor Operator Workflows](docs/runbooks/monitor-operator-workflows.md)
 - [Project Origin](docs/project-origin.md)
@@ -140,6 +141,19 @@ den exakten Installationsbefehl. Die geführten Defaults verlinken die
 auf die gewählte Installation, bootstrappen die lokale Runtime und starten den
 Monitor nach der Installation.
 
+Für deterministische agentische Ausführung aus einem frischen Checkout ist ein
+zweistufiger Plan-Flow vorzuziehen:
+
+```sh
+python3 scripts/agent_context_engine.py install-discovery --plan-json /tmp/agent-context-install-plan.json
+python3 scripts/agent_context_engine.py install --plan-json /tmp/agent-context-install-plan.json
+```
+
+`install-discovery --plan-json` schreibt eine vollständige Plan-Datei.
+`install --plan-json` wendet genau diesen Plan an. Externe Agents sollten die
+gespeicherte Plan-Datei vor der Freigabe gemeinsam mit dem Nutzer pruefen und
+anschliessend den dazu passenden Installationsbefehl unveraendert ausfuehren.
+
 Wenn Discovery bereits auf das zentrale Default-Ziel
 `~/.agent-context-engine/install` zeigt, bleibt das der Standardplan, auch wenn
  der aktuelle Checkout ein frischer Clone ist. Der Checkout selbst bleibt
@@ -176,6 +190,12 @@ Das installiert unter anderem:
 <memory-root>/knowledge/repos.md
 ```
 
+In einer produktiven Uebergabe gibt das dem Operator drei konkrete Anker:
+
+- Die Runtime- und Policy-Historie liegt unter `<memory-root>/status`, `<memory-root>/risk` und den anderen gemeinsamen `status/*`-Ordnern.
+- Der installierte Kommando-Pfad ist immer `<target>/scripts/agent-context-engine` plus Wrapper-Links unter `~/.local/bin`, sodass spaetere Agents mit demselben CLI-Vertrag weiterarbeiten koennen.
+- Hook-gebundene Clients laden `<target>/AGENTS.md` und `<target>/session-start-hook-entry.md`, sodass der naechste Installations- oder Aktivierungsschritt ohne erneutes Erlernen lokaler Konventionen fortgesetzt werden kann.
+
 Der `AGENTS.md`-Block weist zukünftige Agents an, zuerst
 `agent-context-engine search`, `handover`, `last` und `doctor` zu nutzen,
 bevor bei Fragen zu früheren Sessions oder vorhandener Analyse breit im Repo
@@ -186,6 +206,14 @@ installierten Projekten. Dupliziere die Scripts nicht in andere Projekte;
 Wrapper-Kommandos sollen genau diesen Pfad aufrufen. Aufrufe über diesen Pfad
 sind aus synchroner LLM-Klassifikation allowlisted, werden aber weiterhin
 protokolliert und deterministisch gescannt.
+
+Wenn jemand sagt "installier das", ist fuer einen externen Agenten folgende
+Uebergabe praktisch:
+
+1. `install-discovery` aus dem ausgecheckten Source-Tree ausfuehren und den erzeugten Plan per `--plan-json` speichern, damit exakt sichtbar ist, was geaendert werden soll.
+2. Diese erzeugte Plan-Datei gemeinsam mit dem Nutzer pruefen und die explizite Freigabe im Chat einholen.
+3. `install --plan-json` ausfuehren und danach `doctor` plus `check-installation` laufen lassen.
+4. Anschliessend an den Monitor-Workflow (`agent-context-engine status` bzw. Monitor-URL) fuer den laufenden Produktivbetrieb uebergeben.
 
 Mit Wrapper-Link-Flags können zusätzlich entstehen:
 

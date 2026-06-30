@@ -139,6 +139,19 @@ guided defaults relink the shared public commands
 `agent-context-engine`, `ace`, and the `*-ace` wrappers to the chosen
 installation, bootstrap the local runtime, and start the monitor after install.
 
+For deterministic agent-driven execution from a fresh checkout, prefer a two-step
+plan flow:
+
+```sh
+python3 scripts/agent_context_engine.py install-discovery --plan-json /tmp/agent-context-install-plan.json
+python3 scripts/agent_context_engine.py install --plan-json /tmp/agent-context-install-plan.json
+```
+
+`install-discovery --plan-json` writes a complete plan file. `install
+--plan-json` applies that exact plan. External agents should review the saved
+plan file with the user before requesting approval and then execute the matching
+install command unchanged.
+
 If discovery points at the central default target
 `~/.agent-context-engine/install`, that is the default installation plan even
 when the current checkout is a fresh clone. In that mode the checkout stays
@@ -177,6 +190,12 @@ This installs:
 <memory-root>/knowledge/repos.md
 ```
 
+In a production handoff, this gives the operator three concrete anchors:
+
+- The runtime and policy history lives under `<memory-root>/status`, `<memory-root>/risk`, and the other shared `status/*` folders.
+- The installed command path is always `<target>/scripts/agent-context-engine` (and wrapper links under `~/.local/bin`), so later agents can continue with the same CLI contract.
+- Hooked clients load `<target>/AGENTS.md` and `<target>/session-start-hook-entry.md`, so the next install/activation step can be resumed without re-learning local conventions.
+
 The `AGENTS.md` block tells future agents to use
 `agent-context-engine search`, `handover`, `last`,
 and `doctor` before doing broad repository searches when the user asks about
@@ -188,6 +207,13 @@ other project folders; wrapper commands should call this path. Calls through
 this CLI path are allowlisted out of synchronous LLM classification, while still
 being logged and deterministically scanned, so routine memory lookups stay fast
 and do not pay an extra classifier subprocess.
+
+When someone says "installier das", a practical external-agent handoff is:
+
+1. run `install-discovery` from the checked-out source and store the generated plan (`--plan-json`) to show exactly what will be changed.
+2. review that generated plan file with the user and get explicit approval in chat.
+3. run `install --plan-json` and then run `doctor` + `check-installation`.
+4. hand over to the monitor workflow (`agent-context-engine status` / monitor URL) for ongoing production trust.
 
 With wrapper link flags, it can also create:
 

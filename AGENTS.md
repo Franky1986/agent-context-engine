@@ -28,6 +28,7 @@ and repository-level operating constraints.
 ## Documentation And Spec Discipline
 
 - Public-facing documentation and bootstrap guidance should default to English unless a file is explicitly local/private.
+- When `README.md` changes in a user-facing way, keep `README_de.md` aligned in the same patch unless the user explicitly asked for a temporary divergence.
 - When a code change affects a non-trivial boundary, update the nearest `*.spec.md` file in the same area.
 - Treat spec and documentation updates as part of the same change, not as a follow-up cleanup step. When behavior, command contracts, installation defaults, hook flows, or operator guidance changes, update the nearest `*.spec.md` plus the relevant user-facing docs in the same patch.
 - When a `*.spec.md` file is added or moved, run `python3 scripts/update_docs_index.py --check` and keep `docs/index.md` aligned.
