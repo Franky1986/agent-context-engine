@@ -221,8 +221,6 @@ def recent_sessions_context(
             "Previous sessions are available on demand, but are not injected into the visible chat.",
             f"Use `{prefix} last --limit 10` when needed.",
         ]
-        if current_folder:
-            parts.append(f"Current launch/work folder: `{current_folder}`.")
         parts.append(f"Indexed recent sessions: folder={len(folder_rows)}, global={len(global_rows)}.")
         if personal_startup_count:
             parts.append(f"Personal operating memory available: {personal_startup_count} startup-safe files under `{PERSONAL_ROOT}`.")
@@ -565,9 +563,10 @@ def memory_hooks_status_context(
     include_user_only_controls: bool = False,
 ) -> str:
     lines = [
-        f"Agent Context Engine active in `{ROOT}`",
         f"Agent Context Engine active root: `{ROOT}`",
     ]
+    if current_folder and normalized_path(current_folder) != normalized_path(str(ROOT)):
+        lines.append(f"Current launch/work folder: `{normalized_path(current_folder)}`.")
     status = firewall_status(conn)
     if not status.get("enabled", True):
         until = status.get("disabled_until") or "unknown"

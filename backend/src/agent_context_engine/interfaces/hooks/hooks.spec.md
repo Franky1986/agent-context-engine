@@ -58,6 +58,9 @@ pre-action safety checks, and enqueue or persist events for later processing.
 - Existing Codex/Claude/Cursor/Antigravity/Gemini/Opencode integrations continue to work.
 - Hook paths do not run dream/graph work inline.
 - Queue replay can recover accepted events.
+- Minimal SessionStart hook context must surface the original launch/work
+  folder whenever a root-managed wrapper started the runner from a different
+  shell directory than the Agent Context Engine root.
 - `beforeReadFile` and equivalent local file/context reads after taint are
   warned and audited, not blocked.
 - Remote/network reads remain risk-gated even when the upstream tool frames

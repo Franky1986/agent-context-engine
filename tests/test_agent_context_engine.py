@@ -5964,7 +5964,7 @@ exit 0
             self.assertEqual(prompt.returncode, 0, prompt.stdout + prompt.stderr)
             payload = json.loads(prompt.stdout)
             context = payload["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("Agent Context Engine active in", context)
+            self.assertIn("Agent Context Engine active root:", context)
             self.assertIn("Pending blocked approvals: 2.", context)
             self.assertNotIn("intent=", context)
             self.assertNotIn("why=", context)
@@ -8788,6 +8788,40 @@ The session reconciled stale queue state and resumed pending dreams.
                 )
             self.assertIn("Cursor background runner `codex` is not ready", context)
             self.assertIn("codex login", context)
+
+    def test_recent_sessions_context_minimal_includes_launch_folder_for_root_wrappers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            am = load_agent_memory(root)
+            from agent_context_engine.interfaces.hooks.support.session_context import recent_sessions_context
+
+            launch_folder = root / "projects" / "demoProject"
+            launch_folder.mkdir(parents=True)
+            conn = am.connect()
+            with conn:
+                conn.execute(
+                    """
+                    insert into sessions (
+                      session_id, client_type, project_id, cwd, last_workdir,
+                      started_at, last_event_at, status, last_event_seq
+                    ) values (
+                      'launch-folder-session', 'codex', 'demoProject', ?, ?,
+                      '2026-06-01T12:00:00+00:00', '2026-06-01T12:00:00+00:00',
+                      'open', 0
+                    )
+                    """,
+                    (str(root), str(launch_folder)),
+                )
+
+            with mock.patch.dict(os.environ, {"AGENT_MEMORY_STARTUP_CONTEXT": "minimal"}, clear=False):
+                context = recent_sessions_context(
+                    conn,
+                    "launch-folder-session",
+                    current_folder=str(launch_folder),
+                    client_type="codex",
+                    project_id="demoProject",
+                )
+            self.assertIn(f"Current launch/work folder: `{launch_folder.resolve()}`.", context)
 
     def test_cursor_dream_auth_block_message_ignores_recent_failures_after_successful_auth(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
