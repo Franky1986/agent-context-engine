@@ -12,6 +12,8 @@ across installation, hook startup, and harness entrypoints.
 - Rendering of agent-facing instruction artifacts.
 - Stable wording for retrieval, handover, repo-context, monitor, and
   user-control guidance, including the canonical runtime repo-index location.
+- Sandbox guidance for concrete runtime-memory commands that may require
+  escalated filesystem access in agent runners.
 
 ## Non-Scope
 
@@ -67,8 +69,13 @@ across installation, hook startup, and harness entrypoints.
   only when context triggers it.
 - Startup commands in the compact SessionStart context stay focused on retrieval/handover paths and do not include hook-management commands by default.
 - Bare helper commands such as `search`, `retrieve`, `repo-context`,
-  `personal-context`, `retrieval-runs`, and `monitor` explain their own usage or
-  show a short current list when called without a target argument.
+  `last`, `handover`, `personal-context`, `retrieval-runs`, and `monitor`
+  explain their own usage or show a short current list when called without a
+  target argument.
+- Bare helper output for runtime-memory commands states that concrete commands
+  can touch SQLite WAL/SHM files, locks, audit rows, retrieval logs, or metadata
+  refreshes and should request escalated sandbox access up front in
+  filesystem-sandboxed runners.
 
 ## Tests / Checks
 

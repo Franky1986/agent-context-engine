@@ -15,6 +15,7 @@ and repository-level operating constraints.
 - When asked about previous sessions, handovers, project context, "what happened last", "continue there", "we already analyzed this", or similar memory requests, use the local Agent Context Engine CLI first.
 - Agent Context Engine command prefix: `agent-context-engine`
 - Canonical public CLI contract: `agent-context-engine` from `PATH`. Repo-local `./scripts/ace` and `./scripts/agent-context-engine` remain compatibility fallbacks, not the primary hook/session contract.
+- Runtime-memory commands can touch SQLite WAL/SHM files, locks, audit rows, retrieval logs, or metadata refreshes even when they look read-only. In filesystem-sandboxed runners, request escalated sandbox access up front for concrete memory commands such as `last --limit 10`, `handover`, `search`, and `retrieve`.
 - Traceable retrieval: `agent-context-engine retrieve "<question or search terms>" --limit 10`
 - Quick keyword search: `agent-context-engine search "<search terms>" --limit 5`
 - Load a session handover: `agent-context-engine handover "<session|title|search terms>"`

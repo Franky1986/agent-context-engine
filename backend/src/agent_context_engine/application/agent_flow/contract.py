@@ -57,6 +57,7 @@ def render_agents_quick_path(contract: AgentFlowContract) -> str:
 - When asked about previous sessions, handovers, project context, "what happened last", "continue there", "we already analyzed this", or similar memory requests, use the local Agent Context Engine CLI first.
 - Agent Context Engine command prefix: `{contract.command_prefix}`
 - Canonical public CLI contract: `{contract.command_prefix}` from `PATH`. Repo-local `./scripts/ace` and `./scripts/agent-context-engine` remain compatibility fallbacks, not the primary hook/session contract.
+- Runtime-memory commands can touch SQLite WAL/SHM files, locks, audit rows, retrieval logs, or metadata refreshes even when they look read-only. In filesystem-sandboxed runners, request escalated sandbox access up front for concrete memory commands such as `last --limit 10`, `handover`, `search`, and `retrieve`.
 - Traceable retrieval: `{contract.command_prefix} retrieve "<question or search terms>" --limit 10`
 - Quick keyword search: `{contract.command_prefix} search "<search terms>" --limit 5`
 - Load a session handover: `{contract.command_prefix} handover "<session|title|search terms>"`
@@ -89,6 +90,7 @@ def render_session_start_hook_entry(contract: AgentFlowContract) -> str:
             "",
             f"Prefix: `{contract.command_prefix}`",
             "Run subcommands with that prefix. Bare helper commands show usage or a short current list.",
+            "Concrete memory commands may touch runtime storage; in filesystem-sandboxed runners, request escalated sandbox access up front.",
             "",
             "Memory:",
             *[f"- `{command}`" for command in quick_start_commands],

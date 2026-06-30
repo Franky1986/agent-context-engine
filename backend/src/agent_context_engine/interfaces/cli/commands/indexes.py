@@ -8,6 +8,7 @@ from ....infrastructure.config import ROOT, ensure_repos_index
 from ....infrastructure.db import connect
 from ....application.personal import PERSONAL_ROOT, parse_frontmatter, personal_files
 from ....application.query_intent import classify_query_intent
+from ....application.runtime_guidance import print_runtime_memory_sandbox_note
 from ....application.retrieval import index_memory_document, query_terms, recreate_memory_chunks_fts, search_memory_chunks
 from ....infrastructure.text import markdown_escape
 
@@ -21,6 +22,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         print("Use:")
         print('- `search "<search terms>" --limit 5`')
         print('- `retrieve "<question or search terms>" --limit 10` for traceable retrieval with provenance')
+        print_runtime_memory_sandbox_note()
         return 0
     conn = connect()
     query_intent = classify_query_intent(query_terms(args.query))

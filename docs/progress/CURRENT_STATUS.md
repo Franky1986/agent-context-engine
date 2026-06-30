@@ -31,6 +31,10 @@ workflows. The current public slice includes:
 - dream/monitor artifact inspection and CLI handover rendering now resolve
   external runtime-memory roots consistently, including Dream-v2 summaries,
   audit files, and dream-first session briefs.
+- session-start bootstrapping is consolidated with preserved exploratory behavior:
+  recent-session context injection, scoped `session-start-context`, and
+  user prompt hook messaging that still points to
+  `session-start-hook-entry.md`.
 
 Versioned release snapshot:
 
@@ -147,6 +151,42 @@ confirmed:
 - runtime repo-index migration, rebuild-index indexing, and retrieval over the
   canonical repo-index document were revalidated through focused end-to-end
   tests.
+
+## Consolidation Review (Windows Codex Push)
+
+Latest pull consolidation merged:
+
+- `5e4712a fix: harden monitor startup and status reliability`
+- `3144057 main - fix: stabilize windows autostart tests and define session start gating`
+- `3552c4a chore: compact session start command guidance`
+
+Impact summary:
+
+- monitor startup/status behavior is more resilient on macOS as well as Windows,
+  including non-fatal handling of instance metadata synchronization failures,
+  and status reads now avoid stalling on slow integration lookups;
+- userprompt/SessionStart exploratory paths are preserved and still route startup
+  context through the documented hook entry contract;
+- macOS monitor workflow remains LaunchAgent-based, with more deterministic status
+  and reduced risk of status blanking during transient integration metadata issues.
+
+Verification references (automated, current checkout):
+
+- `tests/test_agent_context_engine.py::test_codex_session_start_injects_recent_sessions_context`
+- `tests/test_agent_context_engine.py::test_user_prompt_submit_context_points_to_session_start_hook_entry`
+- `tests/test_agent_context_engine.py::test_session_start_context_surfaces_personal_and_repo_knowledge_without_paths`
+- `tests/test_agent_context_engine.py::test_personal_and_repo_context_commands_are_scoped_and_path_safe`
+- `tests/test_agent_context_engine.py::test_monitor_status_uses_fast_integration_summary`
+- `tests/test_agent_context_engine.py::test_monitor_status_survives_instance_metadata_sync_permission_error`
+- `tests/test_agent_context_engine.py::test_windows_monitor_autostart_uses_cmd_start_and_storage_root_env`
+- `tests/test_agent_context_engine.py::test_windows_monitor_autostart_rejects_brief_port_acceptance`
+- `tests/test_agent_context_engine.py::test_windows_monitor_autostart_falls_back_to_task_scheduler`
+
+Residual risk:
+
+- Windows support is still `experimental`; real-machine end-to-end validation for
+  retrieval and external-project dreams is the remaining blocker for stronger
+  support claims.
 
 ## Known Follow-Up Areas
 

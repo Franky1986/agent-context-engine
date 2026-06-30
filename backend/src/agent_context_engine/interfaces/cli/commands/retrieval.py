@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ....infrastructure.config import json_dumps
+from ....application.runtime_guidance import print_runtime_memory_sandbox_note
 from ....application.retrieval import (
     get_retrieval_run,
     list_retrieval_runs,
@@ -48,6 +49,7 @@ def cmd_retrieve(args: argparse.Namespace) -> int:
         print('- `retrieve "<question or search terms>" --limit 10`')
         print('- `retrieve "<question>" --workdir <absolute-path> --client <runner>` to scope retrieval')
         print('- `retrieval-runs --limit 10` to inspect recent retrievals')
+        print_runtime_memory_sandbox_note()
         return 0
     data = retrieve_memory_for_interface(
         args.query,
@@ -113,6 +115,7 @@ def cmd_retrieval_runs(args: argparse.Namespace) -> int:
         print("- `retrieval-runs --limit 10`")
         print("- `retrieval-runs --query <search terms> --limit 10`")
         print("- `retrieval-run <retrieval_run_id>` for one run")
+        print_runtime_memory_sandbox_note()
         return 0
     data = list_retrieval_runs(
         query=args.query,

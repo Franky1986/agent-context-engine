@@ -9614,6 +9614,16 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertNotIn("Session Start Hook Entry", context)
             self.assertNotIn("agent-memory session-start-context", context)
 
+    def test_memory_bare_commands_include_sandbox_escalation_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for command in ("last", "handover", "search", "retrieve", "retrieval-runs"):
+                result = run_cli(root, command)
+                self.assertEqual(result.returncode, 0, f"{command}\nstdout={result.stdout}\nstderr={result.stderr}")
+                self.assertIn("Use:", result.stdout)
+                self.assertIn("request escalated sandbox access up front", result.stdout)
+                self.assertIn("SQLite WAL/SHM", result.stdout)
+
     def test_session_start_context_surfaces_personal_and_repo_knowledge_without_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -10987,6 +10997,7 @@ The session reconciled stale queue state and resumed pending dreams.
     def test_monitor_runtime_persistence_error_does_not_stop_startup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            load_agent_memory(root)
             with mock.patch.dict(os.environ, {"AGENT_CONTEXT_ENGINE_ROOT": str(root)}, clear=False):
                 from agent_context_engine.interfaces.http import server
 
@@ -11018,6 +11029,7 @@ The session reconciled stale queue state and resumed pending dreams.
     def test_user_state_root_falls_back_to_storage_root_when_home_state_root_is_unwritable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            load_agent_memory(root)
             blocked_home = root / "blocked-home"
             blocked_home.parent.mkdir(parents=True, exist_ok=True)
             blocked_home.write_text("blocked", encoding="utf-8")

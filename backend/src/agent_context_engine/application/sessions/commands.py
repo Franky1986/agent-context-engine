@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..instance_profile import resolve_runner_wrapper_name
+from ..runtime_guidance import print_runtime_memory_sandbox_note
 from ...infrastructure.config import ROOT, detect_project, json_dumps, session_short
 from ...infrastructure.db import connect
 from ...adapters.runners.claude import claude_session_title, sync_transcript_claude
@@ -153,6 +154,17 @@ def cmd_sync_transcripts(args: argparse.Namespace) -> int:
 
 
 def cmd_last(args: argparse.Namespace) -> int:
+    if args.limit is None and not getattr(args, "folder", None) and not args.query:
+        print("# Last Sessions")
+        print("")
+        print("List recent Agent Context Engine sessions from runtime memory.")
+        print("")
+        print("Use:")
+        print("- `last --limit 10`")
+        print("- `last <search terms> --limit 10`")
+        print("- `last --folder <absolute-path> --limit 10`")
+        print_runtime_memory_sandbox_note()
+        return 0
     conn = connect()
     where = []
     params: list[Any] = []
@@ -192,7 +204,7 @@ def cmd_last(args: argparse.Namespace) -> int:
             order by coalesce(s.last_event_at, s.started_at) desc
             limit ?
             """,
-            (*params, args.limit),
+            (*params, args.limit or 10),
         )
     )
     for row in rows:

@@ -148,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.set_defaults(func=cmd_status)
 
     last = sub.add_parser("last")
-    last.add_argument("--limit", type=int, default=10)
+    last.add_argument("--limit", type=int)
     last.add_argument("--folder", help="Only list sessions whose cwd/last_workdir overlaps this folder")
     last.add_argument("query", nargs="?")
     last.set_defaults(func=cmd_last)
@@ -211,7 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     operational_facts.set_defaults(func=cmd_operational_facts)
 
     handover = sub.add_parser("handover")
-    handover.add_argument("selector")
+    handover.add_argument("selector", nargs="?")
     handover.add_argument("--timeline", type=int, default=10)
     handover.add_argument("--tools", type=int, default=10)
     handover.add_argument("--graph-limit", type=int, default=6)

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..instance_profile import resolve_runner_wrapper_name
+from ..runtime_guidance import print_runtime_memory_sandbox_note
 from ..dreaming.memory import extract_session_brief
 from ...infrastructure.config import MEMORY_DIR, ROOT
 from ...infrastructure.db import connect, resolve_session, session_events
@@ -309,6 +310,16 @@ def project_memory_path(project_id: str | None) -> Path:
 
 
 def cmd_handover(args: argparse.Namespace) -> int:
+    if not args.selector:
+        print("# Handover")
+        print("")
+        print("Load a high-context session handover from runtime memory.")
+        print("")
+        print("Use:")
+        print('- `handover "<session|title|search terms>"`')
+        print('- `last --limit 10` to discover recent session selectors first')
+        print_runtime_memory_sandbox_note()
+        return 0
     conn = connect()
     session = resolve_session(conn, args.selector)
     if session is None:
