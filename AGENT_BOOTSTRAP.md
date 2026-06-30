@@ -21,6 +21,8 @@ agent should:
 2. Inspect this file, `docs/setup/RUNNER_HARNESSES.md`, and `README.md`.
 3. Reply in the same language as the user's install request from the first
    answer onward.
+   If the request contains an explicit German install phrase (for example `bitte installieren`),
+   force the install language for that interaction to `de`.
 4. Run `python3 scripts/agent_context_engine.py install-discovery` first when this is a
    fresh public clone or the target/memory-root relationship is still unclear.
    If the user later switches the install conversation language, rerun
@@ -84,6 +86,7 @@ defaults before writing files:
 
 - Target root: where the central Agent Context Engine installation should live.
 - Preferred interaction language: default to English for public setups unless the user asked in another language.
+  - If an explicit German install phrase like `bitte installieren` is present, default to `de`.
 - Harnesses: Codex, Claude Code, Cursor IDE, Antigravity CLI (`agy`), Gemini
   CLI, OpenCode, or a subset.
 - Headless runner readiness: whether `codex` and/or `claude` is installed and
@@ -108,6 +111,7 @@ Reasonable defaults:
   user's preferred language when stated. Discovery should propose the install
   language from the current install interaction before reusing an older
   checkout language.
+  - Explicit German install phrasing such as `bitte installieren` must map to `de`.
 - Harnesses: prepare Codex, Claude, Antigravity, and Gemini in the central
   root; enable Cursor and OpenCode per project only when requested. Cursor
   activation requires `codex` or `claude` for background LLM workflows. Do not
