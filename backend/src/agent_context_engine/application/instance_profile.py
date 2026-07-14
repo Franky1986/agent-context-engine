@@ -246,6 +246,7 @@ def default_installation_profile() -> dict[str, Any]:
             "host": DEFAULT_MONITOR_HOST,
             "port": DEFAULT_MONITOR_PORT,
             "language": "en",
+            "enabled": True,
             "last_started_at": "",
             "last_started_by": "",
             "last_stopped_at": "",
@@ -632,6 +633,7 @@ def _normalize_installation_profile(payload: dict[str, Any] | None) -> dict[str,
                 "host": host,
                 "port": max(1, min(port, 65535)),
                 "language": language if language in {"en", "de"} else "en",
+                "enabled": bool(monitor.get("enabled", True)),
                 "last_started_at": str(monitor.get("last_started_at") or ""),
                 "last_started_by": str(monitor.get("last_started_by") or ""),
                 "last_stopped_at": str(monitor.get("last_stopped_at") or ""),
@@ -735,6 +737,8 @@ def merge_installation_profile(
             except (TypeError, ValueError):
                 port = DEFAULT_MONITOR_PORT
             current_monitor["port"] = max(1, min(port, 65535))
+        if "enabled" in monitor:
+            current_monitor["enabled"] = bool(monitor.get("enabled"))
         for key in ("last_started_at", "last_started_by", "last_stopped_at", "last_seen_at", "last_known_url"):
             if key in monitor:
                 current_monitor[key] = str(monitor.get(key) or "")
@@ -1096,7 +1100,7 @@ def record_monitor_runtime(
     replaced = False
     for index, existing in enumerate(entries):
         normalized = _normalize_monitor_runtime_entry(existing)
-        if normalized.get("instance_id") == entry["instance_id"] or normalized.get("installation_root") == entry["installation_root"]:
+        if normalized.get("installation_root") == entry["installation_root"]:
             entries[index] = {**normalized, **entry}
             replaced = True
             break
@@ -1159,6 +1163,7 @@ def resolve_monitor_profile(root: Path = ROOT) -> dict[str, Any]:
         "host": host,
         "port": max(1, min(port, 65535)),
         "language": language if language in {"en", "de"} else "en",
+        "enabled": bool(monitor.get("enabled", True)),
     }
 
 
@@ -1234,7 +1239,7 @@ def monitor_restart_command(
     *,
     runner: str | None = None,
     replace_existing: bool = True,
-    no_open: bool = True,
+    no_open: bool = False,
 ) -> str:
     monitor = resolve_monitor_profile(root)
     workflow_runner = str(load_installation_profile(root).get("workflows", {}).get("monitor_runner") or WORKFLOW_RUNNER_DEFAULTS["monitor_runner"]).strip()

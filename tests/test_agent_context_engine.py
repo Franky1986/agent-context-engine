@@ -10179,6 +10179,38 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(search.returncode, 0, search.stderr)
             self.assertIn("memory/knowledge/repos.md", search.stdout)
             self.assertIn("presentations-app", search.stdout)
+            self.assertIn('repo-context "presentations-app"', search.stdout)
+
+    def test_search_suggests_matching_repo_context_without_rebuilt_index(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            runtime_repos = root / "memory" / "knowledge" / "repos.md"
+            runtime_repos.parent.mkdir(parents=True, exist_ok=True)
+            runtime_repos.write_text(
+                "\n".join(
+                    [
+                        "# Repository Index",
+                        "",
+                        "## Projects",
+                        "",
+                        "### `aiLab/hackathon`",
+                        "",
+                        f"- Path: [hackathon](file://{root / 'external' / 'hackathon'})",
+                        "- Entry point: `testGame/README.md`",
+                        "- Note: Voxel prototype and Minecraft clone experiments.",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            search = run_cli(root, "search", "minecraft clon", "--limit", "3")
+            self.assertEqual(search.returncode, 0, search.stderr)
+            self.assertIn("No matches.", search.stdout)
+            self.assertIn("Repository context may also contain relevant project knowledge", search.stdout)
+            self.assertIn('repo-context "aiLab/hackathon"', search.stdout)
+            self.assertNotIn(str(root.resolve()), search.stdout)
 
     def test_folder_search_reports_unindexed_codex_transcripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -11820,7 +11852,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(instance_metadata["instance_id"], "install-root")
             self.assertEqual(instance_metadata["installation_root"], str(install_root.resolve()))
             self.assertEqual(instance_metadata["memory_root"], str(memory_root.resolve()))
-            self.assertEqual(instance_metadata["product_version"], "0.2.14.dev0")
+            self.assertEqual(instance_metadata["product_version"], "0.2.14")
             self.assertEqual(instance_metadata["monitor_version"], "0.6.10")
             self.assertEqual(instance_metadata["monitor_port"], 8899)
             self.assertEqual(instance_metadata["wrapper_suffix"], "-ace")
@@ -11838,7 +11870,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn("installed at:", result.stdout)
             self.assertIn("last updated at:", result.stdout)
             check = run_cli(install_root, "check-installation", "--target", str(install_root))
-            self.assertEqual(check.returncode, 0, check.stderr)
+            self.assertEqual(check.returncode, 1, check.stderr)
             self.assertNotIn(str(memory_root / ".agent-context-engine"), check.stdout)
 
     def test_install_refuses_conflicting_user_cli_shortcut_without_force(self) -> None:
@@ -11925,7 +11957,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertFalse(missing_memory_root.exists())
 
             status = run_cli(install_root, "check-installation", "--target", str(install_root))
-            self.assertEqual(status.returncode, 0, status.stderr)
+            self.assertEqual(status.returncode, 1, status.stderr)
             self.assertFalse(missing_memory_root.exists())
             self.assertIn(f"memory root: {missing_memory_root.resolve()}", status.stdout)
 
@@ -11998,8 +12030,10 @@ The session reconciled stale queue state and resumed pending dreams.
                 "--memory-root",
                 str(second_memory_root),
                 "--apply",
+                extra_env={"AGENT_MEMORY_TEST_SKIP_MONITOR_START": "1"},
             )
-            self.assertEqual(repair.returncode, 0, repair.stderr)
+            self.assertEqual(repair.returncode, 1, repair.stdout + repair.stderr)
+            self.assertIn("repair result: incomplete", repair.stdout)
             profile = json.loads((install_root / "memory" / "local" / "installation-profile.json").read_text(encoding="utf-8"))
             self.assertEqual(profile["storage"]["memory_root"], str(second_memory_root.resolve()))
             self.assertEqual(profile["launchagent"]["env_file"], str((second_memory_root / "local" / "agent-context-engine.env").resolve()))
@@ -12276,6 +12310,14 @@ The session reconciled stale queue state and resumed pending dreams.
                 mock.patch.object(installation_cmd, "active_monitor_runtime_entries", return_value=[active_entry]),
                 mock.patch.object(
                     installation_cmd,
+                    "_monitor_status_payload_with_retries",
+                    return_value={
+                        "root": str(root.resolve()),
+                        "memory_root": str((root / "memory").resolve()),
+                    },
+                ),
+                mock.patch.object(
+                    installation_cmd,
                     "_port_conflict_status",
                     return_value={"available": False, "error": "port already accepting connections"},
                 ),
@@ -12289,6 +12331,28 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(status["status"], "active")
             self.assertTrue(status["active"])
             self.assertEqual(status["error"], "")
+
+    def test_configured_monitor_port_reports_stopped_without_verified_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands import installation as installation_cmd
+
+            with mock.patch.object(
+                installation_cmd, "_monitor_status_payload_with_retries", return_value=None
+            ), mock.patch.object(
+                installation_cmd,
+                "_port_conflict_status",
+                return_value={"available": True, "error": ""},
+            ):
+                status = installation_cmd._configured_monitor_port_status(
+                    root=root,
+                    host="127.0.0.1",
+                    port=8787,
+                )
+
+            self.assertEqual(status["status"], "stopped")
+            self.assertFalse(status["active"])
 
     def test_monitor_takeover_detects_delayed_superseded_monitor_reappearance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -12323,6 +12387,153 @@ The session reconciled stale queue state and resumed pending dreams.
 
             self.assertEqual(len(failures), 1)
             self.assertIn("reappeared", failures[0])
+
+    def test_monitor_takeover_keeps_unreachable_process_candidate_as_blocker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "new-install"
+            previous_root = Path(tmp) / "previous-install"
+            memory_root = Path(tmp) / "runtime-memory"
+            root.mkdir()
+            previous_root.mkdir()
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands import installation as installation_cmd
+
+            processes = subprocess.CompletedProcess(
+                ["ps"],
+                0,
+                f"  515 /usr/bin/python3 {previous_root}/scripts/agent_context_engine.py monitor --runner codex --port 8787 --no-open\n",
+                "",
+            )
+            with mock.patch.object(
+                installation_cmd, "active_monitor_runtime_entries", return_value=[]
+            ), mock.patch.object(
+                installation_cmd.subprocess, "run", return_value=processes
+            ), mock.patch.object(
+                installation_cmd, "_monitor_status_payload_with_retries", return_value=None
+            ), mock.patch.object(
+                installation_cmd,
+                "resolve_storage_profile",
+                return_value={"memory_root": str(memory_root.resolve())},
+            ):
+                candidates = installation_cmd._superseded_monitor_candidates(
+                    target=root,
+                    memory_root=memory_root,
+                )
+
+            self.assertEqual(candidates[0]["installation_root"], str(previous_root.resolve()))
+            self.assertTrue(candidates[0]["status_unreachable"])
+
+    def test_runtime_registry_preserves_same_instance_id_for_different_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            home = temp_root / "home"
+            memory_root = temp_root / "memory"
+            first_root = temp_root / "first"
+            second_root = temp_root / "second"
+            for path in (home, memory_root, first_root, second_root):
+                path.mkdir()
+            from agent_context_engine.application.instance_profile import (
+                load_monitor_runtime_registry,
+                record_monitor_runtime,
+            )
+
+            common = {
+                "instance_id": "agent-context-engine",
+                "memory_root": memory_root,
+                "configured_host": "127.0.0.1",
+                "active_host": "127.0.0.1",
+                "pid": os.getpid(),
+                "status": "running",
+                "runner": "codex",
+                "language": "en",
+                "monitor_version": "test",
+                "product_version": "test",
+                "home": home,
+            }
+            record_monitor_runtime(
+                installation_root=first_root,
+                configured_port=8787,
+                active_port=8787,
+                shutdown_token="first-token",
+                **common,
+            )
+            record_monitor_runtime(
+                installation_root=second_root,
+                configured_port=8788,
+                active_port=8788,
+                shutdown_token="second-token",
+                **common,
+            )
+
+            entries = load_monitor_runtime_registry(home)["entries"]
+            self.assertEqual(len(entries), 2)
+            self.assertEqual(
+                {item["installation_root"] for item in entries},
+                {str(first_root.resolve()), str(second_root.resolve())},
+            )
+
+    def test_monitor_replace_existing_uses_authenticated_shutdown_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_root = root / "memory"
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.http import server
+
+            response = mock.MagicMock()
+            response.status = 202
+            response.getcode.return_value = 202
+            response.__enter__.return_value = response
+            response.__exit__.return_value = False
+            status_payload = {
+                "root": str(root.resolve()),
+                "memory_root": str(memory_root.resolve()),
+            }
+            entry = {
+                "installation_root": str(root.resolve()),
+                "memory_root": str(memory_root.resolve()),
+                "active_host": "127.0.0.1",
+                "active_port": 8787,
+                "shutdown_token": "secret-token",
+            }
+            with mock.patch.object(server, "ROOT", root), mock.patch.object(
+                server, "resolve_storage_profile", return_value={"memory_root": str(memory_root.resolve())}
+            ), mock.patch.object(
+                server, "_listener_accepting", side_effect=[True, False]
+            ), mock.patch.object(
+                server, "_replacement_monitor_status", return_value=status_payload
+            ), mock.patch.object(
+                server, "active_monitor_runtime_entries", return_value=[entry]
+            ), mock.patch.object(
+                server.urllib.request, "urlopen", return_value=response
+            ) as urlopen_mock:
+                replaced = server.replace_existing_monitor_port("127.0.0.1", 8787)
+
+            self.assertTrue(replaced)
+            request = urlopen_mock.call_args.args[0]
+            self.assertEqual(request.full_url, "http://127.0.0.1:8787/api/runtime/shutdown")
+            self.assertEqual(request.get_header("X-agent-context-engine-monitor-token"), "secret-token")
+
+    def test_monitor_replace_existing_refuses_identity_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.http import server
+
+            with mock.patch.object(server, "ROOT", root), mock.patch.object(
+                server, "resolve_storage_profile", return_value={"memory_root": str((root / "memory").resolve())}
+            ), mock.patch.object(
+                server, "_listener_accepting", return_value=True
+            ), mock.patch.object(
+                server,
+                "_replacement_monitor_status",
+                return_value={"root": "/unrelated", "memory_root": "/unrelated-memory"},
+            ), mock.patch.object(
+                server, "active_monitor_runtime_entries"
+            ) as registry_mock:
+                replaced = server.replace_existing_monitor_port("127.0.0.1", 8787)
+
+            self.assertFalse(replaced)
+            registry_mock.assert_not_called()
 
     def test_monitor_takeover_refuses_unmanaged_monitor_without_pid_kill(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -12359,7 +12570,11 @@ The session reconciled stale queue state and resumed pending dreams.
             load_agent_memory(root)
             from agent_context_engine.interfaces.cli.commands import installation as installation_cmd
 
-            with mock.patch.object(installation_cmd, "_monitor_status_payload", return_value=None):
+            with mock.patch.object(
+                installation_cmd, "_monitor_status_payload", return_value=None
+            ), mock.patch.object(
+                installation_cmd, "_stop_owned_monitor_launcher", return_value=(None, None)
+            ):
                 actions, failures = installation_cmd._stop_superseded_monitors_for_memory_root(
                     candidates=[
                         {
@@ -12375,6 +12590,38 @@ The session reconciled stale queue state and resumed pending dreams.
 
             self.assertEqual(actions, [])
             self.assertIn("unreachable", failures[0])
+
+    def test_monitor_takeover_stops_unreachable_candidate_only_via_owned_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_root = root / "runtime-memory"
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli.commands import installation as installation_cmd
+
+            candidate = {
+                "host": "127.0.0.1",
+                "port": 8786,
+                "installation_root": "/previous/install",
+            }
+            with mock.patch.object(
+                installation_cmd, "_monitor_status_payload", return_value=None
+            ), mock.patch.object(
+                installation_cmd,
+                "_stop_owned_monitor_launcher",
+                return_value=("stopped verified launcher", None),
+            ), mock.patch.object(
+                installation_cmd, "_wait_for_superseded_monitors_to_stop", return_value=[]
+            ), mock.patch.object(
+                installation_cmd, "_verify_superseded_monitors_stay_stopped", return_value=[]
+            ):
+                actions, failures = installation_cmd._stop_superseded_monitors_for_memory_root(
+                    candidates=[candidate],
+                    target=root,
+                    memory_root=memory_root,
+                )
+
+            self.assertEqual(failures, [])
+            self.assertEqual(actions, ["stopped verified launcher"])
 
     def test_monitor_takeover_uses_authenticated_http_shutdown_without_pid_kill(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -13273,6 +13520,17 @@ The session reconciled stale queue state and resumed pending dreams.
                 return_value=payload,
             ), mock.patch.object(
                 installation_cmd,
+                "_default_storage_root_for_install",
+                return_value=root / "memory",
+            ), mock.patch.object(
+                installation_cmd,
+                "_monitor_status_payload_with_retries",
+                return_value={
+                    "root": str(root.resolve()),
+                    "memory_root": str((root / "memory").resolve()),
+                },
+            ), mock.patch.object(
+                installation_cmd,
                 "_print_installation_check",
             ), mock.patch.object(
                 installation_cmd,
@@ -13292,6 +13550,84 @@ The session reconciled stale queue state and resumed pending dreams.
                 {"codex": [], "claude": [], "cursor": []},
             )
             self.assertIn("finalized installation-root integration", output.getvalue())
+
+    def test_check_installation_returns_nonzero_for_monitor_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli import main as cli_main
+            from agent_context_engine.interfaces.cli.commands import installation as installation_cmd
+
+            args = cli_main.build_parser().parse_args(
+                ["check-installation", "--target", str(root)]
+            )
+            payload = {
+                "findings": [
+                    {
+                        "severity": "error",
+                        "code": "monitor_not_running",
+                        "message": "configured monitor is stopped",
+                    }
+                ]
+            }
+            with mock.patch.object(
+                installation_cmd, "_installation_check_payload", return_value=payload
+            ), mock.patch.object(installation_cmd, "_print_installation_check"):
+                rc = args.func(args)
+
+            self.assertEqual(rc, 1)
+
+    def test_installation_profile_preserves_explicit_monitor_opt_out(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.application.instance_profile import (
+                load_installation_profile,
+                merge_installation_profile,
+                resolve_monitor_profile,
+            )
+
+            merge_installation_profile(root, monitor={"enabled": False})
+
+            self.assertFalse(load_installation_profile(root)["monitor"]["enabled"])
+            self.assertFalse(resolve_monitor_profile(root)["enabled"])
+
+    def test_repair_installation_fails_closed_when_monitor_cannot_start(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            load_agent_memory(root)
+            from agent_context_engine.interfaces.cli import main as cli_main
+            from agent_context_engine.interfaces.cli.commands import installation as installation_cmd
+
+            args = cli_main.build_parser().parse_args(
+                ["repair-installation", "--target", str(root), "--apply"]
+            )
+            payload = {
+                "runtime": {"venv_exists": True, "yaml_available": True},
+                "frontend": {"needs_build": False},
+                "manual_actions": [],
+                "findings": [],
+            }
+            with mock.patch.object(
+                installation_cmd, "_installation_check_payload", return_value=payload
+            ), mock.patch.object(
+                installation_cmd, "_print_installation_check"
+            ), mock.patch.object(
+                installation_cmd, "_monitor_status_payload_with_retries", return_value=None
+            ), mock.patch.object(
+                installation_cmd,
+                "_autostart_monitor_after_install",
+                return_value=(False, "unreachable superseded monitor"),
+            ), mock.patch.object(
+                installation_cmd, "_ensure_central_hub_and_active_root"
+            ) as publish_mock, mock.patch.object(
+                installation_cmd, "_activate_installation_hooks"
+            ) as hooks_mock:
+                rc = args.func(args)
+
+            self.assertEqual(rc, 1)
+            publish_mock.assert_not_called()
+            hooks_mock.assert_not_called()
 
     def test_install_can_skip_monitor_autostart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -13681,8 +14017,8 @@ The session reconciled stale queue state and resumed pending dreams.
 
             (root / ".codex" / "agent-memory-binding.json").unlink()
             status = run_cli(root, "check-installation", "--target", str(root), timeout=60)
-            self.assertEqual(status.returncode, 0, status.stderr)
-            self.assertIn("monitor default: 203.0.113.1:8899 (conflict)", status.stdout)
+            self.assertEqual(status.returncode, 1, status.stderr)
+            self.assertIn("monitor default: 203.0.113.1:8899 (skipped)", status.stdout)
             self.assertIn("codex workspace binding", status.stdout)
             self.assertIn("is missing", status.stdout)
 
@@ -13751,8 +14087,10 @@ The session reconciled stale queue state and resumed pending dreams.
                 "--codex-workspace-root",
                 str(workspace),
                 "--apply",
+                extra_env={"AGENT_MEMORY_TEST_SKIP_MONITOR_START": "1"},
             )
-            self.assertEqual(repair.returncode, 0, repair.stderr)
+            self.assertEqual(repair.returncode, 1, repair.stdout + repair.stderr)
+            self.assertIn("repair result: incomplete", repair.stdout)
             self.assertIn("skipped codex workspace adapter rewrite", repair.stdout)
             self.assertEqual(adapter.read_text(encoding="utf-8"), bad_text)
 
@@ -13780,7 +14118,7 @@ The session reconciled stale queue state and resumed pending dreams.
                 str(workspace),
                 extra_env={"PATH": ""},
             )
-            self.assertEqual(status.returncode, 0, status.stderr)
+            self.assertEqual(status.returncode, 1, status.stderr)
             self.assertIn("Monitor frontend build is missing", status.stdout)
             self.assertIn("Codex GUI hooks in the workspace are separate from the Codex CLI", status.stdout)
             self.assertIn("npm install -g @openai/codex", status.stdout)
@@ -13828,7 +14166,7 @@ The session reconciled stale queue state and resumed pending dreams.
             )
             self.assertEqual(install.returncode, 0, install.stderr)
             status = run_cli(root, "check-installation", "--target", str(root), extra_env={"PATH": ""})
-            self.assertEqual(status.returncode, 0, status.stderr)
+            self.assertEqual(status.returncode, 1, status.stderr)
             self.assertIn("Monitor and monitor ask: claude", status.stdout)
             self.assertIn("Dreaming and headless analysis: deterministic", status.stdout)
             self.assertIn("LLM query expansion: off", status.stdout)
@@ -13927,7 +14265,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(launchagent.returncode, 0, launchagent.stderr)
 
             status = run_cli(temp_root, "check-installation", "--target", str(install_root))
-            self.assertEqual(status.returncode, 0, status.stderr)
+            self.assertEqual(status.returncode, 1, status.stderr)
             self.assertNotIn("program path differs from current install root", status.stdout)
             self.assertNotIn("working directory differs from current install root", status.stdout)
 

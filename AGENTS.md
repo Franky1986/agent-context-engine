@@ -20,6 +20,9 @@ and repository-level operating constraints.
 - Runtime-memory commands can touch SQLite WAL/SHM files, locks, audit rows, retrieval logs, or metadata refreshes even when they look read-only. In filesystem-sandboxed runners, request escalated sandbox access up front for concrete memory commands such as `last --limit 10`, `handover`, `search`, and `retrieve`.
 - Traceable retrieval: `agent-context-engine retrieve "<question or search terms>" --limit 10`
 - Quick keyword search: `agent-context-engine search "<search terms>" --limit 5`
+- Search may also report matching repository identifiers as separate
+  `repo-context "<identifier>"` follow-up commands; treat those as repository
+  knowledge candidates, not session-memory evidence.
 - Load a session handover: `agent-context-engine handover "<session|title|search terms>"`
 - Recent sessions: `agent-context-engine last --limit 10`
 - Status: `agent-context-engine doctor`

@@ -130,6 +130,7 @@ python3 scripts/update_docs_index.py --check
 - [Spec: Risk Domain Boundary](../backend/src/agent_context_engine/domain/risk.spec.md) - `backend/src/agent_context_engine/domain/risk.spec.md`
 - [Spec: Semantic Normalization Domain](../backend/src/agent_context_engine/domain/semantic_normalization.spec.md) - `backend/src/agent_context_engine/domain/semantic_normalization.spec.md`
 - [Spec: CLI Interface Boundary](../backend/src/agent_context_engine/interfaces/cli/cli.spec.md) - `backend/src/agent_context_engine/interfaces/cli/cli.spec.md`
+- [Search And Repository Context Contract](../backend/src/agent_context_engine/interfaces/cli/commands/indexes.spec.md) - `backend/src/agent_context_engine/interfaces/cli/commands/indexes.spec.md`
 - [Spec: Hook Interface Boundary](../backend/src/agent_context_engine/interfaces/hooks/hooks.spec.md) - `backend/src/agent_context_engine/interfaces/hooks/hooks.spec.md`
 - [Spec: HTTP Monitor Interface Boundary](../backend/src/agent_context_engine/interfaces/http/http.spec.md) - `backend/src/agent_context_engine/interfaces/http/http.spec.md`
 - [Spec: Ports Boundary](../backend/src/agent_context_engine/ports/ports.spec.md) - `backend/src/agent_context_engine/ports/ports.spec.md`

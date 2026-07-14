@@ -90,6 +90,16 @@ endpoint must remain absent for eight seconds, including a second stability
 check after startup. Requested incomplete installs return non-zero, and a newly
 started POSIX monitor is terminated, force-killed if necessary, and identity-
 checked when takeover cleanup cannot be verified.
+Status probes use bounded retries so a short response delay does not become a
+false takeover failure. Recognized ACE monitor processes sharing the selected
+memory root remain explicit blockers when their identity cannot be read.
+`repair-installation --apply` repeats this monitor reconciliation and may
+publish the active root or finalize hooks only after the configured monitor is
+identity-verified. It requires separate explicit chat approval after an
+approved install plan fails; install consent does not authorize an automatic
+repair mutation. `check-installation` treats an enabled but stopped monitor as
+an error rather than interpreting a free port or stale registry record as
+healthy.
 On macOS, verified legacy submitted
 `com.agent-context-engine.monitor-<port>` KeepAlive jobs are unloaded as part
 of that takeover; unrelated launchd jobs are not touched.

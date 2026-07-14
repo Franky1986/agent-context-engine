@@ -37,6 +37,11 @@ agent should:
    Sandbox/tool escalation approval is not sufficient. If the installer later
    shows a final `yes/no` confirmation prompt, agents must not answer `yes`
    unless the user already gave explicit chat approval for that exact plan.
+   If that approved install finishes incomplete, agents must not run
+   `repair-installation --apply` automatically. Present the failure and exact
+   repair command, then wait for a new explicit user chat approval because
+   repair may retry monitor takeover, republish the active root, and finalize
+   hooks.
    That summary should explicitly say that the proposed monitor port is only a
    discovery default and will be revalidated again immediately before config is
    written.

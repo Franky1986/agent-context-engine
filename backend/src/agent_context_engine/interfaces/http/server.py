@@ -8,7 +8,7 @@ import os
 import re
 import secrets
 import shutil
-import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -16,12 +16,15 @@ from datetime import datetime, timezone
 import time
 from pathlib import Path
 import urllib.parse
+import urllib.error
+import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from ...infrastructure.config import MEMORY_DIR, ROOT, SKILL_ROOT
 from ...application.instance_profile import (
+    active_monitor_runtime_entries,
     load_installation_profile,
     merge_installation_profile,
     monitor_restart_command,
@@ -961,8 +964,8 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     server: ReusableThreadingHTTPServer | None = None
     attempts = 4 if args.replace_existing else 1
     for attempt in range(attempts):
-        if args.replace_existing:
-            replace_existing_monitor_port(host, port)
+        if args.replace_existing and not replace_existing_monitor_port(host, port):
+            return 1
         try:
             server = ReusableThreadingHTTPServer((host, port), MonitorHandler)
             break
@@ -989,8 +992,8 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         url=url,
         shutdown_token=server.monitor_token,  # type: ignore[attr-defined]
     )
-    print(f"agent-context-engine monitor {MONITOR_VERSION}: {url}")
-    print(f"runner={args.runner} model={runner_model(args.runner, args.runner_model) or '-'} root={ROOT}")
+    print(f"agent-context-engine monitor {MONITOR_VERSION}: {url}", flush=True)
+    print(f"runner={args.runner} model={runner_model(args.runner, args.runner_model) or '-'} root={ROOT}", flush=True)
     if args.open:
         threading.Timer(0.2, lambda: webbrowser.open(url)).start()
     try:
@@ -1016,80 +1019,99 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     return 0
 
 
-def replace_existing_monitor_port(host: str, port: int) -> None:
-    if host not in {"", "0.0.0.0", "127.0.0.1", "localhost", "::", "::1"}:
-        return
-    def _normalize_host(target_host: str) -> str:
-        return "localhost" if target_host in {"127.0.0.1", "localhost", "::1"} else target_host
+def _local_monitor_probe_host(host: str) -> str | None:
+    normalized = str(host or "").strip().strip("[]").lower()
+    if normalized in {"", "0.0.0.0", "127.0.0.1", "localhost"}:
+        return "127.0.0.1"
+    if normalized in {"::", "::1"}:
+        return "::1"
+    return None
 
-    lsof = shutil.which("lsof")
-    if lsof:
-        proc = subprocess.run(
-            [lsof, "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
-            text=True,
-            capture_output=True,
-            timeout=3,
-            check=False,
+
+def _listener_accepting(host: str, port: int, *, timeout: float = 0.3) -> bool:
+    try:
+        connection = socket.create_connection((host, port), timeout=timeout)
+    except OSError:
+        return False
+    connection.close()
+    return True
+
+
+def _replacement_monitor_status(host: str, port: int) -> dict[str, Any] | None:
+    url_host = f"[{host}]" if ":" in host else host
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(f"http://{url_host}:{port}/api/status", timeout=1.5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = None
+        if isinstance(payload, dict):
+            return payload
+        if attempt < 2:
+            time.sleep(0.2)
+    return None
+
+
+def replace_existing_monitor_port(host: str, port: int) -> bool:
+    probe_host = _local_monitor_probe_host(host)
+    if probe_host is None:
+        print(f"refusing to replace non-loopback listener on {host}:{port}")
+        return False
+    if not _listener_accepting(probe_host, port):
+        return True
+
+    payload = _replacement_monitor_status(probe_host, port)
+    expected_root = str(ROOT.resolve())
+    expected_memory_root = str(resolve_storage_profile(ROOT).get("memory_root") or "").strip()
+    observed_root = str((payload or {}).get("root") or (payload or {}).get("install_root") or "").strip()
+    observed_memory_root = str((payload or {}).get("memory_root") or "").strip()
+    if observed_root != expected_root or observed_memory_root != expected_memory_root:
+        print(
+            f"refusing to replace unverified listener on {host}:{port}: "
+            f"root={observed_root or '-'} memory_root={observed_memory_root or '-'}"
         )
-    else:
-        proc = None
+        return False
 
-    pids: set[int] = set()
-    if proc and proc.stdout:
-        pids.update(int(line) for line in proc.stdout.splitlines() if line.strip().isdigit())
+    token = ""
+    for entry in active_monitor_runtime_entries(include_shutdown_token=True):
+        entry_host = str(entry.get("active_host") or entry.get("configured_host") or "").strip()
+        entry_port = int(entry.get("active_port") or entry.get("configured_port") or 0)
+        if (
+            str(entry.get("installation_root") or "").strip() == expected_root
+            and str(entry.get("memory_root") or "").strip() == expected_memory_root
+            and entry_host in {host, probe_host, "localhost"}
+            and entry_port == port
+        ):
+            token = str(entry.get("shutdown_token") or "")
+            break
+    if not token:
+        print(f"refusing to replace tokenless monitor on {host}:{port}; stop it explicitly")
+        return False
 
-    if not pids:
-        ss = shutil.which("ss")
-        if ss:
-            list_proc = subprocess.run(
-                [ss, "-ltnp"],
-                text=True,
-                capture_output=True,
-                timeout=3,
-                check=False,
-            )
-            for line in list_proc.stdout.splitlines():
-                if f":{port}" not in line:
-                    continue
-                match = re.search(r"pid=([0-9]+)", line)
-                if match:
-                    try:
-                        pids.add(int(match.group(1)))
-                    except ValueError:
-                        continue
+    url_host = f"[{probe_host}]" if ":" in probe_host else probe_host
+    request = urllib.request.Request(
+        f"http://{url_host}:{port}/api/runtime/shutdown",
+        data=b"{}",
+        headers={
+            "content-type": "application/json",
+            "x-agent-context-engine-monitor-token": token,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2.0) as response:
+            if int(getattr(response, "status", 0) or response.getcode()) != 202:
+                print(f"authenticated monitor shutdown on {host}:{port} returned HTTP {response.status}")
+                return False
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
+        print(f"authenticated monitor shutdown failed on {host}:{port}: {exc}")
+        return False
 
-    if not pids:
-        return
-
-    pids_list = sorted(pid for pid in pids if pid != os.getpid())
-    if not pids_list:
-        return
-    host_label = _normalize_host(host)
-    print(f"replacing existing listener on {host_label}:{port}: pids={','.join(str(pid) for pid in pids_list)}")
-    for pid in pids_list:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        except PermissionError:
-            print(f"cannot replace listener pid={pid}: permission denied")
-    deadline = time.time() + 2.0
-    remaining = set(pids_list)
-    while remaining and time.time() < deadline:
-        for pid in list(remaining):
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                remaining.discard(pid)
-            except PermissionError:
-                print(f"cannot verify listener pid={pid}: permission denied")
-                remaining.discard(pid)
-        if remaining:
-            time.sleep(0.1)
-    for pid in remaining:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        except PermissionError:
-            print(f"cannot force-replace listener pid={pid}: permission denied")
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if not _listener_accepting(probe_host, port):
+            print(f"replaced verified monitor on {host}:{port} through authenticated shutdown")
+            return True
+        time.sleep(0.1)
+    print(f"verified monitor on {host}:{port} did not stop after authenticated shutdown")
+    return False

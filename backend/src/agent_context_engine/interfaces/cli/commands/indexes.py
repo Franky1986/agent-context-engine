@@ -2,15 +2,71 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 
 from ....infrastructure.config import ROOT, ensure_repos_index
 from ....infrastructure.db import connect
+from ....application.instance_profile import preferred_agent_memory_cli_for_root
 from ....application.personal import PERSONAL_ROOT, parse_frontmatter, personal_files
 from ....application.query_intent import classify_query_intent
 from ....application.runtime_guidance import print_runtime_memory_sandbox_note
 from ....application.retrieval import index_memory_document, query_terms, recreate_memory_chunks_fts, search_memory_chunks
+from ....application.startup_context import repo_index_entries
 from ....infrastructure.text import markdown_escape
+
+
+_REPO_HINT_IGNORED_TERMS = {
+    "about",
+    "clone",
+    "context",
+    "folder",
+    "hatte",
+    "which",
+    "where",
+    "welchem",
+    "projekt",
+    "project",
+    "repo",
+    "repository",
+}
+
+
+def _repo_hint_terms(text: str) -> list[str]:
+    values = query_terms(text)
+    values.extend(query_terms(re.sub(r"[/_.:-]+", " ", text)))
+    return list(dict.fromkeys(term for term in values if len(term) >= 3))
+
+
+def _repo_hint_term_matches(query_term: str, candidate_term: str) -> bool:
+    if query_term == candidate_term:
+        return True
+    return min(len(query_term), len(candidate_term)) >= 4 and (
+        query_term.startswith(candidate_term) or candidate_term.startswith(query_term)
+    )
+
+
+def repo_context_suggestions(query: str, limit: int = 3) -> list[str]:
+    query_values = [term for term in _repo_hint_terms(query) if term not in _REPO_HINT_IGNORED_TERMS]
+    if not query_values:
+        return []
+    ranked: list[tuple[int, int, str]] = []
+    for identifier, body in repo_index_entries():
+        identifier_terms = _repo_hint_terms(identifier)
+        candidate_terms = _repo_hint_terms(f"{identifier} {body}")
+        matched = sum(
+            any(_repo_hint_term_matches(query_term, candidate_term) for candidate_term in candidate_terms)
+            for query_term in query_values
+        )
+        if not matched:
+            continue
+        identifier_matches = sum(
+            any(_repo_hint_term_matches(query_term, candidate_term) for candidate_term in identifier_terms)
+            for query_term in query_values
+        )
+        ranked.append((matched, identifier_matches, identifier))
+    ranked.sort(key=lambda item: (-item[0], -item[1], item[2].lower()))
+    return [identifier for _matched, _identifier_matches, identifier in ranked[: max(0, limit)]]
 
 
 def cmd_search(args: argparse.Namespace) -> int:
@@ -22,6 +78,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         print("Use:")
         print('- `search "<search terms>" --limit 5`')
         print('- `retrieve "<question or search terms>" --limit 10` for traceable retrieval with provenance')
+        print("- Matching repository knowledge is reported separately as `repo-context` candidates")
         print_runtime_memory_sandbox_note()
         return 0
     conn = connect()
@@ -43,6 +100,13 @@ def cmd_search(args: argparse.Namespace) -> int:
         print(markdown_escape(row["text"], args.chars).replace("\n", "\n  "))
     if not rows:
         print("No matches.")
+    repo_suggestions = repo_context_suggestions(args.query)
+    if repo_suggestions:
+        cli_prefix = preferred_agent_memory_cli_for_root(ROOT)
+        print("")
+        print("Repository context may also contain relevant project knowledge:")
+        for identifier in repo_suggestions:
+            print(f'- `{cli_prefix} repo-context "{identifier}"`')
     return 0
 
 

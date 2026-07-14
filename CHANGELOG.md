@@ -11,6 +11,10 @@ The entries below document the changes added since that initial public release.
 
 ## Backend 0.2.14
 
+- `search` now reports matching repository knowledge as separate, path-safe
+  `repo-context` follow-up commands even before the repository index is rebuilt
+  into memory search.
+
 ### Changed
 
 - Direct-user hook controls now support `--project` for the exact current
@@ -73,6 +77,23 @@ The entries below document the changes added since that initial public release.
   launcher instead of an unowned command-host process.
 
 ### Fixed
+
+- Monitor takeover now retries bounded status probes, preserves unreachable
+  process-discovered shared-memory candidates as explicit blockers, and may
+  stop an unreachable candidate only through a verified owned launcher.
+- `repair-installation --apply` now verifies or safely starts the configured
+  monitor before publishing the active root or finalizing hooks, reruns its
+  post-repair diagnostics, and returns non-zero when monitor repair remains
+  incomplete.
+- `check-installation` now verifies monitor installation and memory-root
+  identity through `/api/status`; a free configured port and a stale registry
+  entry no longer masquerade as a healthy running monitor.
+- Manual `monitor --replace-existing` now uses authenticated shutdown for an
+  exact registered monitor identity instead of signaling arbitrary listener
+  PIDs. Monitor startup lines are flushed before the foreground server loop.
+- Runtime registry updates now preserve active entries from older roots that
+  reuse the shared instance name, retaining their shutdown tokens until
+  takeover completes.
 
 - Installer monitor takeover now treats registry and status PIDs as diagnostics
   only. Tokenless unmanaged or identity-mismatched listeners fail safely with a

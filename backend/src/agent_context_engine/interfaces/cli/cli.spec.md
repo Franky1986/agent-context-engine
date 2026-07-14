@@ -45,8 +45,10 @@ application services.
   required artifact exists, including `opencode.json` and
   `.opencode/plugins/agent-memory.js`.
 - After healthy runtime and frontend repair, `repair-installation --apply`
-  repeats installation-root hook and global bridge finalization. Failed
-  prerequisites keep activation skipped.
+  must also verify or safely start the configured monitor before publishing the
+  active root or repeating installation-root hook and global bridge
+  finalization. Failed takeover or startup returns non-zero and keeps
+  activation skipped.
 
 ## Inputs / Outputs
 - Inputs: command line arguments, environment flags, current working directory.
@@ -128,9 +130,11 @@ application services.
   installation and repair. For the default memory root this is
   `$HOME/.agent-context-engine`, never the legacy nested
   `$HOME/.agent-context-engine/memory/.agent-context-engine` path.
-- A configured monitor port owned by an active runtime entry for the same
-  installation is `active`, not a port conflict. A listener owned by another
-  installation remains a conflict.
+- A configured monitor is `active` only when `/api/status` matches both the
+  installation root and memory root. A free configured port is `stopped`, a
+  registry entry without matching status is not sufficient, and a listener
+  owned by another installation remains a conflict. Enabled stopped or
+  conflicting monitors make `check-installation` fail.
 - POSIX monitor autostart must verify `/api/status` against the selected
   installation root and memory root. It must discover verified unregistered
   monitor processes sharing that memory root, stop owned superseded instances, and
@@ -146,8 +150,14 @@ application services.
   remain in the permission-restricted local runtime registry and must not be
   exposed by discovery or monitor status payloads.
 - A registry entry that is still marked active but temporarily unreachable is
-  also a takeover failure; the installer must not silently proceed while its
-  launcher may still restart it.
+  retried with bounded timeouts. If it remains unreachable, the installer may
+  stop only its verified owned launcher; otherwise takeover fails. Recognized
+  ACE monitor processes sharing the memory root must not be silently skipped
+  merely because their status endpoint is temporarily unavailable.
+- Manual `monitor --replace-existing` uses the same identity and ownership
+  boundary: only an exact-root, exact-memory monitor with a registry shutdown
+  token may be stopped through the authenticated loopback endpoint. It must
+  never signal an arbitrary listener PID.
 - The installer-started monitor does not use `--replace-existing`. After old
   launcher removal or authenticated shutdown, old endpoints must remain absent
   for an eight-second stability window before takeover is accepted; the same
