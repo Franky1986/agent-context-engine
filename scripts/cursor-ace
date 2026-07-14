@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+source "$SCRIPT_DIR/lib/ace-wrapper-root.sh"
+
+ACTIVATE_HERE=0
+STATUS_ONLY=0
+BACKGROUND_RUNNER=""
+for arg in "$@"; do
+  case "$arg" in
+    --activate-here) ACTIVATE_HERE=1 ;;
+    --status) STATUS_ONLY=1 ;;
+    --background-runner=*) BACKGROUND_RUNNER="${arg#--background-runner=}" ;;
+    --background-runner)
+      echo "cursor-ace: --background-runner requires codex or claude as --background-runner=<runner>" >&2
+      exit 1
+      ;;
+    *)
+      echo "cursor-ace: unsupported argument: $arg" >&2
+      echo "usage: cursor-ace [--activate-here] [--status] [--background-runner=codex|claude]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -n "$BACKGROUND_RUNNER" && "$BACKGROUND_RUNNER" != "codex" && "$BACKGROUND_RUNNER" != "claude" ]]; then
+  echo "cursor-ace: --background-runner must be codex or claude" >&2
+  exit 1
+fi
+
+ACE_ROOT="$(ace_resolve_wrapper_root "$SCRIPT_DIR" "$0" "cursor-ace")"
+ACE_ROOT="$(cd "$ACE_ROOT" && pwd 2>/dev/null || echo "$ACE_ROOT")"
+
+LAUNCH_CWD="$(pwd)"
+
+if [[ ! -d "$ACE_ROOT" ]]; then
+  echo "cursor-ace: missing Agent Context Engine root: $ACE_ROOT" >&2
+  exit 1
+fi
+
+ACE_CLI=""
+for candidate in \
+  "$ACE_ROOT/scripts/agent-context-engine" \
+  "$ACE_ROOT/docs/skills/agent-context-engine/scripts/agent-context-engine"; do
+  if [[ -x "$candidate" ]]; then
+    ACE_CLI="$candidate"
+    break
+  fi
+done
+if [[ -z "$ACE_CLI" ]]; then
+  echo "cursor-ace: cannot find agent-context-engine CLI under $ACE_ROOT" >&2
+  exit 1
+fi
+
+_SYSTEM_MODE="$(ace_system_mode "$ACE_ROOT" "$ACE_CLI")"
+if [[ "$_SYSTEM_MODE" != "enabled" ]]; then
+  ace_print_suspended_warning "$ACE_ROOT" "$_SYSTEM_MODE"
+  env AGENT_CONTEXT_ENGINE_ROOT="$ACE_ROOT" "$ACE_CLI" system-status
+  exit $?
+fi
+
+SEARCH_DIR="$LAUNCH_CWD"
+PROJECT_DIR=""
+MAX_DEPTH=64
+for ((i=0; i<MAX_DEPTH; i++)); do
+  if [[ -f "$SEARCH_DIR/.cursor/hooks.json" ]]; then
+    PROJECT_DIR="$SEARCH_DIR"
+    break
+  fi
+  if [[ -f "$SEARCH_DIR/.git" || -d "$SEARCH_DIR/.git" ]]; then
+    PROJECT_DIR="$SEARCH_DIR"
+    break
+  fi
+  if [[ "$SEARCH_DIR" = "/" ]]; then
+    break
+  fi
+  SEARCH_DIR="$(dirname "$SEARCH_DIR")"
+done
+if [[ -z "$PROJECT_DIR" ]]; then
+  PROJECT_DIR="$LAUNCH_CWD"
+fi
+
+_ACE_LANGUAGE="en"
+_ace_lower() {
+  printf "%s" "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+_profile_language() {
+  local profile_path="$ACE_ROOT/memory/local/installation-profile.json"
+  if [[ -f "$profile_path" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json, pathlib, sys
+profile = pathlib.Path(sys.argv[1])
+try:
+    data = json.loads(profile.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+language = str((data.get("monitor") or {}).get("language") or "").strip().lower()
+if language:
+    print(language)' "$profile_path" 2>/dev/null || true
+  fi
+}
+
+_INSTALL_LANGUAGE="$(_profile_language)"
+if [[ -n "${AGENT_CONTEXT_ENGINE_LANGUAGE:-}" ]]; then
+  case "$(_ace_lower "$AGENT_CONTEXT_ENGINE_LANGUAGE")" in
+    de*) _ACE_LANGUAGE="de" ;;
+  esac
+elif [[ -n "$_INSTALL_LANGUAGE" ]]; then
+  case "$(_ace_lower "$_INSTALL_LANGUAGE")" in
+    de*) _ACE_LANGUAGE="de" ;;
+  esac
+elif [[ -n "${LANG:-}" ]]; then
+  case "$(_ace_lower "$LANG")" in
+    de*) _ACE_LANGUAGE="de" ;;
+  esac
+elif [[ -n "${LC_ALL:-}" ]]; then
+  case "$(_ace_lower "$LC_ALL")" in
+    de*) _ACE_LANGUAGE="de" ;;
+  esac
+fi
+
+_msg_not_active() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "Agent Context Engine Cursor-Hooks sind in %s nicht aktiv.\n" "$1"
+  else
+    printf "Agent Context Engine Cursor hooks are not active in %s.\n" "$1"
+  fi
+}
+
+_msg_activate_prompt() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "Cursor-Hooks hier aktivieren? [j/N] "
+  else
+    printf "Activate Cursor hooks here? [y/N] "
+  fi
+}
+
+_msg_invalid_reply() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "Bitte mit j/y fuer Ja oder n fuer Nein antworten.\n"
+  else
+    printf "Please answer y/j for yes or n for no.\n"
+  fi
+}
+
+_confirm_activation() {
+  local reply
+  while true; do
+    read -r reply
+    case "$reply" in
+      [YyJj]) return 0 ;;
+      ""|[Nn]) return 1 ;;
+      *) _msg_invalid_reply; _msg_activate_prompt ;;
+    esac
+  done
+}
+
+_msg_activate_start() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "cursor-ace: Aktiviere Agent Context Engine Cursor-Hooks in %s ...\n" "$1"
+  else
+    printf "cursor-ace: activating Agent Context Engine Cursor hooks in %s ...\n" "$1"
+  fi
+}
+
+_msg_abort() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "cursor-ace: Abbruch. Führe '%s cursor-enable --target <projekt-dir>' aus oder verwende 'cursor-ace --activate-here'.\n" "$1" >&2
+  else
+    printf "cursor-ace: aborting. Run '%s cursor-enable --target <project-dir>' or use 'cursor-ace --activate-here'.\n" "$1" >&2
+  fi
+}
+
+_msg_restart_hint() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "cursor-ace: Cursor-Hooks sind aktiv für %s.\n" "$1"
+    printf "cursor-ace: Falls Cursor die Hooks noch nicht ausführt, starte Cursor einmal neu oder lade das Fenster neu.\n"
+  else
+    printf "cursor-ace: Cursor hooks are active for %s.\n" "$1"
+    printf "cursor-ace: If Cursor does not pick up the hooks yet, restart Cursor once or reload the window.\n"
+  fi
+}
+
+hooks_active() {
+  "$ACE_CLI" cursor-status --target "$PROJECT_DIR" 2>/dev/null | python3 -c 'import re, sys
+text = sys.stdin.read()
+match = re.search(r"active events:\s*(\d+)/(\d+)", text)
+ok = bool(match and int(match.group(1)) == int(match.group(2)) and int(match.group(2)) > 0)
+raise SystemExit(0 if ok else 1)'
+}
+
+status_output() {
+  "$ACE_CLI" cursor-status --target "$PROJECT_DIR"
+}
+
+activate_here() {
+  _msg_activate_start "$PROJECT_DIR"
+  local command=("$ACE_CLI" cursor-enable --target "$PROJECT_DIR" --installation-root "$ACE_ROOT")
+  if [[ -n "$BACKGROUND_RUNNER" ]]; then
+    command+=(--background-runner "$BACKGROUND_RUNNER")
+  fi
+  "${command[@]}"
+}
+
+if [[ "$STATUS_ONLY" -eq 1 ]]; then
+  status_output
+  exit $?
+fi
+
+if ! hooks_active; then
+  if [[ "$ACTIVATE_HERE" -eq 1 ]]; then
+    activate_here || exit 1
+  elif [[ -t 0 && -t 2 ]]; then
+    _msg_not_active "$PROJECT_DIR"
+    _msg_activate_prompt
+    if _confirm_activation; then
+      activate_here || exit 1
+    else
+      _msg_abort "$ACE_CLI"
+      exit 1
+    fi
+  else
+    _msg_not_active "$PROJECT_DIR" >&2
+    _msg_abort "$ACE_CLI"
+    exit 1
+  fi
+fi
+
+if ! hooks_active; then
+  _msg_not_active "$PROJECT_DIR" >&2
+  exit 1
+fi
+
+_msg_restart_hint "$PROJECT_DIR"

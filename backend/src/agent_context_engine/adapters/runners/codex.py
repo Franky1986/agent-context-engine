@@ -93,13 +93,17 @@ def _prepend_windows_command_paths(env: dict[str, str]) -> None:
     appdata = env.get("APPDATA") or os.environ.get("APPDATA")
     userprofile = env.get("USERPROFILE") or os.environ.get("USERPROFILE")
     if appdata:
-        candidates.append(str(Path(appdata) / "npm"))
+        candidates.append(os.path.join(appdata, "npm"))
     if userprofile:
-        candidates.append(str(Path(userprofile) / ".local" / "bin"))
+        candidates.append(os.path.join(userprofile, ".local", "bin"))
     existing = env.get("PATH") or env.get("Path") or ""
     existing_parts = [part for part in existing.split(os.pathsep) if part]
-    existing_norm = {str(Path(part)).lower() for part in existing_parts}
-    prefix = [path for path in candidates if path and str(Path(path)).lower() not in existing_norm]
+    existing_norm = {os.path.normcase(os.path.normpath(part)) for part in existing_parts}
+    prefix = [
+        path
+        for path in candidates
+        if path and os.path.normcase(os.path.normpath(path)) not in existing_norm
+    ]
     if prefix:
         env["PATH"] = os.pathsep.join(prefix + existing_parts)
 

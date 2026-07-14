@@ -64,11 +64,11 @@ The install command follows this order:
    job whose action points to a generated short `windows-scheduler-run.cmd`
    script, avoiding `schtasks /TR` command-length limits.
 9. Start the monitor only when the runtime, frontend build, and scheduler
-   prerequisites are clean. On Windows, monitor autostart should launch through
-   `cmd.exe /c start "ace-monitor" /min ...` and must pass
-   `AGENT_CONTEXT_ENGINE_ROOT` plus `AGENT_CONTEXT_ENGINE_STORAGE_ROOT` to the
-   child process. Detached `python.exe` / `Start-Process` launches can exit
-   immediately after the startup banner even though foreground startup works.
+   prerequisites are clean. On Windows, installer monitor autostart uses a
+   root-specific Task Scheduler task and passes `AGENT_CONTEXT_ENGINE_ROOT`
+   plus `AGENT_CONTEXT_ENGINE_STORAGE_ROOT` through its generated script.
+   Detached `python.exe`, `Start-Process`, and command-host launches are not
+   installation-owned and are not used for takeover.
 10. Activate hook configs, GUI workspace hooks, and global-only integration
     hooks as the final step.
 11. Run post-install verification after the final hook activation.
@@ -93,23 +93,35 @@ For Python entrypoints, the `.cmd` shim is part of the runtime contract. It must
 not accidentally use a different global Python than the one used to install
 backend dependencies into `.venv`.
 
-For long-running monitor processes, prefer the Windows command-host launch path
-over a detached Python process:
-
-```powershell
-cmd.exe /c start "ace-monitor" /min <venv-python> <root>\scripts\agent_context_engine.py monitor ...
-```
-
-The monitor process should then be verified by probing `/api/status`, not just
-by checking that the launcher command returned.
-
-If that command-host launch does not expose a stable port from an agent-run
-install, the installer falls back to a short per-user Windows Task Scheduler
-launcher. The fallback writes `<memory-root>\local\windows-monitor-start.cmd`
+The installer uses a short per-user Windows Task Scheduler launcher rather than
+an unowned detached command-host process. It writes a root-specific
+`<memory-root>\local\windows-monitor-start-Monitor-<root>-<hash>.cmd`
 with the resolved runtime command and storage-root environment, then runs it
 outside the transient agent tool process tree. This keeps fresh Windows installs
 agentic even when the agent's own process supervisor cleans up child processes
 after a tool call.
+The monitor is verified through `/api/status`, not just task creation or port
+acceptance.
+
+### Upgrading Older Windows Installs
+
+Installations created before root-specific monitor tasks used the legacy task
+name `AgentContextEngine\Monitor-<name>` and the shared launcher
+`<memory-root>\local\windows-monitor-start.cmd`. Windows support is
+experimental, so upgrades from that format require manual cleanup before
+rerunning installation:
+
+1. List scheduled tasks and identify the legacy monitor task with
+   `schtasks /Query /FO LIST /V`.
+2. Stop and remove only that legacy monitor task:
+   `schtasks /End /TN "AgentContextEngine\Monitor-<name>"` followed by
+   `schtasks /Delete /TN "AgentContextEngine\Monitor-<name>" /F`.
+3. After confirming that no legacy monitor is running, remove or rename the
+   old `windows-monitor-start.cmd` and run discovery/install again.
+
+Do not remove the periodic Agent Context Engine scheduler task unless it is the
+legacy monitor task being migrated. The new installation creates an owned,
+root-specific task and launcher.
 
 For manual recovery or diagnosis on Windows, run the helper from a normal
 PowerShell or Command Prompt session:
@@ -151,6 +163,10 @@ The monitor is also gated. Starting a frontend without a successful build, or
 starting a monitor against an unusable backend, is treated as an incomplete
 install. The operator should run `repair-installation --apply` or rerun
 `install` after fixing prerequisites.
+Both the command-host launch and Task Scheduler fallback must verify
+`/api/status` against the selected installation and memory roots. A stable
+listener alone is not a successful monitor start, and an incomplete requested
+install returns a non-zero exit code.
 
 Windows runtime probes must be defensive:
 

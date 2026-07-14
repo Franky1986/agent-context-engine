@@ -127,7 +127,7 @@ CODEX_DREAM_MODEL = os.environ.get("AGENT_MEMORY_CODEX_DREAM_MODEL", "gpt-5.4-mi
 CLAUDE_DREAM_MODEL = os.environ.get("AGENT_MEMORY_CLAUDE_DREAM_MODEL", "claude-haiku-4-5-20251001")
 CURSOR_DREAM_MODEL = os.environ.get("AGENT_MEMORY_CURSOR_DREAM_MODEL", "gpt-5.4-mini-medium")
 GEMINI_DREAM_MODEL = os.environ.get("AGENT_MEMORY_GEMINI_DREAM_MODEL", "gemini-3.1-flash-lite")
-ANTIGRAVITY_DREAM_MODEL = os.environ.get("AGENT_MEMORY_ANTIGRAVITY_DREAM_MODEL", "gemini-3.1-flash-lite")
+ANTIGRAVITY_DREAM_MODEL = os.environ.get("AGENT_MEMORY_ANTIGRAVITY_DREAM_MODEL", "Gemini 3.5 Flash (Minimal)")
 OPENCODE_DREAM_MODEL = os.environ.get("AGENT_MEMORY_OPENCODE_DREAM_MODEL", "ollama/gpt-oss:20b-cloud")
 
 
@@ -198,6 +198,54 @@ def session_short(session_id: str) -> str:
 
 def sh_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+_CENTRAL_DIR_NAME = ".agent-context-engine"
+
+
+def storage_root() -> Path:
+    """Resolve the central storage root for Agent Context Engine metadata.
+
+    The environment variable AGENT_CONTEXT_ENGINE_STORAGE_ROOT takes precedence,
+    with AGENT_MEMORY_STORAGE_ROOT as a legacy fallback. If neither is set, the
+    user home directory is used.
+    """
+    override = os.environ.get(STORAGE_ROOT_ENV_VAR) or os.environ.get(LEGACY_STORAGE_ROOT_ENV_VAR)
+    if override:
+        try:
+            return Path(override).expanduser().resolve()
+        except OSError:
+            pass
+    return Path.home()
+
+
+def central_metadata_dir() -> Path:
+    return storage_root() / _CENTRAL_DIR_NAME
+
+
+def active_root_path() -> Path:
+    return central_metadata_dir() / "active-root"
+
+
+def central_hub_path(runner: str) -> Path:
+    return central_metadata_dir() / "hooks" / runner / "hook_adapter.sh"
+
+
+def central_backup_dir(*, metadata_root: Path | None = None) -> Path:
+    metadata_dir = (metadata_root.expanduser().resolve() / _CENTRAL_DIR_NAME) if metadata_root is not None else central_metadata_dir()
+    return metadata_dir / "backups"
+
+
+def project_backup_dir(project_path: Path, *, metadata_root: Path | None = None) -> Path:
+    import hashlib
+
+    digest = hashlib.sha256(str(project_path.expanduser().resolve()).encode("utf-8")).hexdigest()
+    return central_backup_dir(metadata_root=metadata_root) / digest
+
+
+def activated_projects_path() -> Path:
+    return central_metadata_dir() / "activated-projects.json"
+
 
 
 @dataclass(frozen=True)

@@ -3,11 +3,14 @@
 - When asked about previous sessions, handovers, project context, "what happened last", "continue there", "we already analyzed this", or similar memory requests, use the local Agent Context Engine CLI first.
 - Agent Context Engine command prefix: `agent-context-engine`
 - Canonical public CLI contract: `agent-context-engine` from `PATH`. Repo-local `./scripts/ace` and `./scripts/agent-context-engine` remain compatibility fallbacks, not the primary hook/session contract.
+- Running bare `agent-context-engine` prints the public command help and the copyable direct-user system-control forms.
+- Runtime-memory commands can touch SQLite WAL/SHM files, locks, audit rows, retrieval logs, or metadata refreshes even when they look read-only. In filesystem-sandboxed runners, request escalated sandbox access up front for concrete memory commands such as `last --limit 10`, `handover`, `search`, and `retrieve`.
 - Traceable retrieval: `agent-context-engine retrieve "<question or search terms>" --limit 10`
 - Quick keyword search: `agent-context-engine search "<search terms>" --limit 5`
 - Load a session handover: `agent-context-engine handover "<session|title|search terms>"`
 - Recent sessions: `agent-context-engine last --limit 10`
 - Status: `agent-context-engine doctor`
+- If the user naturally asks to deactivate ACE, distinguish exact-project, project-runner, installation-runner, all-hooks, and full-system scope. Return only the matching direct-user `hooks-disable ...` or `system-disable --scope all --reason "<reason>"` line; never probe or execute mutating variants as tools, offer approval/firewall bypasses, or remove recovery wrappers.
 - For list/count/today questions about sessions, use `last` first and stop there unless the user explicitly asks for details about a specific session.
 - Do not inspect `~/.cursor/projects/...`, local Cursor transcripts, or terminal metadata for session-history questions while the Agent Context Engine CLI is available.
 - Only after these commands should agents broaden the search with `rg` in the repository or memory tree.

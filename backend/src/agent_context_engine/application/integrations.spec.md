@@ -98,6 +98,27 @@ Each integration item must expose separable status axes:
     runtime environment so workspace-dependent behaviors (including runner
     resolution) do not fall back to the installation root.
 
+20. On POSIX, project-local shell-hook adapters must be symlinks to the stable
+    central hub under
+    `$AGENT_CONTEXT_ENGINE_STORAGE_ROOT/.agent-context-engine/hooks/` rather
+    than rendered scripts carrying installation-specific paths. The central hub
+    resolves the active installation root at runtime via the `active-root`
+    file. On Windows, project-local adapters are native `.cmd`/PowerShell
+    files and must not require symlink privileges.
+    A hub invoked without wrapper environment must derive its metadata root
+    from its own resolved path before reading `active-root`; it must not fall
+    back to an unrelated home installation.
+21. Codex, Claude, Gemini, and Antigravity hook configs must write
+    shell-quoted absolute commands pointing at the project-local adapter
+    symlink. Relative legacy commands such as `./.codex/hooks/hook_adapter.sh`
+    or `./.gemini/hooks/hook_adapter.sh <event>`, plus the older
+    `${CLAUDE_PROJECT_DIR}` Claude command, are accepted only as migratable
+    ACE-owned config and must be replaced during activation so wrapper launches
+    from subdirectories cannot depend on the runner's current working-directory
+    semantics or break on project paths with spaces.
+22. Hook-config backups must resolve the backup metadata root from the
+    activating installation profile. An isolated activation must not write
+    backups into the process-global home metadata root.
 ## Client Families
 
 ### Shell-hook clients
@@ -158,7 +179,15 @@ Rules:
 - Agents must not bypass this by direct file mutation, alternate CLI commands,
   or monitor-API calls.
 - The direct user control contract is `hooks-disable`, `hooks-enable`, and
-  `hooks-status`.
+  `hooks-status`. `--runner <runner>` scopes an installation-wide runner
+  override; `--project` scopes the command to the exact current hook workspace;
+  both flags may be combined.
+- Project disable is an effective no-op gate, not physical hook removal. The
+  minimal hook connection remains installed so a later direct
+  `hooks-enable --project` user line can recover the project.
+- Enable responses must report the effective state after precedence is applied;
+  clearing a project or runner override must not claim hooks are enabled while
+  the global gate remains disabled.
 
 ## Rollback
 

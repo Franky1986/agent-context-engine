@@ -62,6 +62,8 @@ class CheckResult:
 
 
 def run_command(name: str, command: list[str], *, timeout: int = 120, env: dict[str, str] | None = None) -> CheckResult:
+    command_env = {**os.environ, **(env or {})}
+    command_env["AGENT_MEMORY_TEST_SKIP_MONITOR_OPEN"] = "1"
     proc = subprocess.run(
         command,
         cwd=REPO_ROOT,
@@ -69,7 +71,7 @@ def run_command(name: str, command: list[str], *, timeout: int = 120, env: dict[
         capture_output=True,
         timeout=timeout,
         check=False,
-        env={**os.environ, **(env or {})},
+        env=command_env,
     )
     output = "\n".join(part for part in [proc.stdout.strip(), proc.stderr.strip()] if part)
     if len(output) > 4000:
@@ -440,6 +442,7 @@ def check_fresh_install_smoke() -> CheckResult:
             target / "docs" / "skills" / "agent-context-engine" / "scripts" / "agent-context-engine",
             link_dir / "smoke-codex-ace",
             link_dir / "smoke-claude-ace",
+            link_dir / "smoke-cursor-ace",
             link_dir / "smoke-agy-ace",
             link_dir / "smoke-gemini-ace",
             link_dir / "smoke-opencode-ace",
@@ -467,7 +470,7 @@ def check_fresh_install_smoke() -> CheckResult:
             "\n".join(
                 [
                     f"target={target}",
-                    "links=smoke-codex-ace, smoke-claude-ace, smoke-agy-ace, smoke-gemini-ace, smoke-opencode-ace",
+                    "links=smoke-codex-ace, smoke-claude-ace, smoke-cursor-ace, smoke-agy-ace, smoke-gemini-ace, smoke-opencode-ace",
                     "doctor=ok",
                 ]
             ),

@@ -42,6 +42,7 @@ python3 scripts/agent_context_engine.py install \
   --wrapper-suffix ace \
   --link-codex-ace \
   --link-claude-ace \
+  --link-cursor-ace \
   --link-agy-ace \
   --link-gemini-ace \
   --link-opencode-ace \
@@ -64,6 +65,7 @@ python3 docs/skills/agent-context-engine/scripts/agent_context_engine.py install
   --wrapper-suffix ace \
   --link-codex-ace \
   --link-claude-ace \
+  --link-cursor-ace \
   --link-agy-ace \
   --link-gemini-ace \
   --link-opencode-ace \
@@ -77,8 +79,8 @@ Ask the user for these choices when they are not already clear:
 - target root for the central Agent Context Engine installation
 - preferred interaction language for future agents: `en` or `de`
 - which harnesses should be prepared now
-- whether to create global `codex-ace`, `claude-ace`, `agy-ace`,
-  `gemini-ace`, and `opencode-ace` commands
+- whether to create global `codex-ace`, `claude-ace`, `cursor-ace`,
+  `agy-ace`, `gemini-ace`, and `opencode-ace` commands
 - whether this is a second local installation that needs `--instance-name`
 - which local projects should be added to `docs/knowledge/repos.md`
 - whether Cursor IDE should be enabled for a specific project folder

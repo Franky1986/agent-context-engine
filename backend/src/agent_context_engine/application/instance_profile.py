@@ -225,6 +225,7 @@ def default_installation_profile() -> dict[str, Any]:
         "version": 4,
         "instance_id": ROOT.name,
         "root": str(ROOT.resolve()),
+        "installation_mode": "shared",
         "platform": "mac" if current_platform.profile_id == "macos" else current_platform.profile_id,
         "platform_profile": current_platform_profile_payload(),
         "storage": {
@@ -545,6 +546,8 @@ def _normalize_installation_profile(payload: dict[str, Any] | None) -> dict[str,
         profile["version"] = max(2, int(payload.get("version") or 4))
         profile["instance_id"] = str(payload.get("instance_id") or profile["instance_id"]).strip() or profile["instance_id"]
         profile["root"] = str(payload.get("root") or profile["root"]).strip() or profile["root"]
+        installation_mode = str(payload.get("installation_mode") or "shared").strip().lower()
+        profile["installation_mode"] = installation_mode if installation_mode in {"shared", "isolated", "ambiguous"} else "shared"
         profile["platform"] = str(payload.get("platform") or profile["platform"])
         raw_platform_profile = payload.get("platform_profile")
         if isinstance(raw_platform_profile, dict) and str(raw_platform_profile.get("profile_id") or "").strip():
@@ -603,6 +606,20 @@ def _normalize_installation_profile(payload: dict[str, Any] | None) -> dict[str,
                 "suffix": suffix,
                 "template": template,
             }
+        if "installation_mode" not in payload:
+            try:
+                legacy_root = Path(str(profile["root"])).expanduser().resolve()
+                legacy_memory_root = Path(str(profile["storage"]["memory_root"])).expanduser().resolve()
+            except OSError:
+                legacy_root = Path(str(profile["root"]))
+                legacy_memory_root = Path(str(profile["storage"]["memory_root"]))
+            legacy_prefix = str(profile["wrapper_naming"].get("prefix") or "")
+            legacy_instance_prefix = f"{profile['instance_id']}-"
+            if legacy_memory_root == (legacy_root / "memory") and legacy_prefix == legacy_instance_prefix:
+                profile["installation_mode"] = "isolated"
+            elif legacy_memory_root == (legacy_root / "memory") and legacy_prefix:
+                profile["installation_mode"] = "ambiguous"
+                profile["installation_mode_inference"] = "legacy_root_local_memory_custom_prefix"
         monitor = payload.get("monitor")
         if isinstance(monitor, dict):
             host = str(monitor.get("host") or DEFAULT_MONITOR_HOST).strip() or DEFAULT_MONITOR_HOST
@@ -654,6 +671,7 @@ def merge_installation_profile(
     *,
     instance_id: str | None = None,
     root_path: Path | None = None,
+    installation_mode: str | None = None,
     workflows: dict[str, str] | None = None,
     workspace_roots: dict[str, list[Path]] | None = None,
     storage: dict[str, Any] | None = None,
@@ -666,6 +684,11 @@ def merge_installation_profile(
         profile["instance_id"] = str(instance_id).strip()
     if root_path is not None:
         profile["root"] = str(root_path.resolve())
+    if installation_mode is not None:
+        normalized_mode = str(installation_mode).strip().lower()
+        if normalized_mode not in {"shared", "isolated"}:
+            raise ValueError(f"unsupported installation mode: {installation_mode}")
+        profile["installation_mode"] = normalized_mode
     if storage:
         current_storage = dict(profile.get("storage") or {})
         if "memory_root" in storage and storage.get("memory_root") is not None:
@@ -877,6 +900,7 @@ def _normalize_monitor_runtime_entry(payload: dict[str, Any] | None) -> dict[str
         "updated_at": str(data.get("updated_at") or ""),
         "stopped_at": str(data.get("stopped_at") or ""),
         "last_known_url": str(data.get("last_known_url") or ""),
+        "shutdown_token": str(data.get("shutdown_token") or ""),
     }
 
 
@@ -912,6 +936,10 @@ def save_monitor_runtime_registry(payload: dict[str, Any], home: Path | None = N
     path = monitor_runtime_registry_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(registry, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
     return registry
 
 
@@ -929,7 +957,12 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def active_monitor_runtime_entries(home: Path | None = None, *, prune: bool = True) -> list[dict[str, Any]]:
+def active_monitor_runtime_entries(
+    home: Path | None = None,
+    *,
+    prune: bool = True,
+    include_shutdown_token: bool = False,
+) -> list[dict[str, Any]]:
     registry = load_monitor_runtime_registry(home)
     changed = False
     active_entries: list[dict[str, Any]] = []
@@ -944,7 +977,10 @@ def active_monitor_runtime_entries(home: Path | None = None, *, prune: bool = Tr
             normalized["updated_at"] = _utc_timestamp()
             changed = True
         if normalized.get("status") in {"running", "starting"} and live:
-            active_entries.append(normalized)
+            public_entry = dict(normalized)
+            if not include_shutdown_token:
+                public_entry.pop("shutdown_token", None)
+            active_entries.append(public_entry)
         normalized_entries.append(normalized)
     if prune and changed:
         save_monitor_runtime_registry(
@@ -1029,6 +1065,7 @@ def record_monitor_runtime(
     started_at: str | None = None,
     stopped_at: str | None = None,
     last_known_url: str = "",
+    shutdown_token: str = "",
     home: Path | None = None,
 ) -> dict[str, Any]:
     registry = load_monitor_runtime_registry(home)
@@ -1053,6 +1090,7 @@ def record_monitor_runtime(
             "updated_at": now,
             "stopped_at": stopped_at or "",
             "last_known_url": last_known_url,
+            "shutdown_token": shutdown_token,
         }
     )
     replaced = False

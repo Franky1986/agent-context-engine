@@ -16,7 +16,8 @@ Agent Context Engine currently supports these interactive clients and wrappers:
 
 - `codex` via `codex-ace` by default
 - `claude` via `claude-ace` by default
-- `cursor` via `cursor-enable --target <project-path>`
+- `cursor` via `cursor-ace` for the current project or
+  `cursor-enable --target <project-path>` for explicit targets
 - `antigravity` via `agy-ace` by default
 - `gemini` via `gemini-ace` by default
 - `opencode` via `opencode-ace` by default
@@ -26,6 +27,9 @@ Platform note:
 - macOS remains the active supported runtime target
 - Windows now has an explicit experimental runtime path with native `.cmd` and
   PowerShell wrappers/hooks
+- Upgrades from pre-root-specific Windows installs may require manual cleanup
+  of the legacy `AgentContextEngine\Monitor-<name>` task and
+  `windows-monitor-start.cmd`; see `WINDOWS_INSTALLATION.md`
 - Linux and WSL remain scaffolded
 
 Naming note:
@@ -39,7 +43,8 @@ Naming note:
 For fresh public clones, start with:
 
 ```sh
-python3 scripts/agent_context_engine.py install-discovery
+python3 scripts/agent_context_engine.py install-discovery \
+  --plan-json /tmp/agent-context-install-plan.json
 ```
 
 The discovery step is read-only. It reports the detected checkout root and
@@ -59,7 +64,8 @@ non-interactive use it prints the recommended explicit command.
 For agent-driven installs, sandbox/tool approval is not user consent for the
 install itself. Agents must present the discovery or final install plan in chat
 and wait for explicit user approval before running a mutating install command or
-answering `yes` to the final installer prompt.
+answering `yes` to the final installer prompt. The saved plan is mandatory for
+agent-driven handoff and must be applied unchanged with `install --plan-json`.
 
 Central installation into the chosen target root prepares these local artifacts
 by default. Hook artifacts and GUI workspace hooks are activated only as the
@@ -67,6 +73,26 @@ final install step, after runtime bootstrap, frontend build, scheduler
 installation/loading, and requested monitor startup have succeeded. The full
 `doctor` / `check-installation` verification pass runs after that final hook
 activation:
+
+The installer keeps that automatic pass compact, reports finding counts by
+severity, and ends with a localized installation-result line. Explicit
+`doctor` and `check-installation` calls retain the full diagnostics. A monitor
+runtime owned by the same installation is reported as `active`, not as a port
+conflict. A fresh monitor start is successful only after `/api/status` matches
+the selected installation and memory roots and older monitors sharing that
+memory root remain stopped after scheduler replacement. Historical project
+binding drift is a maintenance notice, not an installation failure.
+Registry and status PIDs are diagnostic only and are never terminated. A
+superseded monitor is stopped through its token-authenticated loopback shutdown
+endpoint or a verified ACE-owned LaunchAgent/Task Scheduler handle. Tokenless
+unmanaged monitors stop installation with a manual-stop instruction. The old
+endpoint must remain absent for eight seconds, including a second stability
+check after startup. Requested incomplete installs return non-zero, and a newly
+started POSIX monitor is terminated, force-killed if necessary, and identity-
+checked when takeover cleanup cannot be verified.
+On macOS, verified legacy submitted
+`com.agent-context-engine.monitor-<port>` KeepAlive jobs are unloaded as part
+of that takeover; unrelated launchd jobs are not touched.
 
 - Codex hooks under `.codex/`
 - Claude Code hooks under `.claude/`
@@ -109,10 +135,47 @@ Per-project activation remains explicit for:
 - external Codex GUI workspace roots that differ from the central Agent Context Engine root
 - external Claude/Claude Code workspace roots that differ from the central Agent Context Engine root
 
-`antigravity`, `gemini`, and `opencode` are **global-only**: they are started
-through their `*-ace` wrappers from any directory. No project-specific
-`.agents/hooks.json`, `.gemini/settings.json`, or `.opencode/plugins/agent-memory.js`
-files are created anymore.
+`antigravity`, `gemini`, and `opencode` are **global-only** in the sense that
+their wrapper commands (`agy-ace`, `gemini-ace`, `opencode-ace`) are globally
+available and no runner-specific project activation command is required. Their
+hook configs may still live in the project directory, but those configs always
+delegate to the central hook-adapter hub rather than carrying hard-coded
+installation-specific paths.
+
+`codex` uses a project-local `.codex/hooks.json` and a local adapter symlink
+pointing to the central hub. The hook command stored in `.codex/hooks.json` is
+a shell-quoted absolute path to that project-local symlink, not a relative
+`./.codex/...` command, so launches from nested folders and project paths with
+spaces do not depend on Codex' internal hook working-directory behavior.
+Gemini follows the same rule for the command prefix stored in
+`.gemini/settings.json`, with the Gemini event name appended as the command
+argument. `codex-ace` starts from the caller's current working directory and
+keeps that exact directory as the project directory. It verifies the local
+`.codex/hooks.json`, central-hub adapter link, and workspace binding in that
+same directory, repairs incomplete or stale local configs through
+`integration-hooks --action enable`, and runs `codex --cd <launch_cwd>`.
+Wrappers must not silently move a session to a parent Git root, parent hook
+config, or `$HOME` runner config. If the current directory has no complete
+local hook config, the language-aware activation prompt should ask whether to
+activate hooks in the current directory.
+Because Codex may still execute multiple hook configs along a parent chain, the
+Codex central adapter deduplicates identical native hook payloads before
+persisting them.
+
+Codex' current documented hook discovery still supports project-local
+`<repo>/.codex/hooks.json`; this is not a known breaking change to user-level
+TOML-only hooks. Agent Context Engine therefore keeps `.codex/hooks.json` as
+the per-project activation marker. Codex hook trust/review is separate: if
+Codex marks a complete hook as untrusted after content changes, the user should
+review it through Codex' hook UI, for example `/hooks`. `codex-ace` must not
+set `--dangerously-bypass-hook-trust` by default.
+
+When `codex-ace`, `claude-ace`, `cursor-ace`, `agy-ace`, or `gemini-ace`
+needs user confirmation to activate or repair hooks, the prompt language follows
+`AGENT_CONTEXT_ENGINE_LANGUAGE` first, then the installation profile's stored
+`monitor.language`, then the shell locale. This keeps first-run project
+activation in the language selected during install even when the terminal
+locale is neutral.
 
 For `codex`, `claude`, and `cursor`, installation and status must distinguish
 between two levels:
@@ -144,6 +207,10 @@ Rules:
   headless-ready.
 - Use `codex login status` for Codex and `claude auth status` for Claude Code
   as the terminal-side readiness checks.
+- A negative readiness result from a restricted runner environment is
+  inconclusive until the same probe is rerun with the required process and home
+  access. The installer's post-install readiness line is authoritative for the
+  environment in which the approved install actually ran.
 - `install` should also record the intended workflow runners via
   `--monitor-runner`, `--dream-runner`, and `--query-expansion-runner`, because
   those choices determine whether a GUI-only setup is sufficient later.
@@ -156,6 +223,7 @@ Optional global wrappers can be linked into `~/.local/bin`:
 - `ace` (compatibility shortcut)
 - `codex-ace`
 - `claude-ace`
+- `cursor-ace`
 - `agy-ace`
 - `gemini-ace`
 - `opencode-ace`
@@ -172,22 +240,36 @@ the chosen installation. If a previous installation already owns them, discovery
 should surface that takeover in the proposed plan before the user approves the
 write step.
 
-`cursor` has no single global wrapper. It is activated per project.
+`cursor-ace` is a global convenience activation helper for the current project.
+It does not start Cursor; it resolves the active installation, verifies the
+current folder with `cursor-status`, and runs `cursor-enable` after
+confirmation or with `--activate-here`.
 
 OpenCode is started through the global `opencode-ace` wrapper. OpenCode loads
 plugins only from the startup directory, so `opencode-ace` starts OpenCode
 from the central Agent Context Engine root where `.opencode/plugins/agent-memory.js`
 lives. The original shell folder is preserved as the initial project/workdir
 context via `AGENT_MEMORY_LAUNCH_CWD` and passed back to OpenCode as the
-positional project argument.
+positional project argument. The wrapper resolves the active installation
+through the central `active-root` file before falling back to its script
+location and refuses to start when the OpenCode plugin bridge is missing.
 
-Antigravity and Gemini are started through the global `agy-ace` and
-`gemini-ace` wrappers. Their hook configs are loaded from the current working
-directory, so the wrappers start the runner from the central Agent Context Engine root
-where `.agents/hooks.json` and `.gemini/settings.json` live. The original shell
-folder is added back as a workspace via `--add-dir` / `--include-directories`,
-and the hook adapters use `AGENT_MEMORY_LAUNCH_CWD` as the effective project
-context.
+Codex, Claude, Antigravity, and Gemini are started through the shared
+`codex-ace`, `claude-ace`, `agy-ace`, and `gemini-ace`
+wrappers without changing the effective project context to the installation
+root. `cursor-ace` follows the same current-project discovery model but only
+activates or verifies Cursor hooks. Canonical shared wrapper symlinks resolve
+the active installation through the shared home `active-root` file. Direct
+repo-local wrapper calls and instance-named wrapper symlinks stay pinned to the
+installation that owns their wrapper script, so an isolated command cannot
+jump to the shared installation. All wrappers keep the caller's current
+working directory as the project directory, verify that the local hook adapter
+symlink points at the central hub, verify the runner-native hook configuration
+content, verify the project binding points at the active installation where
+applicable, and then launch the runner against that same directory. Codex, Claude, Antigravity,
+and Gemini project hooks are written with shell-quoted absolute project-local
+adapter paths, so these runners resolve the project hook path independently of
+the process working directory and tolerate project paths with spaces.
 
 When any linked global wrapper is started from another shell folder, Agent Context Engine
 must preserve that original folder as the initial project/workdir context even
@@ -211,6 +293,17 @@ explicitly want side-by-side command isolation instead of takeover:
 - or `--wrapper-prefix <prefix>` / `--wrapper-suffix <suffix>` for explicit
   instance-specific command naming
 
+A normal shared install with `--memory-root <external-path>` still owns the
+canonical shared commands. It writes hub metadata under that external root and
+also updates `$HOME/.agent-context-engine/active-root`. An isolated install
+writes only its own target-local metadata and leaves the shared home
+`active-root` unchanged.
+
+For the default `$HOME/.agent-context-engine/memory` root, hub metadata lives
+at `$HOME/.agent-context-engine`. Install and repair migrate an old nested
+`memory/.agent-context-engine/active-root` to a compatibility link/file instead
+of treating it as an independent active installation.
+
 Current naming note:
 
 - the preferred public default is `--wrapper-suffix ace`, which produces `codex-ace`
@@ -226,6 +319,7 @@ python3 scripts/agent_context_engine.py install \
   --bootstrap-runtime \
   --link-codex-ace \
   --link-claude-ace \
+  --link-cursor-ace \
   --link-agy-ace \
   --link-gemini-ace \
   --link-opencode-ace \
@@ -249,18 +343,50 @@ The CLI flag names remain `launchagent-*` for compatibility, but on Windows the
 same install path drives the per-user Task Scheduler job instead of a macOS
 LaunchAgent.
 
-Monitor startup is also platform-specific. On Windows, long-running monitor
-startup should be hosted through `cmd.exe /c start "ace-monitor" /min ...` with
-`AGENT_CONTEXT_ENGINE_ROOT` and `AGENT_CONTEXT_ENGINE_STORAGE_ROOT` set for the
-child process. A detached `python.exe` process can exit immediately after
-printing the monitor banner, so verification must check the bound port and
-`/api/status`.
+## Full-System Suspension
 
-If the command-host launch does not expose a stable port from an agent-run
-install, Windows autostart falls back to a per-user Task Scheduler launcher
-script under `<memory-root>\local\windows-monitor-start.cmd`. That fallback is
-specifically for transient agent tool processes that clean up child processes
-after command completion.
+An activated runner chat accepts these exact direct-user lines:
+
+```text
+system-disable --scope all --reason "Maintenance"
+system-enable --scope all --reason "Maintenance complete"
+system-status
+```
+
+Agents must not execute or synthesize these controls as tools. The only public
+CLI surface is read-only: `agent-context-engine system-status [--json]`.
+For a natural-language deactivation request, first distinguish hook-only
+scope from full-system suspension. Return `hooks-disable --project` for the
+exact current project, add `--runner <runner>` for one project runner, omit
+`--project` for installation-wide hook controls, or return the exact
+`system-disable --scope all --reason "..."` line for full suspension. Never
+execute the mutation, probe a help variant, or offer an approval/firewall
+bypass. Wrappers and hook files remain installed so status, enable, and
+recovery stay reachable.
+Runner hooks mark these controls as instrumented user-prompt events; current
+runner protocols do not provide signed or OS-authenticated user presence. The
+boundary covers supported ACE hook, CLI, monitor, and agent-tool paths, not
+arbitrary same-user code.
+Suspension keeps project hook files, central hubs, wrappers, memory, and the
+monitor installed. It closes normal hook/background admission, disables the
+installation-owned scheduler, and leaves the monitor read-only. Wrappers warn
+and skip activation/repair while suspended; runner wrappers still start the
+underlying runner so an already activated project can receive a direct-user
+status or enable line. `cursor-ace` reports status and exits.
+
+After initialization, missing, changed, or invalid state fails closed and
+prints an exact `system-recover` chat line.
+Recovery conservatively leaves the scheduler disabled because its earlier
+state cannot be proven.
+
+Monitor startup is also platform-specific. On Windows, long-running monitor
+installer startup uses a per-user Task Scheduler launcher with
+`AGENT_CONTEXT_ENGINE_ROOT` and `AGENT_CONTEXT_ENGINE_STORAGE_ROOT` set in a
+root-specific script under
+`<memory-root>\local\windows-monitor-start-Monitor-<root>-<hash>.cmd`.
+The task is installation-owned, can be ended without PID lookup, and keeps the
+monitor outside transient agent tool process trees. Verification checks
+`/api/status`, not only task creation or port acceptance.
 
 In shells where `%USERPROFILE%\.agent-context-engine` is not writable, set
 `AGENT_CONTEXT_ENGINE_STORAGE_ROOT` when launching so user-runtime state can be
@@ -321,8 +447,9 @@ That binding is part of the effective hook state:
 - if the binding points to a missing Agent Context Engine root, hooks are treated as inactive
 - the monitor shows the binding path, target root, target instance, binding error, and effective inactive reason
 
-The following clients are global-only. Enable their central hook bridge once per
-Agent Context Engine root, then use the global wrapper from any directory:
+The following clients expose shared global wrappers. You can still activate
+their project-local hook configs explicitly, but a central install commonly
+enables them once and then launches the wrapper from any project directory:
 
 ```sh
 agent-context-engine antigravity-enable
@@ -338,14 +465,14 @@ gemini-ace
 opencode-ace [project]
 ```
 
-Per-project `antigravity-enable --target`, `gemini-enable --target`, and
-`opencode-enable --target` are deprecated and will refuse to create
-project-specific hooks.
+Per-project activation remains available for `antigravity` and `gemini` when a
+project does not yet contain `.agents/hooks.json` or `.gemini/settings.json`.
+`opencode-enable --target` remains deprecated because OpenCode still uses the
+global-only plugin bridge.
 
-If older project-specific `.agents/`, `.gemini/`, or `.opencode/` artifacts
-still exist from earlier setups, remove them after migrating to the global
-wrappers so plain runner starts in those projects no longer pick up stale Agent
-Context Engine hook state.
+If older project-specific `.agents/` or `.gemini/` artifacts still exist from
+pre-hub setups, treat them as migration/drift candidates and repair them
+explicitly rather than deleting them automatically.
 
 ## Recommended Agent Questions
 
@@ -413,6 +540,17 @@ Verification rules:
 Use `repair-installation --apply` after review when the check reports a missing
 `.venv`, missing `PyYAML`, stale/missing `frontend/dist`, or missing GUI
 workspace-root hook activation.
+
+After runtime and frontend prerequisites are healthy, repair also repeats the
+installation-root hook finalization. This recreates missing global bridge
+artifacts such as `.opencode/plugins/agent-memory.js`; failed prerequisites
+keep activation skipped.
+
+Legacy profiles with root-local memory and a custom wrapper prefix are
+ambiguous because both historical shared and isolated installs could use that
+shape. Repair refuses to guess; pass either
+`--legacy-installation-mode shared` or `--legacy-installation-mode isolated`
+after reviewing which takeover behavior is intended.
 
 If `check-installation` or `install-discovery` reports unsupported local
 `node`/`npm` versions, upgrade those prerequisites first; otherwise

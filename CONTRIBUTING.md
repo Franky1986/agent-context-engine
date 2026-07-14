@@ -24,6 +24,7 @@ python3 scripts/agent_context_engine.py install \
   --link-dir /tmp/agent-context-engine-bin \
   --link-codex-ace \
   --link-claude-ace \
+  --link-cursor-ace \
   --no-interactive \
   --force
 

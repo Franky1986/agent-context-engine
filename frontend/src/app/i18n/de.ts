@@ -833,6 +833,18 @@ const de = {
   'pilot.noReason': 'keine Begründung',
   'pilot.expires': 'endet',
   'pilot.noOverrides': 'Keine aktiven Ausnahmen.',
+  'pilot.systemControl': 'Systemsteuerung',
+  'pilot.systemMode.enabled': 'Aktiv',
+  'pilot.systemMode.disabling': 'Wird angehalten',
+  'pilot.systemMode.disabled': 'Angehalten',
+  'pilot.systemMode.enabling': 'Wird aktiviert',
+  'pilot.systemMode.partial': 'Teilzustand',
+  'pilot.systemEnabled': 'Normale Hooks und Hintergrundarbeit sind freigegeben.',
+  'pilot.systemSuspended': 'Der Monitor ist schreibgeschuetzt. Normale Hooks und neue Hintergrundarbeit sind angehalten.',
+  'pilot.systemReason': 'Grund',
+  'pilot.systemProvenance': 'Steuerungsprovenienz',
+  'pilot.systemProvenanceInstrumented': 'instrumentiertes Runner-Ereignis; keine vom Betriebssystem bestaetigte Nutzerpraesenz',
+  'pilot.systemRecovery': 'Sende diese exakte Zeile selbst in einem aktivierten Runner-Chat. Nicht als Agent-Tool ausfuehren.',
 } as const;
 
 export default de;

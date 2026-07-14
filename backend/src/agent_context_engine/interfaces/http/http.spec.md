@@ -20,6 +20,11 @@ minimal HTML fallback.
 - Expose enough installation and runtime metadata for operators to understand
   active install roots, memory roots, launchagent identity, monitor runtime
   registry state, link registry state, and version drift.
+- Include installation-specific `system_control` state in `/api/status`.
+- While admission is closed, preserve read-only inspection but reject every
+  POST/DELETE request and LLM-backed retrieval with HTTP 423 and
+  `error_code=system_suspended`.
+- Do not expose HTTP system disable, enable, or recovery mutations.
 
 ## Inputs / Outputs
 - Inputs: local HTTP requests, query params, JSON bodies, monitor token.

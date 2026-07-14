@@ -16,6 +16,7 @@ and repository-level operating constraints.
 - When asked about previous sessions, handovers, project context, "what happened last", "continue there", "we already analyzed this", or similar memory requests, use the local Agent Context Engine CLI first.
 - Agent Context Engine command prefix: `agent-context-engine`
 - Canonical public CLI contract: `agent-context-engine` from `PATH`. Repo-local `./scripts/ace` and `./scripts/agent-context-engine` remain compatibility fallbacks, not the primary hook/session contract.
+- Running bare `agent-context-engine` prints the public command help and the copyable direct-user system-control forms.
 - Runtime-memory commands can touch SQLite WAL/SHM files, locks, audit rows, retrieval logs, or metadata refreshes even when they look read-only. In filesystem-sandboxed runners, request escalated sandbox access up front for concrete memory commands such as `last --limit 10`, `handover`, `search`, and `retrieve`.
 - Traceable retrieval: `agent-context-engine retrieve "<question or search terms>" --limit 10`
 - Quick keyword search: `agent-context-engine search "<search terms>" --limit 5`
@@ -139,9 +140,22 @@ User-only controls such as `approve <risk_event_id> <nonce>`,
 `approve workdir /absolute/project/path`, `approve explain <reason>`,
 `reset taint`, `firewall add ...`, `firewall disable session`,
 `firewall disable session 30m`, `firewall enable session`,
-`hooks-disable [--runner <runner>]`, `hooks-enable [--runner <runner>]`, and
-`hooks-status` must be sent by the user as chat messages. Do not execute those
-control lines as tools.
+`hooks-disable [--project] [--runner <runner>]`,
+`hooks-enable [--project] [--runner <runner>]`, `hooks-status [--project]`,
+`system-disable --scope all --reason "..."`,
+`system-enable --scope all --reason "..."`, `system-status`, and the displayed
+`system-recover` line must be sent by the user as chat messages. Do not execute
+those control lines as tools. `agent-context-engine system-status [--json]` is
+the only public CLI system-control surface and is read-only.
+For a natural-language request to deactivate ACE, distinguish exact-project,
+project-runner, installation-runner, all-hooks, and full-system scope. Return
+the matching exact copyable direct-user `hooks-disable ...` or
+`system-disable --scope all --reason "..."` chat line immediately. Do not probe
+or execute mutating variants, retry their help forms, or suggest firewall or
+approval bypasses. Keep wrappers and hook files installed for recovery.
+System-control provenance is an instrumented runner-event boundary, not
+cryptographic or OS-authenticated user presence. Do not describe it as a
+security boundary against arbitrary code running with the same user privileges.
 
 ## Useful Development Checks
 

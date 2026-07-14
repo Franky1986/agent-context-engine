@@ -12,18 +12,20 @@ fi
 ROOT='__ROOT__'
 LOG="$ROOT/memory/logs/cursor-hook.err.log"
 SCRIPT="$ROOT/scripts/agent_context_engine.py"
-HOOKS_STATE="$ROOT/memory/local/hooks-state.json"
 if [ ! -f "$SCRIPT" ]; then
   SCRIPT="$ROOT/docs/skills/agent-context-engine/scripts/agent_context_engine.py"
 fi
 mkdir -p "$(dirname "$LOG")"
 TMP="$(mktemp)"
-trap 'rm -f "$TMP"' EXIT
+TMPOUT="$(mktemp)"
+trap 'rm -f "$TMP" "$TMPOUT"' EXIT
 cat > "$TMP"
 
 set +e
 env AGENT_CONTEXT_ENGINE_ROOT="$ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client cursor \
   < "$TMP" \
+  3</dev/null \
+  > "$TMPOUT" \
   2>>"$LOG"
 CODE=$?
 set -e
@@ -46,47 +48,11 @@ for key in ("hook_event_name", "event_name", "hookName", "hook_name", "event", "
 PY
 )"
 
-if ! python3 - "$HOOKS_STATE" cursor <<'PY'
-import json
-import sys
-from pathlib import Path
-
-
-path = Path(sys.argv[1])
-runner = sys.argv[2]
-if not path.exists():
-    raise SystemExit(0)
-try:
-    state = json.loads(path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
-if state.get("enabled") is False:
-    raise SystemExit(1)
-runner_state = state.get("runners", {}).get(runner)
-if isinstance(runner_state, dict) and runner_state.get("enabled") is False:
-    raise SystemExit(1)
-if runner_state is False:
-    raise SystemExit(1)
-raise SystemExit(0)
-PY
-then
-  case "$EVENT" in
-    beforeSubmitPrompt)
-      printf '{"continue":true}\n'
-      ;;
-    beforeShellExecution|beforeMCPExecution|beforeReadFile)
-      printf '{"permission":"allow"}\n'
-      ;;
-    *)
-      printf '{}\n'
-      ;;
-  esac
-  exit 0
-fi
-
 case "$EVENT" in
   beforeSubmitPrompt)
-    if [ "$CODE" = "2" ]; then
+    if [ -s "$TMPOUT" ]; then
+      cat "$TMPOUT"
+    elif [ "$CODE" = "2" ]; then
       printf '{"continue":false,"message":"Agent Context Engine blocked this prompt by policy."}\n'
     else
       printf '{"continue":true}\n'

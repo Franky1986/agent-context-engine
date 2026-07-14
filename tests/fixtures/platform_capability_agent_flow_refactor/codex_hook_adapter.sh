@@ -7,43 +7,72 @@ if [ "${AGENT_MEMORY_DREAM:-0}" = "1" ] || [ "${AGENT_MEMORY_INTERNAL_RUN:-0}" =
   exit 0
 fi
 
-ROOT="__ROOT__"
-SCRIPT="__SCRIPT__"
-HOOKS_STATE="$ROOT/memory/local/hooks-state.json"
-LOG="$ROOT/memory/logs/codex-hook.err.log"
-mkdir -p "$(dirname "$LOG")"
-TMPERR="$(mktemp)"
-trap 'rm -f "$TMPERR"' EXIT
-
-if ! python3 - "$HOOKS_STATE" codex <<'PY'
-import json
-import sys
-from pathlib import Path
-
-
-path = Path(sys.argv[1])
-runner = sys.argv[2]
-if not path.exists():
-    raise SystemExit(0)
-try:
-    state = json.loads(path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
-if state.get("enabled") is False:
-    raise SystemExit(1)
-runner_state = state.get("runners", {}).get(runner)
-if isinstance(runner_state, dict) and runner_state.get("enabled") is False:
-    raise SystemExit(1)
-if runner_state is False:
-    raise SystemExit(1)
-raise SystemExit(0)
-PY
-then
+ROOT="${AGENT_CONTEXT_ENGINE_ROOT:-}"
+if [ -z "$ROOT" ]; then
+  echo "codex hook adapter: AGENT_CONTEXT_ENGINE_ROOT is not set" >&2
   exit 0
 fi
 
+CLIENT="${AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT:-codex}"
+
+SCRIPT="${AGENT_CONTEXT_ENGINE_SCRIPT:-}"
+if [ -z "$SCRIPT" ]; then
+  if [ -f "$ROOT/scripts/agent_context_engine.py" ]; then
+    SCRIPT="$ROOT/scripts/agent_context_engine.py"
+  elif [ -f "$ROOT/docs/skills/agent-context-engine/scripts/agent_context_engine.py" ]; then
+    SCRIPT="$ROOT/docs/skills/agent-context-engine/scripts/agent_context_engine.py"
+  else
+    echo "codex hook adapter: cannot find agent_context_engine.py under $ROOT" >&2
+    exit 0
+  fi
+fi
+
+LOG="$ROOT/memory/logs/${CLIENT}-hook.err.log"
+mkdir -p "$(dirname "$LOG")"
+PAYLOAD_TMP="$(mktemp)"
+TMPERR="$(mktemp)"
+trap 'rm -f "$TMPERR" "$PAYLOAD_TMP"' EXIT
+cat > "$PAYLOAD_TMP"
+
+DEDUP_ROOT="$ROOT/memory/runtime/hook-dedupe/${CLIENT}"
+mkdir -p "$DEDUP_ROOT"
+
+if command -v shasum >/dev/null 2>&1; then
+  PAYLOAD_HASH="$(shasum -a 256 "$PAYLOAD_TMP" | awk '{print $1}')"
+elif command -v sha256sum >/dev/null 2>&1; then
+  PAYLOAD_HASH="$(sha256sum "$PAYLOAD_TMP" | awk '{print $1}')"
+else
+  PAYLOAD_HASH=""
+fi
+if [ -n "$PAYLOAD_HASH" ]; then
+  DEDUP_LOCK="$DEDUP_ROOT/$PAYLOAD_HASH.lock"
+  if ! mkdir "$DEDUP_LOCK" 2>/dev/null; then
+    if python3 - "$DEDUP_LOCK" <<'PY'
+import sys
+import time
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    age = time.time() - path.stat().st_mtime
+except OSError:
+    raise SystemExit(0)
+raise SystemExit(0 if age > 10 else 1)
+PY
+    then
+      rm -rf "$DEDUP_LOCK"
+      mkdir "$DEDUP_LOCK" 2>/dev/null || exit 0
+    else
+      exit 0
+    fi
+  fi
+  touch "$DEDUP_LOCK"
+fi
+
 set +e
-env AGENT_CONTEXT_ENGINE_ROOT="$ROOT" AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT="${AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT:-}" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client codex \
+env AGENT_CONTEXT_ENGINE_ROOT="$ROOT" AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT="$CLIENT" AGENT_MEMORY_LAUNCH_CWD="${AGENT_MEMORY_LAUNCH_CWD:-${PWD}}" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client "$CLIENT" \
+  <"$PAYLOAD_TMP" \
+  3</dev/null \
   2>"$TMPERR"
 CODE=$?
 set -e
@@ -62,5 +91,5 @@ if [ "$CODE" = "0" ]; then
   exit 0
 fi
 
-echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] codex hook log failed" >> "$LOG"
+echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ${CLIENT} hook log failed" >> "$LOG"
 exit 0

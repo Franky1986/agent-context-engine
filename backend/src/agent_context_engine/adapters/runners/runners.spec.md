@@ -72,7 +72,12 @@ Dream, classifier, and graph-related execution where configured.
   the adapter boundary must normalize that explicitly and preserve whether
   usage was actually available.
 - Antigravity non-interactive execution for dream/graph stages is expressed via
-  the current `agy --print` contract instead of legacy prompt flags.
+  the current `agy --model "<model>" -p "<prompt>"` contract instead of legacy
+  prompt flags.
+- Gemini classifier envelopes accept policy JSON only from the documented
+  top-level `response` field. Claude JSON mode accepts `structured_output` or
+  the final `result` field. Prompt echoes and multiple policy candidates fail
+  closed instead of being searched recursively.
 
 ## Tests / Checks
 - `python3 tests/test_agent_context_engine.py`

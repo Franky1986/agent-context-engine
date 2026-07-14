@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .specs import CursorProjectHookWrapperSpec, ShellHookAdapterSpec
+from .specs import CentralHubSpec, CursorProjectHookWrapperSpec, ShellHookAdapterSpec
 
 
 
@@ -19,6 +19,19 @@ def render_shell_hook_adapter_script(spec: ShellHookAdapterSpec) -> str:
     rendered = rendered.replace("__AGENT_CONTEXT_ENGINE_ROOT__", str(spec.agent_context_engine_root.resolve()))
     if "__AGENT_MEMORY_SCRIPT__" in rendered or "__AGENT_CONTEXT_ENGINE_ROOT__" in rendered:
         raise ValueError(f"unresolved hook renderer placeholders for client: {spec.client}")
+    return rendered
+
+
+
+
+def render_central_hub_script(spec: CentralHubSpec) -> str:
+    template = spec.template_path.read_text(encoding="utf-8")
+    rendered = template.replace("__RUNNER__", spec.runner)
+    rendered = rendered.replace("__HUB_SPEC_VERSION__", spec.spec_version)
+    if "__RUNNER__" in rendered:
+        raise ValueError(f"unresolved central hub runner placeholder for runner: {spec.runner}")
+    if "__HUB_SPEC_VERSION__" in rendered:
+        raise ValueError(f"unresolved central hub spec-version placeholder for runner: {spec.runner}")
     return rendered
 
 

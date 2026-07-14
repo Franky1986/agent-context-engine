@@ -33,7 +33,19 @@ from .support.risk_gate import apply_consumed_command_approval, apply_policy_all
 from .support.session_context import hook_context_output, memory_hooks_status_context, payload_workdir, recent_sessions_context
 from ...application.hook_effects import spawn_hook_queue_kick, spawn_initial_prompt_dream, spawn_scheduler_kick, spawn_stop_dream
 from ...application.firewall_rules import active_firewall_intent_summaries, active_llm_firewall_contexts, apply_direct_user_firewall_commands, apply_firewall_rule_match, firewall_policy_summary, match_firewall_rules, redact_control_plane_prompt, session_target_workdirs
-from ...application.hooks_state import hooks_enabled_for, prompt_contains_only_hook_control
+from ...application.system_control import (
+    apply_direct_user_system_command,
+    audit_system_control_rejection,
+    system_admission_open,
+)
+from ...application.hooks_state import (
+    apply_direct_user_hook_state_commands,
+    direct_user_hooks_disable_lines,
+    direct_user_hooks_enable_lines,
+    direct_user_hooks_status_lines,
+    hooks_enabled_for,
+    prompt_contains_only_hook_control,
+)
 from ...application.instance_profile import resolve_runner_wrapper_name
 from ...application.integrations import cursor_project_background_runner_status, workspace_binding_status
 from ...application.risk import RiskDecision, apply_taint_to_decision, extract_command_from_tool_input, is_non_overridable_block, record_risk_event, scan_tool_input, shell_command_hash, tool_action_class
@@ -226,11 +238,11 @@ def _workspace_has_managed_hook_config(client: str, root: Path) -> bool:
 
 
 def hooks_runtime_enabled_for(client: str, payload: dict[str, Any], *, root: Path = ROOT) -> bool:
-    if not hooks_enabled_for(client, root=root):
+    workspace_root = _hook_workspace_root(payload)
+    if not hooks_enabled_for(client, root=root, project_root=workspace_root):
         return False
     if client not in {"codex", "claude", "cursor"}:
         return True
-    workspace_root = _hook_workspace_root(payload)
     if workspace_root is None:
         return False
     if workspace_root.resolve() == root.resolve():
@@ -748,7 +760,71 @@ def log_hook(args: argparse.Namespace) -> int:
     payload = load_payload()
     if args.client == "cursor":
         payload = normalize_cursor_payload(payload)
+    name = event_name(payload)
+    prompt = payload.get("prompt")
+    hook_control_requested = bool(
+        _user_prompt_event(name)
+        and (
+            direct_user_hooks_status_lines(prompt)
+            or direct_user_hooks_disable_lines(prompt)
+            or direct_user_hooks_enable_lines(prompt)
+        )
+    )
+    project_root = _hook_workspace_root(payload)
+    if _user_prompt_event(name):
+        try:
+            system_context = apply_direct_user_system_command(
+                payload.get("prompt"),
+                event_name=name,
+                installation_root=ROOT,
+                session_id=str(payload.get("session_id") or ""),
+                event_seq=payload.get("event_seq") if isinstance(payload.get("event_seq"), int) else None,
+            )
+        except (PermissionError, TimeoutError, ValueError) as exc:
+            if str(payload.get("prompt") or "").strip().startswith("system-"):
+                audit_system_control_rejection(
+                    installation_root=ROOT,
+                    raw_message=payload.get("prompt"),
+                    event_name=name,
+                    reason=str(exc),
+                )
+                hook_context_output(name, f"System control rejected: {exc}")
+                return 0
+            system_context = None
+        if system_context:
+            hook_context_output(name, system_context)
+            return 0
+    if not system_admission_open(installation_root=ROOT):
+        if _user_prompt_event(name) and direct_user_hooks_status_lines(prompt):
+            hook_context_output(
+                name,
+                "\n".join(
+                    apply_direct_user_hook_state_commands(
+                        prompt,
+                        root=ROOT,
+                        project_root=project_root,
+                    )
+                ),
+            )
+        elif _user_prompt_event(name) and (direct_user_hooks_disable_lines(prompt) or direct_user_hooks_enable_lines(prompt)):
+            hook_context_output(
+                name,
+                "Hooks mutation rejected: Agent Context Engine is suspended and the preserved hook state cannot be changed.",
+            )
+        return 0
     if not hooks_runtime_enabled_for(args.client, payload):
+        if hook_control_requested:
+            try:
+                control_context = "\n".join(
+                    apply_direct_user_hook_state_commands(
+                        prompt,
+                        root=ROOT,
+                        project_root=project_root,
+                    )
+                )
+            except ValueError as exc:
+                control_context = f"Hooks control rejected: {exc}"
+            hook_context_output(name, control_context)
         return 0
     mode = _log_mode(args, args.client, payload)
     if mode in {"queue", "context", "fast"}:
@@ -761,6 +837,18 @@ def log_hook(args: argparse.Namespace) -> int:
         )
     else:
         code, context, block_reason = log_payload(args.client, payload, detect_version=args.detect_version, queue_on_failure=True, return_context=True)
+    if hook_control_requested:
+        try:
+            control_context = "\n".join(
+                apply_direct_user_hook_state_commands(
+                    prompt,
+                    root=ROOT,
+                    project_root=project_root,
+                )
+            )
+        except ValueError as exc:
+            control_context = f"Hooks control rejected: {exc}"
+        context = _join_hook_context_blocks(context, control_context)
     # Codex currently accepts injected context for SessionStart/UserPromptSubmit,
     # but Stop has a stricter schema and reports "invalid stop hook JSON output"
     # when hookSpecificOutput is printed. Pending approvals are therefore shown
@@ -792,6 +880,8 @@ def log_payload(
     now = recorded_at or utc_now()
     name = event_name(payload)
     original_prompt = payload.get("prompt")
+    if not system_admission_open(installation_root=ROOT):
+        return (0, "", "") if return_context else 0
     if not hooks_runtime_enabled_for(client, payload):
         return (0, "", "") if return_context else 0
     session_id = str(payload.get("session_id") or f"missing-session-{now}")
@@ -1489,6 +1579,9 @@ def log_payload(
 
 
 def cmd_replay_hook_queue(args: argparse.Namespace) -> int:
+    if not system_admission_open(installation_root=ROOT):
+        print("replayed queued hook events: 0 worker=suspended")
+        return 0
     root = MEMORY_DIR / "events" / "queue"
     worker_lock = None
     started_at = utc_now()
@@ -1530,6 +1623,9 @@ def cmd_replay_hook_queue(args: argparse.Namespace) -> int:
         replayed = 0
         failed = parse_failed
         for _sort_key, path, item in files:
+            if not system_admission_open(installation_root=ROOT):
+                append_hook_queue_log("queue replay paused before claim", reason="system-suspended")
+                break
             try:
                 client = str(item.get("client_type") or args.client or "unknown")
                 payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}

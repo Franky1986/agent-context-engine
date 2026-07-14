@@ -56,6 +56,8 @@ def risk_labels(preview: str | None, reason: str | None = "", impact: str | None
     reason_text = " ".join(str(item or "") for item in [reason, impact]).lower()
     if "agent_self_approval_attempt" in joined_flags:
         why = "The active agent is not allowed to approve its own risk blocks through tool calls."
+    elif "classifier_invalid_output" in joined_flags or "classifier_schema_violation" in joined_flags:
+        why = "The firewall classifier returned invalid structured output, so Agent Context Engine blocked fail-closed instead of guessing."
     elif "tainted_context_side_effect" in joined_flags or "approval_required" in joined_flags or "tainted context" in reason_text or "prior sensitive" in reason_text:
         why = "Earlier risky or sensitive context was detected in this session; follow-up write or execution actions need explicit approval."
     elif (
@@ -74,9 +76,9 @@ def risk_labels(preview: str | None, reason: str | None = "", impact: str | None
     return {"intent": intent, "why": why, "not_executed": not_executed}
 
 
-def _taint_sources(decision: Any, *, limit: int = 3) -> list[dict[str, str]]:
+def _taint_sources(decision: Any, *, limit: int = 3) -> list[dict[str, Any]]:
     raw = getattr(decision, "taint_context", None) or []
-    items: list[dict[str, str]] = []
+    items: list[dict[str, Any]] = []
     for entry in raw[:limit]:
         if not isinstance(entry, dict):
             continue
@@ -87,9 +89,35 @@ def _taint_sources(decision: Any, *, limit: int = 3) -> list[dict[str, str]]:
                 "decision": one_line(entry.get("decision"), 40),
                 "risk_level": one_line(entry.get("risk_level"), 40),
                 "reason": one_line(entry.get("reason"), 220),
+                "categories": entry.get("categories") or entry.get("categories_json") or [],
+                "poisoning_flags": entry.get("poisoning_flags") or entry.get("poisoning_flags_json") or [],
             }
         )
     return items
+
+
+def _json_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return [value] if value else []
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed if str(item)]
+    return []
+
+
+def _taint_context_has_classifier_failure(items: list[dict[str, Any]]) -> bool:
+    for item in items:
+        flags = set(_json_list(item.get("categories"))) | set(_json_list(item.get("poisoning_flags")))
+        text = f"{item.get('reason') or ''} {item.get('impact') or ''}".lower()
+        if {"classifier_invalid_output", "classifier_schema_violation"} & flags:
+            return True
+        if "classifier runner failed" in text or "classifier output" in text or "valid policy json" in text:
+            return True
+    return False
 
 
 def blocking_reason(decision: Any) -> str:
@@ -107,6 +135,12 @@ def blocking_reason(decision: Any) -> str:
     flag_text = ", ".join(str(flag) for flag in list(flags)[:6])
     command_preview = one_line(getattr(decision, "preview", "") or "", 700)
     labels = risk_labels(getattr(decision, "preview", "") or "", reason, impact, [str(flag) for flag in flags])
+    taint_sources = _taint_sources(decision)
+    if "tainted_context_side_effect" in flags and _taint_context_has_classifier_failure(taint_sources):
+        labels["why"] = (
+            "An earlier firewall classifier failure tainted this session. "
+            "This follow-up side-effect action needs explicit approval because Agent Context Engine cannot rely on that prior classifier output."
+        )
     parts = [
         f"Blocked command: `{command_preview or '<unavailable>'}`",
         f"Agent Context Engine blocked this tool use: {labels['intent']}.",
@@ -119,17 +153,30 @@ def blocking_reason(decision: Any) -> str:
         parts.append(f"Approval: {approval_state}.")
     if risk_event_id:
         parts.append(f"Command: stored in local risk audit/monitor only (`monitor:risk_events:{risk_event_id}`).")
-    taint_sources = _taint_sources(decision)
     if taint_sources:
         parts.append(
             "Taint sources that currently influence this block:\n"
             + "\n".join(
-                f"- `{item['risk_event_id'] or '-'}` status={item['status'] or '-'} decision={item['decision'] or '-'} level={item['risk_level'] or '-'} reason={json.dumps(item['reason'] or '-', ensure_ascii=False)}"
+                f"- `{item['risk_event_id'] or '-'}` status={item['status'] or '-'} decision={item['decision'] or '-'} level={item['risk_level'] or '-'} "
+                f"flags={json.dumps(_json_list(item.get('categories')) + _json_list(item.get('poisoning_flags')), ensure_ascii=False)} "
+                f"reason={json.dumps(item['reason'] or '-', ensure_ascii=False)}"
                 for item in taint_sources
             )
         )
     firewall_command = one_line(getattr(decision, "firewall_add_command", "") or "", 900)
-    if firewall_command:
+    self_control_block = "agent_self_approval_attempt" in flags
+    if self_control_block:
+        parts.append(
+            "This control-plane block cannot be bypassed with an approval or firewall rule. "
+            "Do not retry the command, its help variant, or another mutating ACE command as a tool."
+        )
+        parts.append(
+            "If the user asked to suspend the whole system, reply with this exact copyable direct-chat form:\n"
+            "system-disable --scope all --reason \"<reason>\"\n"
+            "For hook-only control, tell the user to send the bare `hooks-disable` chat line. "
+            "Do not remove global wrappers; they are part of the recovery path."
+        )
+    elif firewall_command:
         parts.append(
             "To persistently allow this reviewed command pattern, the user can send this exact chat line; "
             f"the agent must not execute it as a tool:\n{firewall_command}"
@@ -156,7 +203,7 @@ def blocking_reason(decision: Any) -> str:
         parts.append(f"Command hash: {command_hash[:16]}.")
     if flag_text:
         parts.append(f"Flags: {flag_text}")
-    if approval_state == "required" and risk_event_id and approval_token:
+    if not self_control_block and approval_state == "required" and risk_event_id and approval_token:
         parts.append(
             "Only this exact one-time approval syntax is valid here. "
             "Do not replace it with the blocked shell command or paraphrase it."

@@ -73,6 +73,14 @@ pre-action safety checks, and enqueue or persist events for later processing.
   runner subprocesses, and classifier runner launch failures must fall back to
   deterministic policy instead of creating tainting `classifier_invalid_output`
   cascades.
+- If the firewall classifier still returns invalid structured output and a
+  fail-closed block is required, hook blocking messages and monitor risk
+  summaries must name the classifier failure explicitly instead of presenting it
+  as an ordinary policy denial or generic tainted-context block.
+- Pre-action classifier runners that produce CLI event wrappers or text-only
+  output must be normalized before policy evaluation: prefer schema-shaped risk
+  JSON inside nested `text` / `message` / `content` fields and give text-only
+  runners one schema-repair prompt before recording invalid classifier output.
 - Cursor auth readiness checks must treat textual unauthenticated states such
   as `Not logged in` as not-ready even when `cursor-agent status` exits `0`.
 - Cursor queue reservation and later replay must preserve the resolved
@@ -105,3 +113,8 @@ pre-action safety checks, and enqueue or persist events for later processing.
   direct user chat control lines for `hooks-disable`, `hooks-enable`, and
   `hooks-status` are also allowed; normal agentic hook-disable attempts are
   not.
+- Direct-user system controls require the current native user-prompt event on
+  the instrumented hook path. The inherited descriptor is a path marker, not
+  authenticated user presence. Mutating controls are consumed before normal
+  hook-state and admission checks; recognizable forged `log-hook` and
+  agent-tool attempts are blocked within the instrumented boundary.

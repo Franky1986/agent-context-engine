@@ -104,6 +104,7 @@ from ...application.scheduler import (
 from ...application.schema_proposals import cmd_schema_proposals
 from ...application.startup_context import cmd_personal_context, cmd_repo_context, cmd_session_start_context
 from ...application.summaries import cmd_summarize, cmd_summarize_windows
+from ...application.system_control import command_allowed_while_suspended, cmd_system_status, system_admission_open
 
 
 def _parse_bool_arg(value: str | None) -> bool:
@@ -133,7 +134,17 @@ def _cmd_monitor_lazy(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agent-context-engine")
+    parser = argparse.ArgumentParser(
+        prog="agent-context-engine",
+        description="Capture, retrieve, inspect, and operate Agent Context Engine memory.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Direct-user full-system controls are chat lines, not CLI commands:\n"
+            "  system-disable --scope all --reason \"<reason>\"\n"
+            "  system-enable --scope all --reason \"<reason>\"\n"
+            "  system-status"
+        ),
+    )
     launchagent_defaults = default_launchagent_profile()
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -271,9 +282,14 @@ def build_parser() -> argparse.ArgumentParser:
     hooks_status = sub.add_parser("hooks-status")
     hooks_status.set_defaults(func=cmd_hooks_status)
 
+    system_status = sub.add_parser("system-status")
+    system_status.add_argument("--json", action="store_true")
+    system_status.set_defaults(func=cmd_system_status)
+
     integration_hooks = sub.add_parser("integration-hooks")
     integration_hooks.add_argument("--client", required=True, choices=["codex", "claude", "cursor", "antigravity", "gemini", "opencode"])
-    integration_hooks.add_argument("--action", required=True, choices=["enable", "disable"])
+    integration_hooks.add_argument("--action", choices=["enable", "disable"], help="Enable or disable hooks for the target project")
+    integration_hooks.add_argument("--activate", action="store_true", help="Shorthand for --action enable")
     integration_hooks.add_argument("--target")
     integration_hooks.add_argument("--installation-root", help="Agent Context Engine installation root; defaults to this installation root")
     integration_hooks.add_argument("--background-runner", choices=["codex", "claude"], help="Pin Cursor background LLM workflows to a specific headless runner")
@@ -314,7 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
     opencode_status.set_defaults(func=cmd_opencode_status)
 
     global_wrapper_enable = sub.add_parser("global-wrapper-enable")
-    global_wrapper_enable.add_argument("wrapper", choices=["codex-ace", "claude-ace", "agy-ace", "gemini-ace", "opencode-ace"])
+    global_wrapper_enable.add_argument("wrapper", choices=["codex-ace", "claude-ace", "cursor-ace", "agy-ace", "gemini-ace", "opencode-ace"])
     global_wrapper_enable.add_argument("--link-dir", default="~/.local/bin")
     global_wrapper_enable.add_argument("--instance-name", help="Optional instance name used for prefixed global command links")
     global_wrapper_enable.add_argument("--command-prefix", help="Optional prefix for the global command link, e.g. personal-")
@@ -324,7 +340,7 @@ def build_parser() -> argparse.ArgumentParser:
     global_wrapper_enable.set_defaults(func=cmd_global_wrapper_enable)
 
     global_wrapper_disable = sub.add_parser("global-wrapper-disable")
-    global_wrapper_disable.add_argument("wrapper", choices=["codex-ace", "claude-ace", "agy-ace", "gemini-ace", "opencode-ace"])
+    global_wrapper_disable.add_argument("wrapper", choices=["codex-ace", "claude-ace", "cursor-ace", "agy-ace", "gemini-ace", "opencode-ace"])
     global_wrapper_disable.add_argument("--link-dir", default="~/.local/bin")
     global_wrapper_disable.add_argument("--instance-name", help="Optional instance name used for prefixed global command links")
     global_wrapper_disable.add_argument("--command-prefix", help="Optional prefix for the global command link, e.g. personal-")
@@ -680,6 +696,11 @@ def build_parser() -> argparse.ArgumentParser:
     repair_installation.add_argument("--query-expansion-runner", choices=["codex", "claude", "cursor", "antigravity", "gemini", "opencode", "deterministic", "off"])
     repair_installation.add_argument("--install-cli", action="append", choices=["codex", "claude"], help="Additively install a known headless CLI after review")
     repair_installation.add_argument("--rewrite-workspace-hook-adapters", action="store_true", help="Explicitly allow rewriting external Codex/Claude workspace hook adapters when they point to the wrong memory root")
+    repair_installation.add_argument(
+        "--legacy-installation-mode",
+        choices=["shared", "isolated"],
+        help="Resolve an ambiguous legacy profile before applying repair side effects",
+    )
     repair_installation.add_argument("--install-frontend-deps", action="store_true")
     repair_installation.add_argument("--apply", action="store_true")
     repair_installation.set_defaults(func=cmd_repair_installation)
@@ -753,6 +774,7 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--wrapper-suffix", help="Optional suffix for global command links, e.g. -v2")
     install.add_argument("--link-codex-ace", dest="link_codex_memory", action=argparse.BooleanOptionalAction, default=None)
     install.add_argument("--link-claude-ace", dest="link_claude_memory", action=argparse.BooleanOptionalAction, default=None)
+    install.add_argument("--link-cursor-ace", dest="link_cursor_memory", action=argparse.BooleanOptionalAction, default=None)
     install.add_argument("--link-agy-ace", dest="link_agy_memory", action=argparse.BooleanOptionalAction, default=None)
     install.add_argument("--link-gemini-ace", dest="link_gemini_memory", action=argparse.BooleanOptionalAction, default=None)
     install.add_argument("--link-opencode-ace", dest="link_opencode_memory", action=argparse.BooleanOptionalAction, default=None)
@@ -1080,5 +1102,16 @@ def _normalize_graph_query_args(argv: list[str]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(_normalize_graph_query_args(list(argv) if argv is not None else list(sys.argv[1:])))
+    normalized_argv = _normalize_graph_query_args(list(argv) if argv is not None else list(sys.argv[1:]))
+    if not normalized_argv:
+        parser.print_help()
+        return 0
+    args = parser.parse_args(normalized_argv)
+    if not system_admission_open() and not command_allowed_while_suspended(args):
+        print(
+            "Agent Context Engine is suspended; this command is not permitted because it may mutate operational state or start background work. "
+            "Use `agent-context-engine system-status` for details.",
+            file=sys.stderr,
+        )
+        return 3
     return args.func(args)

@@ -33,6 +33,13 @@ graph repair, sync, cleanup, and recovery.
 - SQLite busy/locked errors are retryable when safe.
 - Step hard failures are recorded without hiding later steps.
 - Missing optional integrations do not fail unrelated core steps.
+- Check the installation-specific system admission gate before acquiring the
+  scheduler run lock or claiming work. Suspended and fail-closed partial modes
+  skip successfully.
+- Use `SystemSchedulerPort` for system suspension: macOS unloads/restores only
+  the owned LaunchAgent without deleting its plist; Windows disables/restores
+  only the owned Task Scheduler task.
+- Restore a scheduler only when the pre-disable snapshot proves it was active.
 
 ## Observability / Audit
 - Each scheduler step records name, status, timing, and error class.

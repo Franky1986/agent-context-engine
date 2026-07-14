@@ -66,7 +66,7 @@ memory artifacts and graph-ready proposals.
 - Semantic persistence must prefer grounded evidence from the actual
   conversation window over paraphrase from dream summaries.
 - Antigravity-backed dream stages use the current non-interactive
-  `agy --print` command contract.
+  `agy --model "<model>" -p "<prompt>"` command contract.
 - Semantic extraction and reconciliation use the same resilient JSON parsing
   contract across all supported runners and fall back deterministically when
   parsing fails.

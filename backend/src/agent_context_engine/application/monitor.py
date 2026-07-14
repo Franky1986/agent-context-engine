@@ -158,6 +158,13 @@ def monitor_status(
         ),
         {},
     )
+    public_monitor_entries = [
+        {key: value for key, value in entry.items() if key != "shutdown_token"}
+        for entry in active_monitor_entries
+    ]
+    public_current_monitor_entry = {
+        key: value for key, value in current_monitor_entry.items() if key != "shutdown_token"
+    }
 
     return {
         "runner": runner,
@@ -203,8 +210,8 @@ def monitor_status(
         "integrations": integration_summary(root=root, probe_gemini=False, external_probes=False),
         "monitor_process": _monitor_process_status(runner=runner, root=root, monitor_version=monitor_version, monitor_context=monitor_context),
         "monitor_runtime_registry": {
-            "current": current_monitor_entry,
-            "active_entries": active_monitor_entries,
+            "current": public_current_monitor_entry,
+            "active_entries": public_monitor_entries,
         },
         "link_registry_path": str(link_registry_path()),
         "link_registry": load_link_registry(),

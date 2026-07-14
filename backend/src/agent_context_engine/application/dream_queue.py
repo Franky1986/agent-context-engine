@@ -15,6 +15,7 @@ from ..infrastructure.locks import is_stale_lock, lock_path, release_lock
 from ..ports.clock import Clock
 from ..ports.repositories.sqlite import SQLiteConnectionProvider
 from .dreaming.v2 import cmd_dream_v2
+from .system_control import system_admission_open
 
 
 class _DefaultClock(Clock):
@@ -308,6 +309,9 @@ def process_dream_queue(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     while processed < limit:
+        if not system_admission_open():
+            print("dream queue paused before claim: system suspended")
+            break
         conn = _connect(init=False)
         job = _claim_next_queued_job(conn, lease_seconds=int(getattr(args, "runner_timeout", 1800)))
         if job is None:

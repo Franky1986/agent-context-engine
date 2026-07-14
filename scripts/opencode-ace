@@ -8,24 +8,47 @@ while [[ -L "$SOURCE" ]]; do
   [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+source "$SCRIPT_DIR/lib/ace-wrapper-root.sh"
 DEFAULT_ROOT="__AGENT_CONTEXT_ENGINE_ROOT__"
 
-if [[ -n "${AGENT_CONTEXT_ENGINE_ROOT:-}" ]]; then
-  WORKMANAGEMENT_ROOT="$AGENT_CONTEXT_ENGINE_ROOT"
-elif [[ "$DEFAULT_ROOT" != "__AGENT_CONTEXT_ENGINE_ROOT__" ]]; then
+WORKMANAGEMENT_ROOT="$(ace_resolve_wrapper_root "$SCRIPT_DIR" "$0" "opencode-ace")"
+if [[ -z "$WORKMANAGEMENT_ROOT" && "$DEFAULT_ROOT" != "__AGENT_CONTEXT_ENGINE_ROOT__" ]]; then
   WORKMANAGEMENT_ROOT="$DEFAULT_ROOT"
-elif [[ -f "$SCRIPT_DIR/../SKILL.md" && "$(basename "$(dirname "$SCRIPT_DIR")")" = "agent-context-engine" && "$(basename "$(dirname "$(dirname "$SCRIPT_DIR")")")" = "skills" ]]; then
-  WORKMANAGEMENT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-elif [[ -f "$SCRIPT_DIR/../SKILL.md" ]]; then
-  WORKMANAGEMENT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-else
-  WORKMANAGEMENT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+WORKMANAGEMENT_ROOT="$(cd "$WORKMANAGEMENT_ROOT" && pwd 2>/dev/null || echo "$WORKMANAGEMENT_ROOT")"
+
+if [[ -z "${WORKMANAGEMENT_ROOT:-}" ]]; then
+  echo "opencode-ace: cannot resolve Agent Context Engine root" >&2
+  exit 1
 fi
 
 LAUNCH_CWD="${PWD}"
 
 if [[ ! -d "$WORKMANAGEMENT_ROOT" ]]; then
   echo "opencode-ace: missing Agent Context Engine root: $WORKMANAGEMENT_ROOT" >&2
+  exit 1
+fi
+
+ACE_CLI="$WORKMANAGEMENT_ROOT/scripts/agent-context-engine"
+_SYSTEM_SUSPENDED=0
+if [[ ! -x "$ACE_CLI" ]]; then
+  ACE_CLI="$WORKMANAGEMENT_ROOT/docs/skills/agent-context-engine/scripts/agent-context-engine"
+fi
+if [[ -x "$ACE_CLI" ]]; then
+  _SYSTEM_MODE="$(ace_system_mode "$WORKMANAGEMENT_ROOT" "$ACE_CLI")"
+  if [[ "$_SYSTEM_MODE" != "enabled" ]]; then
+    _SYSTEM_SUSPENDED=1
+    ace_print_suspended_warning "$WORKMANAGEMENT_ROOT" "$_SYSTEM_MODE"
+  fi
+fi
+
+if [[ ! -f "$WORKMANAGEMENT_ROOT/.opencode/plugins/agent-memory.js" || ! -f "$WORKMANAGEMENT_ROOT/opencode.json" ]]; then
+  echo "opencode-ace: OpenCode Agent Context Engine plugin bridge is not active in $WORKMANAGEMENT_ROOT." >&2
+  if [[ "$_SYSTEM_SUSPENDED" -eq 1 ]]; then
+    echo "opencode-ace: activation and repair are blocked while the system is suspended; use an already active project for direct recovery controls." >&2
+  else
+    echo "opencode-ace: run '$WORKMANAGEMENT_ROOT/scripts/agent-context-engine opencode-enable' before starting opencode-ace." >&2
+  fi
   exit 1
 fi
 

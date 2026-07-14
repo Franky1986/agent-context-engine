@@ -8,34 +8,328 @@ while [[ -L "$SOURCE" ]]; do
   [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
-DEFAULT_ROOT="__AGENT_CONTEXT_ENGINE_ROOT__"
+source "$SCRIPT_DIR/lib/ace-wrapper-root.sh"
 
-if [[ -n "${AGENT_CONTEXT_ENGINE_ROOT:-}" ]]; then
-  WORKMANAGEMENT_ROOT="$AGENT_CONTEXT_ENGINE_ROOT"
-elif [[ "$DEFAULT_ROOT" != "__AGENT_CONTEXT_ENGINE_ROOT__" ]]; then
-  WORKMANAGEMENT_ROOT="$DEFAULT_ROOT"
-elif [[ -f "$SCRIPT_DIR/../SKILL.md" && "$(basename "$(dirname "$SCRIPT_DIR")")" = "agent-context-engine" && "$(basename "$(dirname "$(dirname "$SCRIPT_DIR")")")" = "skills" ]]; then
-  WORKMANAGEMENT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-elif [[ -f "$SCRIPT_DIR/../SKILL.md" ]]; then
-  WORKMANAGEMENT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-else
-  WORKMANAGEMENT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-fi
+ACTIVATE_HERE=0
+PASSTHROUGH_ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == "--activate-here" ]]; then
+    ACTIVATE_HERE=1
+  else
+    PASSTHROUGH_ARGS+=("$arg")
+  fi
+done
 
-LAUNCH_CWD="${PWD}"
+ACE_ROOT="$(ace_resolve_wrapper_root "$SCRIPT_DIR" "$0" "claude-ace")"
+ACE_ROOT="$(cd "$ACE_ROOT" && pwd 2>/dev/null || echo "$ACE_ROOT")"
 
-if [[ ! -d "$WORKMANAGEMENT_ROOT" ]]; then
-  echo "claude-ace: missing Agent Context Engine root: $WORKMANAGEMENT_ROOT" >&2
+_resolve_storage_root() {
+  if [[ -n "${AGENT_CONTEXT_ENGINE_STORAGE_ROOT:-}" ]]; then
+    printf "%s\n" "$AGENT_CONTEXT_ENGINE_STORAGE_ROOT"
+    return
+  fi
+  if [[ -n "${AGENT_MEMORY_STORAGE_ROOT:-}" ]]; then
+    printf "%s\n" "$AGENT_MEMORY_STORAGE_ROOT"
+    return
+  fi
+  local profile_path="$ACE_ROOT/memory/local/installation-profile.json"
+  local profile_storage=""
+  if [[ -f "$profile_path" ]] && command -v python3 >/dev/null 2>&1; then
+    profile_storage="$(python3 -c 'import json, pathlib, sys
+profile = pathlib.Path(sys.argv[1])
+root = pathlib.Path(sys.argv[2])
+data = json.loads(profile.read_text(encoding="utf-8"))
+raw = str(data.get("storage", {}).get("memory_root") or "").strip()
+if raw:
+    path = pathlib.Path(raw).expanduser()
+    if not path.is_absolute():
+        path = root / path
+    resolved = path.resolve()
+    if resolved.name == "memory" and resolved.parent.name == ".agent-context-engine":
+        resolved = resolved.parent.parent
+    print(resolved)' "$profile_path" "$ACE_ROOT" 2>/dev/null || true)"
+  fi
+  if [[ -n "$profile_storage" ]]; then
+    printf "%s\n" "$profile_storage"
+    return
+  fi
+  printf "%s\n" "$HOME"
+}
+STORAGE_ROOT="$(_resolve_storage_root)"
+
+LAUNCH_CWD="$(pwd)"
+
+if [[ ! -d "$ACE_ROOT" ]]; then
+  echo "claude-ace: missing Agent Context Engine root: $ACE_ROOT" >&2
   exit 1
 fi
 
-if [[ ! -f "$WORKMANAGEMENT_ROOT/.claude/settings.json" ]]; then
-  echo "claude-ace: missing hooks config: $WORKMANAGEMENT_ROOT/.claude/settings.json" >&2
+# Resolve the CLI entrypoint relative to the installation root.
+ACE_CLI=""
+for candidate in \
+  "$ACE_ROOT/scripts/agent-context-engine" \
+  "$ACE_ROOT/docs/skills/agent-context-engine/scripts/agent-context-engine"; do
+  if [[ -x "$candidate" ]]; then
+    ACE_CLI="$candidate"
+    break
+  fi
+done
+if [[ -z "$ACE_CLI" ]]; then
+  echo "claude-ace: cannot find agent-context-engine CLI under $ACE_ROOT" >&2
   exit 1
 fi
 
-cd "$WORKMANAGEMENT_ROOT"
+# Keep the caller's current folder as the project directory. Parent hook
+# configs must not silently move a wrapper-launched session to another folder.
+PROJECT_DIR="$LAUNCH_CWD"
+
+CENTRAL_HUB="${STORAGE_ROOT}/.agent-context-engine/hooks/claude/hook_adapter.sh"
+
+_SYSTEM_MODE="$(ace_system_mode "$ACE_ROOT" "$ACE_CLI")"
+if [[ "$_SYSTEM_MODE" != "enabled" ]]; then
+  ace_print_suspended_warning "$ACE_ROOT" "$_SYSTEM_MODE"
+  export AGENT_MEMORY_LAUNCH_CWD="$LAUNCH_CWD"
+  export AGENT_CONTEXT_ENGINE_ROOT="$ACE_ROOT"
+  export AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT="claude"
+  cd "$PROJECT_DIR"
+  set +u
+  exec claude "${PASSTHROUGH_ARGS[@]}"
+fi
+
+# i18n: choose English or German based on environment hints.
+_ACE_LANGUAGE="en"
+_ace_lower() {
+  printf "%s" "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+_profile_language() {
+  local profile_path="$ACE_ROOT/memory/local/installation-profile.json"
+  if [[ -f "$profile_path" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json, pathlib, sys
+profile = pathlib.Path(sys.argv[1])
+try:
+    data = json.loads(profile.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+language = str((data.get("monitor") or {}).get("language") or "").strip().lower()
+if language:
+    print(language)' "$profile_path" 2>/dev/null || true
+  fi
+}
+
+_INSTALL_LANGUAGE="$(_profile_language)"
+if [[ -n "${AGENT_CONTEXT_ENGINE_LANGUAGE:-}" ]]; then
+  case "$(_ace_lower "$AGENT_CONTEXT_ENGINE_LANGUAGE")" in
+    de*) _ACE_LANGUAGE="de" ;;
+  esac
+elif [[ -n "$_INSTALL_LANGUAGE" ]]; then
+  case "$(_ace_lower "$_INSTALL_LANGUAGE")" in
+    de*) _ACE_LANGUAGE="de" ;;
+  esac
+elif [[ -n "${LANG:-}" ]]; then
+  case "$(_ace_lower "$LANG")" in
+    de*) _ACE_LANGUAGE="de" ;;
+  esac
+elif [[ -n "${LC_ALL:-}" ]]; then
+  case "$(_ace_lower "$LC_ALL")" in
+    de*) _ACE_LANGUAGE="de" ;;
+  esac
+fi
+
+_msg_not_active() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "Agent Context Engine Hooks sind in %s (oder einem Elternverzeichnis) nicht aktiv.\n" "$1"
+  else
+    printf "Agent Context Engine hooks are not active in %s (or a parent directory).\n" "$1"
+  fi
+}
+
+_msg_no_hooks_found() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "Keine lokale .claude/settings.json in diesem Projektverzeichnis gefunden.\n"
+  else
+    printf "No local .claude/settings.json found in this project directory.\n"
+  fi
+}
+
+_msg_project_dir() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "Projektverzeichnis: %s\n" "$1"
+  else
+    printf "Project directory: %s\n" "$1"
+  fi
+}
+
+_msg_activate_prompt() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "Hooks hier aktivieren? [j/N] "
+  else
+    printf "Activate hooks here? [y/N] "
+  fi
+}
+
+_msg_invalid_reply() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "Bitte mit j/y fuer Ja oder n fuer Nein antworten.\n"
+  else
+    printf "Please answer y/j for yes or n for no.\n"
+  fi
+}
+
+_confirm_activation() {
+  local reply
+  while true; do
+    read -r reply
+    case "$reply" in
+      [YyJj]) return 0 ;;
+      ""|[Nn]) return 1 ;;
+      *) _msg_invalid_reply; _msg_activate_prompt ;;
+    esac
+  done
+}
+
+_msg_activate_start() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "claude-ace: Aktiviere Agent Context Engine Hooks in %s ...\n" "$1"
+  else
+    printf "claude-ace: activating Agent Context Engine hooks in %s ...\n" "$1"
+  fi
+}
+
+_msg_abort() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "claude-ace: Abbruch. Führe '%s integration-hooks --client claude --target <projekt-dir> --action enable' aus oder verwende 'claude-ace --activate-here'.\n" "$1" >&2
+  else
+    printf "claude-ace: aborting. Run '%s integration-hooks --client claude --target <project-dir> --action enable' or use 'claude-ace --activate-here'.\n" "$1" >&2
+  fi
+}
+
+_msg_noninteractive() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "claude-ace: Agent Context Engine Hooks sind in %s nicht aktiv. Führe '%s integration-hooks --client claude --target <projekt-dir> --action enable' aus oder verwende 'claude-ace --activate-here'.\n" "$1" "$2" >&2
+  else
+    printf "claude-ace: Agent Context Engine hooks are not active in %s. Run '%s integration-hooks --client claude --target <project-dir> --action enable' or use 'claude-ace --activate-here'.\n" "$1" "$2" >&2
+  fi
+}
+
+_msg_cannot_activate() {
+  if [[ "$_ACE_LANGUAGE" == "de" ]]; then
+    printf "claude-ace: Kann Hooks in diesem Projektverzeichnis nicht aktivieren.\n" >&2
+  else
+    printf "claude-ace: cannot activate hooks in this project directory.\n" >&2
+  fi
+}
+
+needs_activation() {
+  [[ -z "$PROJECT_DIR" ]] && return 0
+  local config_path="$PROJECT_DIR/.claude/settings.json"
+  local adapter_path="$PROJECT_DIR/.claude/hooks/hook_adapter.sh"
+  local binding_path="$PROJECT_DIR/.claude/agent-memory-binding.json"
+  [[ ! -f "$config_path" ]] && return 0
+  python3 - "$config_path" "$PROJECT_DIR" <<'PY' || return 0
+import json
+import sys
+from pathlib import Path
+
+expected_events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop"]
+expected_path = str(Path(sys.argv[2]).expanduser().resolve() / ".claude" / "hooks" / "hook_adapter.sh")
+expected_command = "'" + expected_path.replace("'", "'\"'\"'") + "'"
+
+try:
+    data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+hooks = data.get("hooks")
+if not isinstance(hooks, dict):
+    raise SystemExit(1)
+for event in expected_events:
+    groups = hooks.get(event)
+    if not isinstance(groups, list):
+        raise SystemExit(1)
+    found = False
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        for hook in group.get("hooks") or []:
+            if isinstance(hook, dict) and hook.get("type") == "command" and hook.get("command") == expected_command:
+                found = True
+                break
+        if found:
+            break
+    if not found:
+        raise SystemExit(1)
+PY
+  [[ ! -f "$binding_path" ]] && return 0
+  python3 - "$binding_path" "$ACE_ROOT" <<'PY' || return 0
+import json
+import sys
+from pathlib import Path
+
+try:
+    data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+expected_root = str(Path(sys.argv[2]).expanduser().resolve())
+installation_root = str(Path(str(data.get("installation_root") or "")).expanduser().resolve())
+if data.get("client") != "claude" or installation_root != expected_root:
+    raise SystemExit(1)
+cli = str(data.get("agent_memory_cli") or "").strip()
+if not cli or not Path(cli).expanduser().exists():
+    raise SystemExit(1)
+PY
+  [[ ! -e "$adapter_path" ]] && return 0
+  # The adapter should be a symlink resolving to the central hub.
+  if [[ -L "$adapter_path" ]]; then
+    local resolved
+    resolved="$(readlink "$adapter_path" 2>/dev/null || true)"
+    [[ "$resolved" == "$CENTRAL_HUB" ]] || return 0
+    return 1
+  fi
+  return 0
+}
+
+activate_here() {
+  if [[ -z "$PROJECT_DIR" ]]; then
+    PROJECT_DIR="$LAUNCH_CWD"
+  fi
+  _msg_activate_start "$PROJECT_DIR"
+  "$ACE_CLI" integration-hooks --client claude --target "$PROJECT_DIR" --action enable
+}
+
+if needs_activation; then
+  if [[ "$ACTIVATE_HERE" -eq 1 ]]; then
+    activate_here || exit 1
+  elif [[ -t 0 && -t 2 ]]; then
+    _msg_not_active "$LAUNCH_CWD"
+    if [[ -z "$PROJECT_DIR" ]]; then
+      _msg_no_hooks_found
+    else
+      _msg_project_dir "$PROJECT_DIR"
+    fi
+    _msg_activate_prompt
+    if _confirm_activation; then
+      activate_here || exit 1
+    else
+      _msg_abort "$ACE_CLI"
+      exit 1
+    fi
+  else
+    _msg_noninteractive "$LAUNCH_CWD" "$ACE_CLI"
+    exit 1
+  fi
+fi
+
+if needs_activation; then
+  _msg_noninteractive "$LAUNCH_CWD" "$ACE_CLI"
+  exit 1
+fi
+
 export AGENT_MEMORY_LAUNCH_CWD="$LAUNCH_CWD"
-export AGENT_CONTEXT_ENGINE_ROOT="$WORKMANAGEMENT_ROOT"
+export AGENT_CONTEXT_ENGINE_ROOT="$ACE_ROOT"
 export AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT="claude"
-exec claude "$@"
+
+if [[ -n "$PROJECT_DIR" ]]; then
+  cd "$PROJECT_DIR"
+fi
+set +u
+exec claude "${PASSTHROUGH_ARGS[@]}"

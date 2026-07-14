@@ -8,4 +8,8 @@ while [[ -L "$SOURCE" ]]; do
   [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+source "$SCRIPT_DIR/lib/ace-wrapper-root.sh"
+export AGENT_CONTEXT_ENGINE_ROOT="$(
+  ace_resolve_wrapper_root "$SCRIPT_DIR" "$0" "antigravity-ace" "agy-ace"
+)"
 exec "$SCRIPT_DIR/agy-ace" "$@"

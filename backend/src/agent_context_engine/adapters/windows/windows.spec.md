@@ -34,15 +34,17 @@ Windows platform path.
   `schtasks /TR` has a short command-length limit, the task target is a
   generated `memory/local/windows-scheduler-run.cmd` script rather than the
   full scheduler command line.
+- `system_scheduler.py`: suspension-time task status/disable/restore for only
+  the installation-owned task. Status parses `schtasks /XML` instead of
+  localized display text and treats unreadable installed-task state
+  conservatively as active so suspension still attempts to disable it.
 - `path_quoting.py`: Windows quoting helpers
 - `process_launch.py`: process launch metadata
-  - Monitor autostart on Windows must use a Windows command-host strategy such
-    as `cmd.exe /c start "ace-monitor" /min ...` and verify the server via
-    port/API probing rather than assuming a detached Python launch stayed alive.
-  - If a command-host launch from an agent-run install does not expose a stable
-    port, autostart must fall back to a Windows Task Scheduler launcher script
-    under the active memory root so the monitor is not tied to the transient
-    agent tool process tree.
+  - Installer monitor autostart on Windows must use a root-specific owned Task
+    Scheduler launcher script under the active memory root, not an unowned
+    detached Python or command-host process.
+  - Startup success requires matching installation/memory identity from
+    `/api/status`; task creation and port acceptance are insufficient.
 - `workspace_binding.py`: workspace binding metadata
 - `system_open.py`: local file open behavior
 - `executable_permissions.py`: no-op executable permission strategy

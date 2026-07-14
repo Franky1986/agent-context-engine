@@ -7,10 +7,28 @@ if [ "${AGENT_MEMORY_DREAM:-0}" = "1" ] || [ "${AGENT_MEMORY_INTERNAL_RUN:-0}" =
 fi
 
 EVENT="${1:-}"
-WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MEMORY_ROOT="${AGENT_CONTEXT_ENGINE_ROOT:-__AGENT_CONTEXT_ENGINE_ROOT__}"
-HOOKS_STATE="$MEMORY_ROOT/memory/local/hooks-state.json"
-LOG="$MEMORY_ROOT/memory/logs/antigravity-hook.err.log"
+ROOT="${AGENT_CONTEXT_ENGINE_ROOT:-}"
+if [ -z "$ROOT" ]; then
+  echo "antigravity hook adapter: AGENT_CONTEXT_ENGINE_ROOT is not set" >&2
+  printf '{}\n'
+  exit 0
+fi
+
+SCRIPT="${AGENT_CONTEXT_ENGINE_SCRIPT:-}"
+if [ -z "$SCRIPT" ]; then
+  if [ -f "$ROOT/scripts/agent_context_engine.py" ]; then
+    SCRIPT="$ROOT/scripts/agent_context_engine.py"
+  elif [ -f "$ROOT/docs/skills/agent-context-engine/scripts/agent_context_engine.py" ]; then
+    SCRIPT="$ROOT/docs/skills/agent-context-engine/scripts/agent_context_engine.py"
+  else
+    echo "antigravity hook adapter: cannot find agent_context_engine.py under $ROOT" >&2
+    printf '{}\n'
+    exit 0
+  fi
+fi
+
+WORKSPACE_ROOT="${AGENT_MEMORY_LAUNCH_CWD:-${PWD}}"
+LOG="$ROOT/memory/logs/antigravity-hook.err.log"
 STATE_DIR="$WORKSPACE_ROOT/.agents/hooks/.agent-memory-state"
 mkdir -p "$(dirname "$LOG")" "$STATE_DIR"
 TMPIN="$(mktemp)"
@@ -18,34 +36,6 @@ TMPPAYLOAD="$(mktemp)"
 TMPOUT="$(mktemp)"
 TMPERR="$(mktemp)"
 trap 'rm -f "$TMPIN" "$TMPPAYLOAD" "$TMPOUT" "$TMPERR"' EXIT
-
-if ! python3 - "$HOOKS_STATE" antigravity <<'PY'
-import json
-import sys
-from pathlib import Path
-
-
-path = Path(sys.argv[1])
-runner = sys.argv[2]
-if not path.exists():
-    raise SystemExit(0)
-try:
-    state = json.loads(path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
-if state.get("enabled") is False:
-    raise SystemExit(1)
-runner_state = state.get("runners", {}).get(runner)
-if isinstance(runner_state, dict) and runner_state.get("enabled") is False:
-    raise SystemExit(1)
-if runner_state is False:
-    raise SystemExit(1)
-raise SystemExit(0)
-PY
-then
-  printf '{}\n'
-  exit 0
-fi
 
 cat > "$TMPIN"
 
@@ -203,8 +193,9 @@ run_hook() {
   local client_event="$1"
   local output_target="$2"
   set +e
-  env AGENT_CONTEXT_ENGINE_ROOT="$MEMORY_ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$MEMORY_ROOT/__AGENT_MEMORY_SCRIPT__" log-hook --client antigravity \
+  env AGENT_CONTEXT_ENGINE_ROOT="$ROOT" AGENT_MEMORY_LAUNCH_CWD="${AGENT_MEMORY_LAUNCH_CWD:-${PWD}}" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client antigravity \
     < "$TMPPAYLOAD" \
+    3</dev/null \
     > "$output_target" \
     2> "$TMPERR"
   local code=$?

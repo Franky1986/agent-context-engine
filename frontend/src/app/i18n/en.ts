@@ -833,6 +833,18 @@ const en = {
   'pilot.noReason': 'no reason',
   'pilot.expires': 'expires',
   'pilot.noOverrides': 'No active scoped overrides.',
+  'pilot.systemControl': 'System control',
+  'pilot.systemMode.enabled': 'Enabled',
+  'pilot.systemMode.disabling': 'Disabling',
+  'pilot.systemMode.disabled': 'Disabled',
+  'pilot.systemMode.enabling': 'Enabling',
+  'pilot.systemMode.partial': 'Partial',
+  'pilot.systemEnabled': 'Normal hook and background admission is open.',
+  'pilot.systemSuspended': 'The monitor is read-only. Normal hooks and new background work are suspended.',
+  'pilot.systemReason': 'Reason',
+  'pilot.systemProvenance': 'Control provenance',
+  'pilot.systemProvenanceInstrumented': 'instrumented runner event; not OS-authenticated user presence',
+  'pilot.systemRecovery': 'Send this exact line yourself in an activated runner chat. Do not execute it as an agent tool.',
 } as const;
 
 export default en;

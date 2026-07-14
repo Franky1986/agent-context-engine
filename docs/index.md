@@ -49,6 +49,7 @@ development references in this repository.
 - [Instance Isolation / Workspace Binding Epic](epics/instance-isolation-and-workspace-binding-plan.md)
 - [Platform Capability And Agent Flow Refactor Epic](epics/platform-capability-agent-flow-refactor-plan.md)
 - [Platform Capability And Agent Flow Refactor Findings Baseline (2026-06-25)](epics/platform-capability-agent-flow-refactor-findings-2026-06-25.md)
+- [Direct-User Full-System Suspension Epic](epics/direct-user-system-suspension-plan.md)
 
 ## Archive
 
@@ -116,12 +117,14 @@ python3 scripts/update_docs_index.py --check
 - [Spec: Graph Application Boundary](../backend/src/agent_context_engine/application/graph/graph.spec.md) - `backend/src/agent_context_engine/application/graph/graph.spec.md`
 - [Spec: Graphing Engine Boundary](../backend/src/agent_context_engine/application/graphing/graphing.spec.md) - `backend/src/agent_context_engine/application/graphing/graphing.spec.md`
 - [Spec: Hook And Wrapper Rendering Application Boundary](../backend/src/agent_context_engine/application/hook_rendering/hook_rendering.spec.md) - `backend/src/agent_context_engine/application/hook_rendering/hook_rendering.spec.md`
+- [Spec: Central Hook Adapter Hub](../backend/src/agent_context_engine/application/hooks.spec.md) - `backend/src/agent_context_engine/application/hooks.spec.md`
 - [Spec: Integration Management Application Boundary](../backend/src/agent_context_engine/application/integrations.spec.md) - `backend/src/agent_context_engine/application/integrations.spec.md`
 - [Spec: Platform Capability Application Boundary](../backend/src/agent_context_engine/application/platform/platform.spec.md) - `backend/src/agent_context_engine/application/platform/platform.spec.md`
 - [Spec: Retrieval Application Boundary](../backend/src/agent_context_engine/application/retrieval.spec.md) - `backend/src/agent_context_engine/application/retrieval.spec.md`
 - [Spec: Risk Review Application Boundary](../backend/src/agent_context_engine/application/risk_api.spec.md) - `backend/src/agent_context_engine/application/risk_api.spec.md`
 - [Spec: Scheduler Application Boundary](../backend/src/agent_context_engine/application/scheduler.spec.md) - `backend/src/agent_context_engine/application/scheduler.spec.md`
 - [Spec: Session Handover Application Boundary](../backend/src/agent_context_engine/application/sessions/sessions.spec.md) - `backend/src/agent_context_engine/application/sessions/sessions.spec.md`
+- [Spec: Direct-User System Suspension](../backend/src/agent_context_engine/application/system_control.spec.md) - `backend/src/agent_context_engine/application/system_control.spec.md`
 - [Spec: Wrapper Publication Application Boundary](../backend/src/agent_context_engine/application/wrapper_publication/wrapper_publication.spec.md) - `backend/src/agent_context_engine/application/wrapper_publication/wrapper_publication.spec.md`
 - [Spec: Graph Domain Boundary](../backend/src/agent_context_engine/domain/graph.spec.md) - `backend/src/agent_context_engine/domain/graph.spec.md`
 - [Spec: Risk Domain Boundary](../backend/src/agent_context_engine/domain/risk.spec.md) - `backend/src/agent_context_engine/domain/risk.spec.md`

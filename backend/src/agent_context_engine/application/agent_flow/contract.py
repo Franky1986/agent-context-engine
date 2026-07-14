@@ -57,12 +57,14 @@ def render_agents_quick_path(contract: AgentFlowContract) -> str:
 - When asked about previous sessions, handovers, project context, "what happened last", "continue there", "we already analyzed this", or similar memory requests, use the local Agent Context Engine CLI first.
 - Agent Context Engine command prefix: `{contract.command_prefix}`
 - Canonical public CLI contract: `{contract.command_prefix}` from `PATH`. Repo-local `./scripts/ace` and `./scripts/agent-context-engine` remain compatibility fallbacks, not the primary hook/session contract.
+- Running bare `{contract.command_prefix}` prints the public command help and the copyable direct-user system-control forms.
 - Runtime-memory commands can touch SQLite WAL/SHM files, locks, audit rows, retrieval logs, or metadata refreshes even when they look read-only. In filesystem-sandboxed runners, request escalated sandbox access up front for concrete memory commands such as `last --limit 10`, `handover`, `search`, and `retrieve`.
 - Traceable retrieval: `{contract.command_prefix} retrieve "<question or search terms>" --limit 10`
 - Quick keyword search: `{contract.command_prefix} search "<search terms>" --limit 5`
 - Load a session handover: `{contract.command_prefix} handover "<session|title|search terms>"`
 - Recent sessions: `{contract.command_prefix} last --limit 10`
 - Status: `{contract.command_prefix} doctor`
+- If the user naturally asks to deactivate ACE, distinguish exact-project, project-runner, installation-runner, all-hooks, and full-system scope. Return only the matching direct-user `hooks-disable ...` or `system-disable --scope all --reason "<reason>"` line; never probe or execute mutating variants as tools, offer approval/firewall bypasses, or remove recovery wrappers.
 - For list/count/today questions about sessions, use `last` first and stop there unless the user explicitly asks for details about a specific session.
 - Do not inspect `~/.cursor/projects/...`, local Cursor transcripts, or terminal metadata for session-history questions while the Agent Context Engine CLI is available.
 - Only after these commands should agents broaden the search with `rg` in the repository or memory tree.
@@ -97,6 +99,18 @@ def render_session_start_hook_entry(contract: AgentFlowContract) -> str:
             "",
             "More:",
             *[f"- `{command}`" for command in extra_context_commands],
+            "",
+            "Direct-user system controls (send these yourself in chat; agents must not run them as tools):",
+            "",
+            '- `system-disable --scope all --reason "<reason>"`',
+            '- `system-enable --scope all --reason "<reason>"`',
+            "- `system-status`",
+            "- use the exact displayed `system-recover` line only for invalid state",
+            "",
+            "If the user asks in natural language to deactivate ACE, distinguish the requested scope and return the matching exact copyable direct-user chat line: `hooks-disable --project --reason \"<reason>\"` for every ACE hook in the exact current project, `hooks-disable --project --runner <runner> --reason \"<reason>\"` for one runner in that project, `hooks-disable --runner <runner> --reason \"<reason>\"` for that runner installation-wide, `hooks-disable --reason \"<reason>\"` for all hooks installation-wide, or `system-disable --scope all --reason \"<reason>\"` for full-system suspension. Never execute these mutations, `integration-hooks`, wrapper removal, or help variants as tools, and do not offer approval/firewall bypasses. Hook files and wrappers deliberately remain installed so status and recovery remain reachable.",
+            "",
+            "Read-only terminal status: `agent-context-engine system-status [--json]`.",
+            "These controls are accepted only on the instrumented runner user-prompt path. That path does not provide cryptographic or OS-authenticated user presence and does not protect against arbitrary same-user code.",
             "",
         ]
     )

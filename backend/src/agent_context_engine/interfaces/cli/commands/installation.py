@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import ipaddress
 import json
 import os
 import re
-import signal
+import shlex
 import socket
 import shutil
 import subprocess
@@ -14,9 +16,24 @@ import time
 import webbrowser
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 
-from ....infrastructure.config import DEFAULT_STORAGE_SCHEMA_VERSION, ROOT, ROOT_ENV_VAR, SKILL_ROOT, STORAGE_ROOT_ENV_VAR, ensure_repos_index as ensure_runtime_repos_index, legacy_repos_index_path, safe_slug, write_repos_index_text
+from ....infrastructure.config import (
+    DEFAULT_STORAGE_SCHEMA_VERSION,
+    ROOT,
+    ROOT_ENV_VAR,
+    SKILL_ROOT,
+    STORAGE_ROOT_ENV_VAR,
+    active_root_path,
+    central_hub_path,
+    ensure_repos_index as ensure_runtime_repos_index,
+    legacy_repos_index_path,
+    safe_slug,
+    storage_root,
+    write_repos_index_text,
+)
 from ....application.installation import (
     ensure_monitor_frontend_build,
     ensure_runtime_venv,
@@ -41,7 +58,6 @@ from ....application.instance_profile import (
     installation_profile_path,
     load_installation_profile,
     load_link_registry,
-    mark_monitor_runtime_entries_stopped,
     normalize_launchagent_profile,
     preferred_agent_memory_cli_for_root,
     load_user_config,
@@ -59,6 +75,7 @@ from ....application.instance_profile import (
 )
 from ....adapters.launchagent import DEFAULT_ENV_FILE, DEFAULT_LABEL, launchagent_runtime_status
 from ....application.integrations import (
+    _project_local_hook_command,
     antigravity_status,
     append_integration_history,
     cursor_background_runner_status,
@@ -69,12 +86,14 @@ from ....application.integrations import (
     integration_hook_command,
     integration_summary,
     manage_integration_hooks,
+    integration_projects_status,
     opencode_status,
     shell_hook_adapter_status,
     workspace_binding_status,
     write_workspace_binding,
 )
 from ....application.hooks_state import hooks_control_status, set_hooks_enabled
+from ....application.hook_rendering import HUB_RENDER_SPEC_VERSION
 
 
 def copy_text(src: Path, dest: Path, replacements: dict[str, str] | None = None) -> None:
@@ -233,6 +252,7 @@ def _launchagent_recommendation_source_text(source: str, *, language: str = "en"
 GLOBAL_WRAPPERS = (
     "codex-ace",
     "claude-ace",
+    "cursor-ace",
     "agy-ace",
     "gemini-ace",
     "opencode-ace",
@@ -247,12 +267,14 @@ GLOBAL_CLI_COMMAND_NAME = "agent-context-engine"
 PUBLIC_WRAPPER_NAME_TO_SCRIPT = {
     "codex-memory": "codex-ace",
     "claude-memory": "claude-ace",
+    "cursor-memory": "cursor-ace",
     "agy-memory": "agy-ace",
     "antigravity-memory": "antigravity-ace",
     "gemini-memory": "gemini-ace",
     "opencode-memory": "opencode-ace",
     "codex-ace": "codex-ace",
     "claude-ace": "claude-ace",
+    "cursor-ace": "cursor-ace",
     "agy-ace": "agy-ace",
     "antigravity-ace": "antigravity-ace",
     "gemini-ace": "gemini-ace",
@@ -1461,6 +1483,7 @@ def _apply_install_plan(args: argparse.Namespace, plan: dict[str, object]) -> No
     for flag_name, wrapper_name in [
         ("link_codex_memory", "codex-ace"),
         ("link_claude_memory", "claude-ace"),
+        ("link_cursor_memory", "cursor-ace"),
         ("link_agy_memory", "agy-ace"),
         ("link_antigravity_memory", "antigravity-ace"),
         ("link_gemini_memory", "gemini-ace"),
@@ -1599,7 +1622,7 @@ def _run_post_install_checks(target: Path, *, language: str, include_doctor: boo
             check=False,
         )
         doctor_output = "\n".join(part for part in [doctor.stdout.strip(), doctor.stderr.strip()] if part)
-        if doctor_output:
+        if doctor.returncode != 0 and doctor_output:
             print(doctor_output)
         doctor_exit = int(doctor.returncode)
         doctor_summary = str(doctor_exit)
@@ -1614,8 +1637,61 @@ def _run_post_install_checks(target: Path, *, language: str, include_doctor: boo
         query_expansion_runner=None,
     )
     check_payload = _installation_check_payload(root=target, args=check_args)
-    _print_installation_check(check_payload)
-    check_exit = 0
+    integration_items = list(((check_payload.get("integrations") or {}).get("items") or []))
+    headless_readiness: list[str] = []
+    for client in ("codex", "claude"):
+        item = next((candidate for candidate in integration_items if str(candidate.get("client") or "") == client), None)
+        if not item:
+            continue
+        status = "ready" if bool(item.get("ready")) else str(item.get("readiness_status") or "not_ready")
+        headless_readiness.append(f"{client}={status}")
+    if headless_readiness:
+        print(
+            _ui_text(
+                language,
+                en="authoritative post-install headless CLI readiness: ",
+                de="Massgebliche Post-Installationsbereitschaft der Headless-CLIs: ",
+            )
+            + ", ".join(headless_readiness)
+        )
+    findings = list(check_payload.get("findings") or [])
+    error_count = sum(1 for finding in findings if str(finding.get("severity") or "") == "error")
+    notice_count = sum(1 for finding in findings if str(finding.get("severity") or "") == "notice")
+    warning_count = len(findings) - error_count - notice_count
+    check_exit = 1 if error_count else 0
+    if findings:
+        print(
+            _ui_text(
+                language,
+                en=(
+                    f"post-install check recorded {error_count} error(s), {warning_count} warning(s), "
+                    f"and {notice_count} maintenance notice(s); "
+                    "run `agent-context-engine check-installation` for details"
+                ),
+                de=(
+                    f"Post-Installationspruefung hat {error_count} Fehler, {warning_count} Warnung(en) "
+                    f"und {notice_count} Wartungshinweis(e) erfasst; "
+                    "Details mit `agent-context-engine check-installation`"
+                ),
+            )
+        )
+        registry_notice_count = sum(
+            1 for finding in findings if str(finding.get("code") or "").endswith("_central_registry_drift")
+        )
+        if registry_notice_count:
+            print(
+                _ui_text(
+                    language,
+                    en=(
+                        f"maintenance notices: {registry_notice_count} historical project hook binding(s) need reconciliation; "
+                        "the current installation prerequisites are healthy"
+                    ),
+                    de=(
+                        f"Wartungshinweise: {registry_notice_count} historische Projekt-Hook-Bindung(en) muessen abgeglichen werden; "
+                        "die Voraussetzungen der aktuellen Installation sind gesund"
+                    ),
+                )
+            )
     print(
         _ui_text(
             language,
@@ -1663,6 +1739,7 @@ def _linked_wrapper_specs(args: argparse.Namespace) -> list[str]:
     for flag_name, wrapper_name in [
         ("link_codex_memory", "codex-ace"),
         ("link_claude_memory", "claude-ace"),
+        ("link_cursor_memory", "cursor-ace"),
         ("link_agy_memory", "agy-ace"),
         ("link_antigravity_memory", "antigravity-ace"),
         ("link_gemini_memory", "gemini-ace"),
@@ -1756,7 +1833,6 @@ def _monitor_start_command(target: Path, *, runner: str, host: str, port: int, l
         str(port),
         "--language",
         language,
-        "--replace-existing",
         "--no-open",
     ]
 
@@ -1768,37 +1844,462 @@ def _open_monitor_howto(*, host: str, port: int, runner: str, language: str) -> 
     threading.Timer(0.35, lambda: webbrowser.open(url)).start()
 
 
-def _stop_superseded_monitors_for_memory_root(*, target: Path, memory_root: Path) -> list[str]:
+def _superseded_monitor_candidates(*, target: Path, memory_root: Path) -> list[dict[str, object]]:
     normalized_target = str(target.resolve())
     normalized_memory_root = str(memory_root.resolve())
-    actions: list[str] = []
-    affected = False
-    for entry in active_monitor_runtime_entries():
+    candidates: list[dict[str, object]] = []
+    seen: set[tuple[str, int, str]] = set()
+    for entry in active_monitor_runtime_entries(include_shutdown_token=True):
         if not isinstance(entry, dict):
             continue
         entry_root = str(entry.get("installation_root") or "").strip()
         entry_memory_root = str(entry.get("memory_root") or "").strip()
-        if entry_root == normalized_target or entry_memory_root != normalized_memory_root:
+        if not entry_root or entry_root == normalized_target or entry_memory_root != normalized_memory_root:
             continue
-        pid = int(entry.get("pid") or 0)
-        if pid > 0:
-            try:
-                os.kill(pid, signal.SIGTERM)
-                actions.append(f"terminated superseded monitor pid={pid} root={entry_root}")
-            except ProcessLookupError:
-                actions.append(f"superseded monitor already exited pid={pid} root={entry_root}")
-            except PermissionError:
-                actions.append(f"could not terminate superseded monitor pid={pid} root={entry_root}: permission denied")
-        affected = True
-    if affected:
-        time.sleep(0.35)
-        mark_monitor_runtime_entries_stopped(
-            memory_root=memory_root,
-            exclude_installation_root=target,
-            reason_status="superseded",
+        host = str(entry.get("active_host") or entry.get("configured_host") or DEFAULT_MONITOR_HOST).strip()
+        try:
+            port = int(entry.get("active_port") or entry.get("configured_port") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not host or port <= 0 or _local_monitor_probe_host(host) is None:
+            continue
+        key = (host, port, entry_root)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(
+            {
+                "host": host,
+                "port": port,
+                "installation_root": entry_root,
+                "shutdown_token": str(entry.get("shutdown_token") or ""),
+            }
         )
-        active_monitor_runtime_entries(prune=True)
-    return actions
+    if os.name != "nt":
+        try:
+            processes = subprocess.run(
+                ["ps", "-axo", "pid=,command="],
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=3,
+            )
+        except (OSError, subprocess.SubprocessError):
+            processes = None
+        for line in (processes.stdout.splitlines() if processes and processes.returncode == 0 else []):
+            match = re.match(r"^\s*\d+\s+(.+)$", line)
+            if not match:
+                continue
+            try:
+                tokens = shlex.split(match.group(1))
+            except ValueError:
+                continue
+            try:
+                monitor_index = tokens.index("monitor")
+            except ValueError:
+                continue
+            command_prefix = " ".join(tokens[:monitor_index])
+            if "agent_context_engine.py" not in command_prefix and "agent-context-engine" not in command_prefix:
+                continue
+            monitor_args = tokens[monitor_index + 1 :]
+            host = DEFAULT_MONITOR_HOST
+            port = DEFAULT_MONITOR_PORT
+            if "--host" in monitor_args:
+                index = monitor_args.index("--host")
+                if index + 1 < len(monitor_args):
+                    host = str(monitor_args[index + 1]).strip() or DEFAULT_MONITOR_HOST
+            if "--port" in monitor_args:
+                index = monitor_args.index("--port")
+                if index + 1 < len(monitor_args):
+                    try:
+                        port = int(monitor_args[index + 1])
+                    except ValueError:
+                        continue
+            payload = _monitor_status_payload(host, port)
+            if not payload:
+                continue
+            entry_root = str(payload.get("root") or payload.get("install_root") or "").strip()
+            entry_memory_root = str(payload.get("memory_root") or "").strip()
+            if not entry_root or entry_root == normalized_target or entry_memory_root != normalized_memory_root:
+                continue
+            key = (host, port, entry_root)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append({"host": host, "port": port, "installation_root": entry_root})
+    return candidates
+
+
+def _monitor_status_payload(host: str, port: int, *, timeout: float = 0.5) -> dict[str, object] | None:
+    probe_host = _local_monitor_probe_host(host)
+    if probe_host is None:
+        return None
+    url_host = f"[{probe_host}]" if ":" in probe_host else probe_host
+    try:
+        with urlopen(f"http://{url_host}:{port}/api/status", timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _local_monitor_probe_host(host: str) -> str | None:
+    normalized = str(host or "").strip().strip("[]").lower()
+    if normalized == "localhost":
+        return "127.0.0.1"
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        return None
+    if address.is_loopback:
+        return str(address)
+    if address.is_unspecified:
+        return "::1" if address.version == 6 else "127.0.0.1"
+    return None
+
+
+def _wait_for_monitor_identity(
+    *,
+    target: Path,
+    memory_root: Path,
+    host: str,
+    port: int,
+    timeout: float = 20.0,
+) -> tuple[bool, dict[str, object] | None]:
+    expected_root = str(target.resolve())
+    expected_memory_root = str(memory_root.resolve())
+    deadline = time.monotonic() + max(0.1, timeout)
+    latest: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        latest = _monitor_status_payload(host, port)
+        if (
+            latest
+            and str(latest.get("root") or latest.get("install_root") or "").strip() == expected_root
+            and str(latest.get("memory_root") or "").strip() == expected_memory_root
+        ):
+            return True, latest
+        time.sleep(0.2)
+    return False, latest
+
+
+def _stop_submitted_monitor_launchctl_job(
+    *, host: str, port: int, expected_installation_root: str
+) -> tuple[str | None, str | None]:
+    if sys.platform != "darwin" or host not in {"127.0.0.1", "localhost", "::1"}:
+        return None, None
+    launchctl = shutil.which("launchctl")
+    if not launchctl:
+        return None, None
+    service = f"gui/{os.getuid()}/com.agent-context-engine.monitor-{port}"
+    try:
+        inspection = subprocess.run(
+            [launchctl, "print", service],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    if inspection.returncode != 0:
+        return None, None
+    ownership_evidence = inspection.stdout or ""
+    if (
+        expected_installation_root not in ownership_evidence
+        or "monitor" not in ownership_evidence
+        or str(port) not in ownership_evidence
+    ):
+        return None, f"submitted monitor job {service} exists but its ownership could not be verified"
+    try:
+        stopped = subprocess.run(
+            [launchctl, "bootout", service],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"could not unload submitted monitor job {service}: {exc}"
+    if stopped.returncode != 0:
+        detail = (stopped.stderr or stopped.stdout).strip() or f"exit {stopped.returncode}"
+        return None, f"could not unload submitted monitor job {service}: {detail}"
+    return f"unloaded submitted monitor job {service}", None
+
+
+def _stop_windows_monitor_task(
+    *,
+    port: int,
+    expected_installation_root: str,
+    memory_root: Path,
+) -> tuple[str | None, str | None]:
+    if os.name != "nt":
+        return None, None
+    scheduler_bin = shutil.which("schtasks")
+    if not scheduler_bin:
+        scheduler_bin = str(Path(os.environ.get("SystemRoot", r"C:\\Windows")) / "System32" / "schtasks.exe")
+    if not os.path.exists(scheduler_bin):
+        return None, None
+    task_name = _windows_monitor_task_name(Path(expected_installation_root))
+    script_path = _windows_monitor_start_script_path(Path(expected_installation_root), memory_root)
+    try:
+        query = subprocess.run(
+            [scheduler_bin, "/Query", "/TN", task_name, "/XML"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"could not inspect Windows monitor task {task_name}: {exc}"
+    if query.returncode != 0:
+        return None, None
+    script_text = ""
+    try:
+        script_text = script_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        pass
+    ownership_evidence = query.stdout or ""
+    if str(script_path) not in ownership_evidence or expected_installation_root not in script_text or str(port) not in script_text:
+        return None, f"Windows monitor task {task_name} exists but its ownership could not be verified"
+    try:
+        subprocess.run(
+            [scheduler_bin, "/End", "/TN", task_name],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+        deleted = subprocess.run(
+            [scheduler_bin, "/Delete", "/TN", task_name, "/F"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"could not stop Windows monitor task {task_name}: {exc}"
+    if deleted.returncode != 0:
+        detail = (deleted.stderr or deleted.stdout or "").strip()
+        return None, f"could not delete Windows monitor task {task_name}: {detail or deleted.returncode}"
+    return f"ended and removed Windows monitor task {task_name}", None
+
+
+def _stop_owned_monitor_launcher(
+    *,
+    host: str,
+    port: int,
+    expected_installation_root: str,
+    memory_root: Path,
+) -> tuple[str | None, str | None]:
+    if os.name == "nt":
+        return _stop_windows_monitor_task(
+            port=port,
+            expected_installation_root=expected_installation_root,
+            memory_root=memory_root,
+        )
+    return _stop_submitted_monitor_launchctl_job(
+        host=host,
+        port=port,
+        expected_installation_root=expected_installation_root,
+    )
+
+
+def _request_monitor_shutdown(*, host: str, port: int, token: str) -> tuple[str | None, str | None]:
+    probe_host = _local_monitor_probe_host(host)
+    if probe_host is None or not token:
+        return None, None
+    url_host = f"[{probe_host}]" if ":" in probe_host else probe_host
+    request = Request(
+        f"http://{url_host}:{port}/api/runtime/shutdown",
+        data=b"{}",
+        headers={
+            "content-type": "application/json",
+            "x-agent-context-engine-monitor-token": token,
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=2.0) as response:
+            if int(getattr(response, "status", 0) or response.getcode()) != 202:
+                return None, f"monitor shutdown at {host}:{port} returned HTTP {response.status}"
+    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        return None, f"monitor shutdown request failed at {host}:{port}: {exc}"
+    return f"requested authenticated shutdown for superseded monitor at {host}:{port}", None
+
+
+def _candidate_monitor_identity(candidate: dict[str, object]) -> tuple[str, int, str] | None:
+    host = str(candidate.get("host") or "").strip()
+    expected_root = str(candidate.get("installation_root") or "").strip()
+    try:
+        port = int(candidate.get("port") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not host or port <= 0 or not expected_root or _local_monitor_probe_host(host) is None:
+        return None
+    return host, port, expected_root
+
+
+def _verify_superseded_monitors_stay_stopped(
+    *,
+    candidates: list[dict[str, object]],
+    target: Path,
+    memory_root: Path,
+    desired_host: str | None = None,
+    desired_port: int | None = None,
+    stability_seconds: float = 8.0,
+    poll_seconds: float = 0.25,
+) -> list[str]:
+    if not candidates:
+        return []
+    expected_target = str(target.resolve())
+    expected_memory_root = str(memory_root.resolve())
+    deadline = time.monotonic() + max(0.1, stability_seconds)
+    while time.monotonic() < deadline:
+        for candidate in candidates:
+            identity = _candidate_monitor_identity(candidate)
+            if identity is None:
+                continue
+            host, port, expected_old_root = identity
+            payload = _monitor_status_payload(host, port)
+            if not payload:
+                continue
+            observed_root = str(payload.get("root") or payload.get("install_root") or "").strip()
+            observed_memory_root = str(payload.get("memory_root") or "").strip()
+            if (
+                host == desired_host
+                and port == desired_port
+                and observed_root == expected_target
+                and observed_memory_root == expected_memory_root
+            ):
+                continue
+            if observed_root == expected_old_root and observed_memory_root == expected_memory_root:
+                return [f"superseded monitor reappeared at {host}:{port} root={observed_root}"]
+            return [
+                f"unexpected listener at {host}:{port} root={observed_root or '-'} "
+                f"memory_root={observed_memory_root or '-'}"
+            ]
+        time.sleep(max(0.01, poll_seconds))
+    return []
+
+
+def _wait_for_superseded_monitors_to_stop(
+    *,
+    candidates: list[dict[str, object]],
+    memory_root: Path,
+    timeout: float = 5.0,
+    poll_seconds: float = 0.2,
+) -> list[str]:
+    expected_memory_root = str(memory_root.resolve())
+    pending = list(candidates)
+    deadline = time.monotonic() + max(0.1, timeout)
+    while pending and time.monotonic() < deadline:
+        remaining: list[dict[str, object]] = []
+        for candidate in pending:
+            identity = _candidate_monitor_identity(candidate)
+            if identity is None:
+                continue
+            host, port, expected_root = identity
+            payload = _monitor_status_payload(host, port)
+            if not payload:
+                continue
+            observed_root = str(payload.get("root") or payload.get("install_root") or "").strip()
+            observed_memory_root = str(payload.get("memory_root") or "").strip()
+            if observed_root != expected_root or observed_memory_root != expected_memory_root:
+                return [
+                    f"unexpected listener while stopping {host}:{port} root={observed_root or '-'} "
+                    f"memory_root={observed_memory_root or '-'}"
+                ]
+            remaining.append(candidate)
+        pending = remaining
+        if pending:
+            time.sleep(max(0.01, poll_seconds))
+    return [
+        f"superseded monitor did not stop at {host}:{port} root={expected_root}"
+        for candidate in pending
+        if (identity := _candidate_monitor_identity(candidate)) is not None
+        for host, port, expected_root in (identity,)
+    ]
+
+
+def _stop_superseded_monitors_for_memory_root(
+    *,
+    target: Path,
+    memory_root: Path,
+    candidates: list[dict[str, object]] | None = None,
+) -> tuple[list[str], list[str]]:
+    normalized_memory_root = str(memory_root.resolve())
+    candidates = candidates if candidates is not None else _superseded_monitor_candidates(
+        target=target,
+        memory_root=memory_root,
+    )
+    actions: list[str] = []
+    failures: list[str] = []
+    active_candidates: list[dict[str, object]] = []
+    for candidate in candidates:
+        identity = _candidate_monitor_identity(candidate)
+        if identity is None:
+            actions.append(f"skipped invalid superseded monitor candidate: {candidate!r}")
+            continue
+        host, port, expected_root = identity
+        payload = _monitor_status_payload(host, port)
+        if not payload:
+            failures.append(
+                f"registered superseded monitor at {host}:{port} root={expected_root} is unreachable; "
+                "takeover refused until its launcher is stopped or the monitor responds"
+            )
+            continue
+        observed_root = str(payload.get("root") or payload.get("install_root") or "").strip()
+        observed_memory_root = str(payload.get("memory_root") or "").strip()
+        if observed_root != expected_root or observed_memory_root != normalized_memory_root:
+            failures.append(
+                f"monitor identity mismatch at {host}:{port} root={observed_root or '-'} "
+                f"memory_root={observed_memory_root or '-'}"
+            )
+            continue
+        active_candidates.append(candidate)
+        owner_action, owner_failure = _stop_owned_monitor_launcher(
+            host=host,
+            port=port,
+            expected_installation_root=expected_root,
+            memory_root=memory_root,
+        )
+        if owner_failure:
+            failures.append(owner_failure)
+        elif owner_action:
+            actions.append(owner_action)
+        else:
+            shutdown_action, shutdown_failure = _request_monitor_shutdown(
+                host=host,
+                port=port,
+                token=str(candidate.get("shutdown_token") or ""),
+            )
+            if shutdown_failure:
+                failures.append(shutdown_failure)
+            elif shutdown_action:
+                actions.append(shutdown_action)
+            else:
+                failures.append(
+                    f"refused to terminate unmanaged superseded monitor at {host}:{port} root={expected_root}; "
+                    "stop it explicitly and rerun installation"
+                )
+    if failures:
+        return actions, failures
+    failures.extend(
+        _wait_for_superseded_monitors_to_stop(
+            candidates=active_candidates,
+            memory_root=memory_root,
+        )
+    )
+    if failures:
+        return actions, failures
+    failures.extend(
+        _verify_superseded_monitors_stay_stopped(
+            candidates=active_candidates,
+            target=target,
+            memory_root=memory_root,
+        )
+    )
+    return actions, failures
 
 
 def _stop_superseded_launchagents_for_memory_root(*, target: Path, memory_root: Path) -> list[str]:
@@ -1808,11 +2309,18 @@ def _stop_superseded_launchagents_for_memory_root(*, target: Path, memory_root: 
 
 
 def _windows_monitor_task_name(target: Path) -> str:
-    return f"AgentContextEngine\\Monitor-{safe_slug(target.name)}"
+    resolved = str(target.expanduser().resolve())
+    digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:12]
+    return f"AgentContextEngine\\Monitor-{safe_slug(target.name)}-{digest}"
+
+
+def _windows_monitor_start_script_path(target: Path, memory_root: Path) -> Path:
+    task_slug = _windows_monitor_task_name(target).split("\\", 1)[-1]
+    return memory_root / "local" / f"windows-monitor-start-{task_slug}.cmd"
 
 
 def _write_windows_monitor_start_script(target: Path, command: list[str], memory_root: Path) -> Path:
-    script_path = memory_root / "local" / "windows-monitor-start.cmd"
+    script_path = _windows_monitor_start_script_path(target, memory_root)
     log_dir = memory_root / "logs"
     script_path.parent.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -1879,14 +2387,58 @@ def _autostart_monitor_via_windows_task(
     if run.returncode != 0:
         detail = (run.stderr or run.stdout).strip() or f"schtasks run exit {run.returncode}"
         return False, f"Windows Task Scheduler monitor task run failed: {detail}"
-    deadline = time.time() + 20.0
-    while time.time() < deadline:
-        if _port_accepting(host, port):
-            time.sleep(1.5)
-            if _port_accepting(host, port):
-                return True, f"launched via Windows Task Scheduler task={task_name} script={script_path}"
-        time.sleep(0.5)
-    return False, f"Windows Task Scheduler monitor task did not expose port {host}:{port} task={task_name} script={script_path}"
+    ready, payload = _wait_for_monitor_identity(
+        target=target,
+        memory_root=memory_root,
+        host=host,
+        port=port,
+        timeout=20.0,
+    )
+    if ready:
+        return True, f"launched and identity-verified via Windows Task Scheduler task={task_name} script={script_path}"
+    observed_root = str((payload or {}).get("root") or (payload or {}).get("install_root") or "-")
+    cleanup_action, cleanup_failure = _stop_windows_monitor_task(
+        port=port,
+        expected_installation_root=str(target.resolve()),
+        memory_root=memory_root,
+    )
+    cleanup_detail = cleanup_action or cleanup_failure or "task cleanup not required"
+    return False, (
+        f"Windows Task Scheduler monitor task did not expose the expected identity at {host}:{port} "
+        f"observed_root={observed_root} task={task_name} script={script_path}; {cleanup_detail}"
+    )
+
+
+def _rollback_spawned_monitor(
+    process: subprocess.Popen[str],
+    *,
+    target: Path,
+    memory_root: Path,
+    host: str,
+    port: int,
+) -> tuple[bool, str]:
+    stop_error = ""
+    if process.poll() is None:
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+                process.wait(timeout=5)
+            except (OSError, subprocess.SubprocessError) as exc:
+                stop_error = f"could not force-stop new monitor pid={process.pid}: {exc}"
+        except (OSError, subprocess.SubprocessError) as exc:
+            stop_error = f"could not stop new monitor pid={process.pid}: {exc}"
+    payload = _monitor_status_payload(host, port)
+    observed_root = str((payload or {}).get("root") or (payload or {}).get("install_root") or "").strip()
+    observed_memory_root = str((payload or {}).get("memory_root") or "").strip()
+    if observed_root == str(target.resolve()) and observed_memory_root == str(memory_root.resolve()):
+        return False, f"new monitor identity still responds after rollback pid={process.pid}"
+    if process.poll() is None:
+        detail = stop_error or f"new monitor child did not report exit after rollback pid={process.pid}"
+        return False, detail + "; monitor identity no longer responds"
+    return True, f"rolled back new monitor pid={process.pid}"
 
 
 def _autostart_monitor_after_install(
@@ -1898,48 +2450,20 @@ def _autostart_monitor_after_install(
     language: str,
     memory_root: Path,
 ) -> tuple[bool, str]:
-    stop_actions = _stop_superseded_monitors_for_memory_root(target=target, memory_root=memory_root)
+    superseded_candidates = _superseded_monitor_candidates(target=target, memory_root=memory_root)
+    stop_actions, stop_failures = _stop_superseded_monitors_for_memory_root(
+        target=target,
+        memory_root=memory_root,
+        candidates=superseded_candidates,
+    )
+    if stop_failures:
+        detail = "superseded monitor takeover refused: " + "; ".join(stop_failures)
+        if stop_actions:
+            detail += " superseded_monitors=" + "; ".join(stop_actions)
+        return False, detail
     command = _monitor_start_command(target, runner=runner, host=host, port=port, language=language)
     env = {**os.environ, ROOT_ENV_VAR: str(target), STORAGE_ROOT_ENV_VAR: str(memory_root)}
     if os.name == "nt":
-        cmdline = 'cmd.exe /c start "ace-monitor" /min ' + subprocess.list2cmdline(command)
-        process = subprocess.Popen(
-            cmdline,
-            cwd=str(target),
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            shell=False,
-        )
-        time.sleep(1.5)
-        if process.poll() is None:
-            if _port_accepting(host, port):
-                time.sleep(1.5)
-                if not _port_accepting(host, port):
-                    detail = (
-                        f"windows monitor accepted briefly but did not stay running; "
-                        f"launcher_pid={process.pid} launcher_exit={process.returncode}"
-                    )
-                    if stop_actions:
-                        detail += " superseded_monitors=" + "; ".join(stop_actions)
-                    return False, detail
-                detail = f"launcher_pid={process.pid} via cmd.exe start command={monitor_restart_command(target, runner=runner)}"
-                if stop_actions:
-                    detail += " superseded_monitors=" + "; ".join(stop_actions)
-                return True, detail
-        if _port_accepting(host, port):
-            time.sleep(1.5)
-            if not _port_accepting(host, port):
-                detail = f"windows monitor accepted briefly but did not stay running; launcher exit {process.returncode}"
-                if stop_actions:
-                    detail += " superseded_monitors=" + "; ".join(stop_actions)
-                return False, detail
-            detail = f"launched via cmd.exe start command={monitor_restart_command(target, runner=runner)}"
-            if stop_actions:
-                detail += " superseded_monitors=" + "; ".join(stop_actions)
-            return True, detail
         task_started, task_detail = _autostart_monitor_via_windows_task(
             target,
             command=command,
@@ -1948,11 +2472,30 @@ def _autostart_monitor_after_install(
             memory_root=memory_root,
         )
         if task_started:
+            cleanup_failures = _verify_superseded_monitors_stay_stopped(
+                candidates=superseded_candidates,
+                target=target,
+                memory_root=memory_root,
+                desired_host=host,
+                desired_port=port,
+            )
+            if cleanup_failures:
+                cleanup_action, cleanup_failure = _stop_windows_monitor_task(
+                    port=port,
+                    expected_installation_root=str(target.resolve()),
+                    memory_root=memory_root,
+                )
+                rollback_detail = cleanup_action or cleanup_failure or "Windows monitor task rollback unavailable"
+                return False, (
+                    "monitor started, but superseded monitor cleanup could not be verified: "
+                    + "; ".join(cleanup_failures)
+                    + f"; {rollback_detail}"
+                )
             detail = task_detail
             if stop_actions:
                 detail += " superseded_monitors=" + "; ".join(stop_actions)
             return True, detail
-        detail = f"windows monitor launcher exit {process.returncode}; {task_detail}"
+        detail = f"windows monitor identity not verified; {task_detail}"
         if stop_actions:
             detail += " superseded_monitors=" + "; ".join(stop_actions)
         return False, detail
@@ -1961,23 +2504,66 @@ def _autostart_monitor_after_install(
         cwd=str(target),
         env=env,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         text=True,
         start_new_session=True,
         close_fds=True,
     )
-    time.sleep(0.75)
-    if process.poll() is None:
-        detail = f"pid={process.pid} command={monitor_restart_command(target, runner=runner)}"
+    time.sleep(0.4)
+    if process.poll() is not None:
+        detail = f"exit {process.returncode}"
         if stop_actions:
             detail += " superseded_monitors=" + "; ".join(stop_actions)
-        return True, detail
-    stdout, stderr = process.communicate(timeout=1)
-    detail = (stderr or stdout).strip() or f"exit {process.returncode}"
+        return False, detail
+    ready, status_payload = _wait_for_monitor_identity(
+        target=target,
+        memory_root=memory_root,
+        host=host,
+        port=port,
+    )
+    if not ready:
+        _rolled_back, rollback_detail = _rollback_spawned_monitor(
+            process,
+            target=target,
+            memory_root=memory_root,
+            host=host,
+            port=port,
+        )
+        observed_root = str((status_payload or {}).get("root") or (status_payload or {}).get("install_root") or "-")
+        detail = (
+            f"monitor did not expose the expected identity at {host}:{port}; "
+            f"observed_root={observed_root}; {rollback_detail}"
+        )
+        if stop_actions:
+            detail += " superseded_monitors=" + "; ".join(stop_actions)
+        return False, detail
+    cleanup_failures = _verify_superseded_monitors_stay_stopped(
+        candidates=superseded_candidates,
+        target=target,
+        memory_root=memory_root,
+        desired_host=host,
+        desired_port=port,
+    )
+    if cleanup_failures:
+        _rolled_back, rollback_detail = _rollback_spawned_monitor(
+            process,
+            target=target,
+            memory_root=memory_root,
+            host=host,
+            port=port,
+        )
+        detail = "monitor started, but superseded monitor cleanup could not be verified: " + "; ".join(cleanup_failures)
+        detail += f"; {rollback_detail}"
+        if stop_actions:
+            detail += " superseded_monitors=" + "; ".join(stop_actions)
+        return False, detail
+    monitor_process = status_payload.get("monitor_process") if isinstance(status_payload, dict) and isinstance(status_payload.get("monitor_process"), dict) else {}
+    monitor_pid = int(monitor_process.get("pid") or process.pid)
+    detail = f"pid={monitor_pid} identity=verified takeover=verified command={monitor_restart_command(target, runner=runner)}"
     if stop_actions:
         detail += " superseded_monitors=" + "; ".join(stop_actions)
-    return False, detail
+    return True, detail
 
 
 def cmd_install_discovery(args: argparse.Namespace) -> int:
@@ -2014,6 +2600,19 @@ def cmd_install_discovery(args: argparse.Namespace) -> int:
         print(_ui_text(summary["reply_language"], en="recommended command from plan:", de="empfohlener Befehl aus Plan:"))
         print(apply_plan_command)
     else:
+        print(
+            _ui_text(
+                summary["reply_language"],
+                en=(
+                    "Agent-driven handoff: rerun discovery with `--plan-json <file>` before requesting approval, "
+                    "then execute that unchanged plan file."
+                ),
+                de=(
+                    "Agentengesteuerte Uebergabe: Discovery vor der Freigabe mit `--plan-json <datei>` wiederholen "
+                    "und danach genau diese unveraenderte Plan-Datei ausfuehren."
+                ),
+            )
+        )
         print(_ui_text(summary["reply_language"], en="recommended command:", de="empfohlener Befehl:"))
         print(_recommended_install_command(summary))
     return 0
@@ -2411,6 +3010,38 @@ def _port_conflict_status(host: str, port: int) -> dict[str, object]:
     return {"available": True, "error": ""}
 
 
+def _configured_monitor_port_status(*, root: Path, host: str, port: int) -> dict[str, object]:
+    normalized_root = str(root.expanduser().resolve())
+    active = False
+    for entry in active_monitor_runtime_entries():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            entry_port = int(entry.get("active_port") or entry.get("configured_port") or 0)
+        except (TypeError, ValueError):
+            continue
+        entry_host = str(
+            entry.get("active_host") or entry.get("configured_host") or DEFAULT_MONITOR_HOST
+        ).strip()
+        if (
+            str(entry.get("installation_root") or "").strip() == normalized_root
+            and entry_host == host
+            and entry_port == port
+        ):
+            active = True
+            break
+    if active:
+        return {"available": False, "active": True, "status": "active", "error": ""}
+    port_status = _port_conflict_status(host, port)
+    available = bool(port_status.get("available"))
+    return {
+        "available": available,
+        "active": False,
+        "status": "available" if available else "conflict",
+        "error": str(port_status.get("error") or ""),
+    }
+
+
 def _port_accepting(host: str, port: int) -> bool:
     return not bool(_port_conflict_status(host, port).get("available"))
 
@@ -2571,6 +3202,109 @@ def _enable_workspace_hooks(*, client: str, target: Path, memory_root: Path) -> 
     }
 
 
+def _metadata_dir_for_runtime_root(runtime_root: Path) -> Path:
+    metadata_base = runtime_root.expanduser().resolve()
+    if metadata_base.name == "memory" and metadata_base.parent.name == ".agent-context-engine":
+        metadata_base = metadata_base.parent.parent
+    return metadata_base / ".agent-context-engine"
+
+
+def _ensure_central_hub_and_active_root(
+    installation_root: Path,
+    *,
+    metadata_root: Path | None = None,
+    publish_shared_active_root: bool = False,
+) -> list[str]:
+    """Write the central active-root file and refresh supported hub scripts.
+
+    This is idempotent and safe to call during both install and repair. The
+    caller explicitly decides whether the installation owns the shared home
+    active-root or only its installation-specific metadata root.
+    """
+    from ....application.hook_rendering import build_central_hub_spec, render_central_hub_script
+
+    actions: list[str] = []
+    requested_metadata_root = (metadata_root or storage_root()).expanduser().resolve()
+    meta_dir = _metadata_dir_for_runtime_root(requested_metadata_root)
+    meta_dir.mkdir(parents=True, exist_ok=True)
+
+    active_root = meta_dir / "active-root"
+    active_root.write_text(str(installation_root.resolve()) + "\n", encoding="utf-8")
+    actions.append(f"updated active-root: {active_root}")
+
+    legacy_nested_active_root = requested_metadata_root / ".agent-context-engine" / "active-root"
+    if legacy_nested_active_root != active_root and (
+        legacy_nested_active_root.is_file() or legacy_nested_active_root.is_symlink()
+    ):
+        legacy_nested_active_root.unlink()
+        if os.name == "nt":
+            legacy_nested_active_root.write_text(str(installation_root.resolve()) + "\n", encoding="utf-8")
+            actions.append(f"refreshed legacy nested active-root compatibility file: {legacy_nested_active_root}")
+        else:
+            legacy_nested_active_root.symlink_to(active_root)
+            actions.append(f"linked legacy nested active-root to canonical metadata: {legacy_nested_active_root}")
+
+    if publish_shared_active_root:
+        shared_active_root = Path.home().expanduser().resolve() / ".agent-context-engine" / "active-root"
+        if shared_active_root.resolve() != active_root.resolve():
+            shared_active_root.parent.mkdir(parents=True, exist_ok=True)
+            shared_active_root.write_text(str(installation_root.resolve()) + "\n", encoding="utf-8")
+            actions.append(f"updated shared active-root: {shared_active_root}")
+
+    for runner in ("codex", "claude", "antigravity", "gemini"):
+        hub_path = meta_dir / "hooks" / runner / "hook_adapter.sh"
+        hub_path.parent.mkdir(parents=True, exist_ok=True)
+        hub_text = render_central_hub_script(build_central_hub_spec(runner))
+        hub_path.write_text(hub_text, encoding="utf-8")
+        _mark_platform_executable(hub_path)
+        actions.append(f"refreshed central hub: {hub_path}")
+
+    return actions
+
+
+def _write_project_hook_adapter(
+    *,
+    script_path: Path,
+    runner: str,
+    installation_root: Path,
+    metadata_root: Path,
+    hook_renderer: object,
+    windows: bool | None = None,
+) -> list[Path]:
+    use_windows = os.name == "nt" if windows is None else windows
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    if use_windows:
+        from ....adapters.windows import render_cmd_powershell_launcher
+        from ....application.hook_rendering import build_shell_hook_adapter_spec
+
+        if script_path.exists() or script_path.is_symlink():
+            script_path.unlink()
+        script_text = hook_renderer.render_shell_hook_adapter(
+            build_shell_hook_adapter_spec(
+                runner,
+                agent_context_engine_root=installation_root,
+                agent_memory_script=str(
+                    (installation_root / agent_memory_script_for_root(installation_root)).resolve()
+                ),
+            )
+        )
+        companion_path = script_path.with_suffix(".ps1")
+        if companion_path.exists() or companion_path.is_symlink():
+            companion_path.unlink()
+        companion_path.write_text(script_text, encoding="utf-8")
+        script_path.write_text(render_cmd_powershell_launcher(companion_path.name), encoding="utf-8")
+        _mark_platform_executable(companion_path)
+        _mark_platform_executable(script_path)
+        return [companion_path, script_path]
+
+    hub_path = (_metadata_dir_for_runtime_root(metadata_root) / "hooks" / runner / "hook_adapter.sh").resolve()
+    if script_path.exists() or script_path.is_symlink():
+        script_path.unlink()
+    script_path.symlink_to(hub_path)
+    _mark_platform_executable(hub_path)
+    return [script_path]
+
+
 def _activate_installation_hooks(
     *,
     target: Path,
@@ -2579,8 +3313,6 @@ def _activate_installation_hooks(
     hook_renderer: object,
     workspace_roots: dict[str, list[Path]],
 ) -> list[Path]:
-    from ....application.hook_rendering import build_shell_hook_adapter_spec
-
     activated_paths: list[Path] = []
     codex_templates = SKILL_ROOT / "templates" / "codex-hooks"
     codex_script_path = target / ".codex" / "hooks" / ("hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh")
@@ -2590,59 +3322,55 @@ def _activate_installation_hooks(
     for path in [codex_script_path, claude_script_path, antigravity_script_path, gemini_script_path]:
         path.parent.mkdir(parents=True, exist_ok=True)
 
-    _write_json(target / ".codex" / "hooks.json", _render_shell_hook_config(codex_templates / "hooks.json", command=f"./.codex/hooks/{codex_script_path.name}"))
-    _write_platform_script(
-        codex_script_path,
-        hook_renderer.render_shell_hook_adapter(
-            build_shell_hook_adapter_spec(
-                "codex",
-                agent_context_engine_root=target,
-                agent_memory_script=script_abs,
+    def write_project_adapter(script_path: Path, runner: str) -> None:
+        activated_paths.extend(
+            _write_project_hook_adapter(
+                script_path=script_path,
+                runner=runner,
+                installation_root=target,
+                metadata_root=runtime_memory_root,
+                hook_renderer=hook_renderer,
             )
+        )
+
+    _write_json(
+        target / ".codex" / "hooks.json",
+        _render_shell_hook_config(
+            codex_templates / "hooks.json",
+            command=_project_local_hook_command("codex", root=target),
         ),
     )
+    write_project_adapter(codex_script_path, "codex")
     claude_templates = SKILL_ROOT / "templates" / "claude-hooks"
-    _write_json(target / ".claude" / "settings.json", _render_shell_hook_config(claude_templates / "settings.json", command=f"./.claude/hooks/{claude_script_path.name}"))
-    _write_platform_script(
-        claude_script_path,
-        hook_renderer.render_shell_hook_adapter(
-            build_shell_hook_adapter_spec(
-                "claude",
-                agent_context_engine_root=target,
-                agent_memory_script=script_abs,
-            )
+    _write_json(
+        target / ".claude" / "settings.json",
+        _render_shell_hook_config(
+            claude_templates / "settings.json",
+            command=_project_local_hook_command("claude", root=target),
         ),
     )
+    write_project_adapter(claude_script_path, "claude")
     _write_json(target / ".agents" / "hooks.json", _render_antigravity_hook_config(hook_script=antigravity_script_path))
-    _write_platform_script(
-        antigravity_script_path,
-        hook_renderer.render_shell_hook_adapter(
-            build_shell_hook_adapter_spec(
-                "antigravity",
-                agent_context_engine_root=target,
-                agent_memory_script=script_abs,
-            )
-        ),
-    )
+    write_project_adapter(antigravity_script_path, "antigravity")
     gemini_templates = SKILL_ROOT / "templates" / "gemini-hooks"
-    _write_json(target / ".gemini" / "settings.json", _render_shell_hook_config(gemini_templates / "settings.json", command=f"./.gemini/hooks/{gemini_script_path.name}"))
-    _write_platform_script(
-        gemini_script_path,
-        hook_renderer.render_shell_hook_adapter(
-            build_shell_hook_adapter_spec(
-                "gemini",
-                agent_context_engine_root=target,
-                agent_memory_script=script_abs,
-            )
+    _write_json(
+        target / ".gemini" / "settings.json",
+        _render_shell_hook_config(
+            gemini_templates / "settings.json",
+            command=_project_local_hook_command("gemini", root=target),
         ),
     )
+    write_project_adapter(gemini_script_path, "gemini")
     write_workspace_binding("codex", root=target, memory_root=target, written_by="install")
     write_workspace_binding("claude", root=target, memory_root=target, written_by="install")
-    ensure_opencode_project(
+    write_workspace_binding("antigravity", root=target, memory_root=target, written_by="install")
+    write_workspace_binding("gemini", root=target, memory_root=target, written_by="install")
+    opencode_paths = ensure_opencode_project(
         target,
         memory_root=runtime_memory_root,
     )
     _run_integration_hook_action(client="opencode", action="enable", target=target, memory_root=runtime_memory_root)
+    activated_paths.extend([opencode_paths["config"], opencode_paths["plugin_file"]])
     for workspace_root in workspace_roots["codex"]:
         try:
             _enable_workspace_hooks(client="codex", target=workspace_root, memory_root=target)
@@ -2674,7 +3402,30 @@ def _activate_installation_hooks(
         if path.exists():
             _mark_platform_executable(path)
             activated_paths.append(path)
+    missing_artifacts = _missing_installation_hook_artifacts(target)
+    if missing_artifacts:
+        missing = ", ".join(str(path) for path in missing_artifacts)
+        raise RuntimeError(
+            f"installation hook finalization incomplete; missing required artifacts: {missing}"
+        )
     return activated_paths
+
+
+def _missing_installation_hook_artifacts(target: Path) -> list[Path]:
+    adapter_name = "hook_adapter.cmd" if os.name == "nt" else "hook_adapter.sh"
+    required = [
+        target / ".codex" / "hooks.json",
+        target / ".codex" / "hooks" / adapter_name,
+        target / ".claude" / "settings.json",
+        target / ".claude" / "hooks" / adapter_name,
+        target / ".agents" / "hooks.json",
+        target / ".agents" / "hooks" / adapter_name,
+        target / ".gemini" / "settings.json",
+        target / ".gemini" / "hooks" / adapter_name,
+        target / "opencode.json",
+        target / ".opencode" / "plugins" / "agent-memory.js",
+    ]
+    return [path for path in required if not path.exists() and not path.is_symlink()]
 
 
 def _print_headless_guidance(client: str) -> None:
@@ -2719,6 +3470,8 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
     integrations = integration_summary(root=root, probe_gemini=False)
     profile = _resolved_installation_profile(root, args)
     storage_status = _storage_status(root=root, profile=profile)
+    metadata_root = Path(str(storage_status["memory_root"])).expanduser().resolve()
+    metadata_dir = _metadata_dir_for_runtime_root(metadata_root)
     findings: list[dict[str, str]] = []
     repair_actions: list[dict[str, str]] = []
     manual_actions: list[dict[str, str]] = []
@@ -2877,11 +3630,195 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
             }
         )
 
+    active_root_file = metadata_dir / "active-root"
+    if not active_root_file.exists():
+        findings.append(
+            {
+                "severity": "warn",
+                "code": "active_root_missing",
+                "message": f"Central active-root file is missing: {active_root_file}",
+            }
+        )
+        repair_actions.append({"code": "refresh_active_root", "message": "Recreate central active-root during repair."})
+        add_agent_action(
+            code="refresh_active_root",
+            message="Recreate central active-root during repair.",
+            command=f"{agent_memory_cli_for_root(root)} repair-installation --apply",
+        )
+    elif not active_root_file.is_file():
+        findings.append(
+            {
+                "severity": "error",
+                "code": "active_root_not_file",
+                "message": f"Central active-root path is not a file: {active_root_file}",
+            }
+        )
+    else:
+        try:
+            active_root_content = active_root_file.read_text(encoding="utf-8").strip().splitlines()
+        except OSError as exc:
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": "active_root_unreadable",
+                    "message": f"Cannot read central active-root at {active_root_file}: {exc}",
+                }
+            )
+        else:
+            active_root_text = active_root_content[0].strip() if active_root_content else ""
+            if not active_root_text:
+                findings.append(
+                    {
+                        "severity": "error",
+                        "code": "active_root_empty",
+                        "message": f"Central active-root file is empty: {active_root_file}",
+                    }
+                )
+            else:
+                try:
+                    active_root_value = Path(active_root_text).expanduser()
+                except OSError as exc:
+                    findings.append(
+                        {
+                            "severity": "error",
+                            "code": "active_root_invalid_path",
+                            "message": f"Central active-root contains invalid path '{active_root_text}': {exc}",
+                        }
+                    )
+                else:
+                    if not active_root_value.is_absolute():
+                        findings.append(
+                            {
+                                "severity": "error",
+                                "code": "active_root_relative",
+                                "message": f"Central active-root is not absolute: {active_root_text}",
+                            }
+                        )
+                    elif not active_root_value.exists() or not active_root_value.is_dir():
+                        findings.append(
+                            {
+                                "severity": "error",
+                                "code": "active_root_invalid_dir",
+                                "message": f"Central active-root points to missing/non-directory path: {active_root_text}",
+                            }
+                        )
+                    elif str(active_root_value.resolve()) != str(root.resolve()):
+                        findings.append(
+                            {
+                                "severity": "warn",
+                                "code": "active_root_mismatch",
+                                "message": (
+                                    f"Central active-root points to {active_root_value}, which is different from this installation root {root}. "
+                                    "Hooks may resolve to a different runtime."
+                                ),
+                            }
+                        )
+    for client in ("codex", "claude", "antigravity", "gemini"):
+        hub_path = metadata_dir / "hooks" / client / "hook_adapter.sh"
+        if not hub_path.exists():
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": f"{client}_central_hub_missing",
+                    "message": f"Central {client} hub script is missing: {hub_path}",
+                }
+            )
+            repair_actions.append(
+                {
+                    "code": f"{client}_central_hub_refresh",
+                    "message": f"Recreate the central {client} hub script with the active installation during repair.",
+                }
+            )
+            add_agent_action(
+                code=f"refresh_{client}_hub",
+                message=f"Recreate the central {client} hub script with the active installation during repair.",
+                command=f"{agent_memory_cli_for_root(root)} repair-installation --apply",
+            )
+            continue
+        if not os.path.isfile(hub_path):
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": f"{client}_central_hub_not_file",
+                    "message": f"Central {client} hub path is not a regular file: {hub_path}",
+                }
+            )
+            continue
+        if not os.access(hub_path, os.X_OK):
+            findings.append(
+                {
+                    "severity": "warn",
+                    "code": f"{client}_central_hub_not_executable",
+                    "message": f"Central {client} hub script is not executable: {hub_path}",
+                }
+            )
+            repair_actions.append(
+                {
+                    "code": f"{client}_central_hub_refresh",
+                    "message": f"Recreate the central {client} hub script with executable permissions during repair.",
+                }
+            )
+            add_agent_action(
+                code=f"refresh_{client}_hub",
+                message=f"Recreate the central {client} hub script with executable permissions during repair.",
+                command=f"{agent_memory_cli_for_root(root)} repair-installation --apply",
+            )
+        hub_spec_version = ""
+        try:
+            for line in hub_path.read_text(encoding="utf-8").splitlines():
+                match = re.match(r"^#\s*spec_version=(.+)$", line.strip())
+                if match:
+                    hub_spec_version = match.group(1).strip()
+                    break
+        except OSError as exc:
+            findings.append(
+                {
+                    "severity": "warn",
+                    "code": f"{client}_central_hub_unreadable",
+                    "message": f"Cannot read central {client} hub script at {hub_path}: {exc}",
+                }
+            )
+        else:
+            if not hub_spec_version:
+                findings.append(
+                    {
+                        "severity": "warn",
+                        "code": f"{client}_central_hub_spec_version_missing",
+                        "message": f"Central {client} hub script does not expose a spec version marker: {hub_path}",
+                    }
+                )
+            elif hub_spec_version != HUB_RENDER_SPEC_VERSION:
+                findings.append(
+                    {
+                        "severity": "warn",
+                        "code": f"{client}_central_hub_spec_version_mismatch",
+                        "message": (
+                            f"Central {client} hub script spec-version is {hub_spec_version}, "
+                            f"expected {HUB_RENDER_SPEC_VERSION}: {hub_path}"
+                        ),
+                    }
+                )
+                repair_actions.append(
+                    {
+                        "code": f"{client}_central_hub_refresh",
+                        "message": f"Recreate the central {client} hub script with the current spec version during repair.",
+                    }
+                )
+                add_agent_action(
+                    code=f"refresh_{client}_hub",
+                    message=f"Recreate the central {client} hub script with the current spec version during repair.",
+                    command=f"{agent_memory_cli_for_root(root)} repair-installation --apply",
+                )
+
     monitor_profile = dict(profile.get("monitor") or {})
     monitor_host = str(monitor_profile.get("host") or DEFAULT_MONITOR_HOST).strip() or DEFAULT_MONITOR_HOST
     monitor_port = int(monitor_profile.get("port") or DEFAULT_MONITOR_PORT)
-    monitor_port_status = _port_conflict_status(monitor_host, monitor_port)
-    if not bool(monitor_port_status["available"]):
+    monitor_port_status = _configured_monitor_port_status(
+        root=root,
+        host=monitor_host,
+        port=monitor_port,
+    )
+    if monitor_port_status["status"] == "conflict":
         findings.append(
             {
                 "severity": "warn",
@@ -3058,6 +3995,42 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
                     ),
                 )
 
+    for client in ("codex", "claude", "antigravity", "gemini"):
+        status = integration_projects_status(client, memory_root=root)
+        for item in list(status.get("activated_projects") or []):
+            if str(item.get("registry_status") or "").strip().lower() != "active":
+                continue
+            project_path = str(item.get("path") or "").strip()
+            if not project_path:
+                continue
+            hooks_state = str(item.get("hooks_state") or "unknown")
+            if hooks_state == "enabled":
+                continue
+            findings.append(
+                {
+                    "severity": "error" if hooks_state in {"project_missing", "error"} else "notice",
+                    "code": f"{client}_central_registry_drift",
+                    "message": (
+                        f"{client} central registry marks {project_path} as active but hook state is {hooks_state}"
+                        + (f" ({item.get('registry_detail')})" if item.get("registry_detail") else "")
+                    ),
+                }
+            )
+            repair_actions.append(
+                {
+                    "code": f"{client}_central_registry_repair_{safe_slug(project_path)}",
+                    "message": f"Reconcile the central registry state for {project_path} by re-enabling {client} hooks.",
+                }
+            )
+            add_agent_action(
+                code=f"repair_{client}_registry_{safe_slug(project_path)}",
+                message=f"Reconcile central registry state for {project_path} by re-enabling {client} hooks.",
+                command=(
+                    f"{agent_memory_cli_for_root(root)} integration-hooks --client {client} "
+                    f"--target {_quote_platform_path(project_path)} --action enable"
+                ),
+            )
+
     return {
         "root": str(root),
         "profile_path": str(installation_profile_path(root)),
@@ -3070,6 +4043,8 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
             "host": monitor_host,
             "port": monitor_port,
             "port_available": bool(monitor_port_status["available"]),
+            "port_active": bool(monitor_port_status["active"]),
+            "port_status": str(monitor_port_status["status"]),
             "port_error": str(monitor_port_status["error"] or ""),
         },
         "launchagent_profile": {
@@ -3121,7 +4096,7 @@ def _print_installation_check(payload: dict[str, object]) -> None:
     print(
         "monitor default: "
         + f"{monitor_profile.get('host') or DEFAULT_MONITOR_HOST}:{monitor_profile.get('port') or DEFAULT_MONITOR_PORT} "
-        + f"({'available' if monitor_profile.get('port_available') else 'conflict'})"
+        + f"({monitor_profile.get('port_status') or ('available' if monitor_profile.get('port_available') else 'conflict')})"
     )
     if monitor_profile.get("port_error"):
         print(f"monitor port detail: {monitor_profile['port_error']}")
@@ -3324,7 +4299,7 @@ def _replace_string_placeholder(value: object, placeholder: str, replacement: st
 
 def _render_antigravity_hook_config(*, hook_script: Path) -> dict[str, object]:
     template = json.loads((SKILL_ROOT / "templates" / "antigravity-hooks" / "hooks.json").read_text(encoding="utf-8"))
-    rendered = _replace_string_placeholder(template, "__ANTIGRAVITY_HOOK_SCRIPT__", str(hook_script.resolve()))
+    rendered = _replace_string_placeholder(template, "__ANTIGRAVITY_HOOK_SCRIPT__", _quote_platform_path(hook_script.resolve()))
     if not isinstance(rendered, dict):
         raise ValueError("invalid antigravity hook template")
     return rendered
@@ -3633,30 +4608,39 @@ def _run_integration_hook_action(
 
 
 def cmd_integration_hooks(args: argparse.Namespace) -> int:
+    action: str
+    if getattr(args, "action", None):
+        action = str(args.action)
+    elif getattr(args, "activate", False):
+        action = "enable"
+    else:
+        print("error: --action or --activate is required", file=sys.stderr)
+        return 2
+
     target = Path(args.target).expanduser().resolve() if getattr(args, "target", None) else ROOT
     installation_root = Path(str(getattr(args, "installation_root", None) or getattr(args, "memory_root", None) or ROOT)).expanduser().resolve()
     if getattr(args, "target", None) and str(args.client) in {"codex", "claude", "cursor"}:
         if not _require_existing_workspace_target(
             target,
-            command_name=f"agent-context-engine integration-hooks --client {args.client} --action {args.action}",
+            command_name=f"agent-context-engine integration-hooks --client {args.client} --action {action}",
             client_name=str(args.client).capitalize(),
         ):
             return 1
     result, target_item = _run_integration_hook_action(
         client=str(args.client),
-        action=str(args.action),
+        action=action,
         target=target,
         memory_root=installation_root,
         background_runner=str(getattr(args, "background_runner", "") or "") or None,
     )
     print(f"client: {args.client}")
-    print(f"action: {args.action}")
+    print(f"action: {action}")
     print(f"target: {target}")
     print(f"hook config: {target_item.get('hook_config_path') or '-'}")
     print(f"hook disabled file: {target_item.get('hook_disabled_path') or '-'}")
     print(f"hooks state: {target_item.get('hooks_state') or '-'}")
     print(f"hook events: {', '.join(target_item.get('active_hook_events', [])) if isinstance(target_item.get('active_hook_events'), list) else '-'}")
-    print(f"command: {result.get('command') or integration_hook_command(client=str(args.client), action=str(args.action), target_root=target, root=installation_root)}")
+    print(f"command: {result.get('command') or integration_hook_command(client=str(args.client), action=action, target_root=target, root=installation_root)}")
     return 0
 
 
@@ -3802,6 +4786,9 @@ def cmd_check_installation(args: argparse.Namespace) -> int:
 
 
 def cmd_repair_installation(args: argparse.Namespace) -> int:
+    from ....application.platform import current_platform_profile
+    from ....application.platform.runtime_selection import select_hook_adapter_renderer
+
     root = Path(args.target).expanduser().resolve() if getattr(args, "target", None) else ROOT
     current_storage_root = Path(str(resolve_storage_profile(root).get("memory_root") or (root / "memory"))).expanduser().resolve()
     runtime_memory_root = _default_storage_root_for_install(root, args)
@@ -3810,13 +4797,38 @@ def cmd_repair_installation(args: argparse.Namespace) -> int:
     payload = _installation_check_payload(root=root, args=args)
     _print_installation_check(payload)
     if not getattr(args, "apply", False):
+        if str(load_installation_profile(root).get("installation_mode") or "") == "ambiguous":
+            print(
+                "warning: legacy installation mode is ambiguous; review and pass "
+                "--legacy-installation-mode shared|isolated with --apply"
+            )
         print("next: rerun with --apply after reviewing the proposed actions")
         return 0
 
     applied: list[str] = []
     skipped: list[str] = []
+    runtime_ready = True
+    frontend_ready = True
     storage_rebound = bool(getattr(args, "memory_root", None))
     try:
+        installation_profile = load_installation_profile(root)
+        installation_mode = str(installation_profile.get("installation_mode") or "shared")
+        selected_legacy_mode = str(getattr(args, "legacy_installation_mode", "") or "")
+        if installation_mode == "ambiguous":
+            if not selected_legacy_mode:
+                raise RuntimeError(
+                    "legacy installation mode is ambiguous; rerun with "
+                    "--legacy-installation-mode shared or --legacy-installation-mode isolated"
+                )
+            merge_installation_profile(root, installation_mode=selected_legacy_mode)
+            installation_mode = selected_legacy_mode
+            applied.append(f"resolved legacy installation mode as {selected_legacy_mode}")
+        for hub_action in _ensure_central_hub_and_active_root(
+            root,
+            metadata_root=runtime_memory_root,
+            publish_shared_active_root=installation_mode != "isolated",
+        ):
+            applied.append(hub_action)
         if workflow_overrides or any(workspace_roots.values()) or getattr(args, "memory_root", None):
             applied.extend(_relocate_runtime_storage(current_storage_root, runtime_memory_root))
             ensure_storage_profile(runtime_memory_root, schema_version=int(resolve_storage_profile(root).get("schema_version") or DEFAULT_STORAGE_SCHEMA_VERSION), storage_instance_id=str(load_installation_profile(root).get("instance_id") or root.name))
@@ -3840,6 +4852,7 @@ def cmd_repair_installation(args: argparse.Namespace) -> int:
                 applied.extend(ensure_runtime_venv(root, install_backend_dependencies=True))
             except (RuntimeError, subprocess.CalledProcessError) as exc:
                 if storage_rebound or workflow_overrides or any(workspace_roots.values()):
+                    runtime_ready = False
                     skipped.append(f"runtime bootstrap skipped after profile repair: {exc}")
                 else:
                     raise
@@ -3855,6 +4868,7 @@ def cmd_repair_installation(args: argparse.Namespace) -> int:
                 )
             except (RuntimeError, subprocess.CalledProcessError) as exc:
                 if storage_rebound or workflow_overrides or any(workspace_roots.values()):
+                    frontend_ready = False
                     skipped.append(f"monitor frontend repair skipped after profile repair: {exc}")
                 else:
                     raise
@@ -3881,7 +4895,21 @@ def cmd_repair_installation(args: argparse.Namespace) -> int:
         for workspace_root in workspace_roots["cursor"]:
             _enable_workspace_hooks(client="cursor", target=workspace_root, memory_root=root)
             applied.append(f"enabled cursor hooks in {workspace_root}")
-    except (RuntimeError, subprocess.CalledProcessError) as exc:
+        if runtime_ready and frontend_ready:
+            activated = _activate_installation_hooks(
+                target=root,
+                runtime_memory_root=runtime_memory_root,
+                script_abs=str((root / "scripts" / "agent_context_engine.py").resolve()),
+                hook_renderer=select_hook_adapter_renderer(current_platform_profile()),
+                workspace_roots={"codex": [], "claude": [], "cursor": []},
+            )
+            for path in activated:
+                applied.append(f"finalized installation-root integration: {path}")
+        else:
+            skipped.append(
+                "installation-root hook finalization skipped because runtime or frontend repair failed"
+            )
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"repair failed: {exc}", file=sys.stderr)
         return 1
 
@@ -4371,6 +5399,8 @@ def cmd_install(args: argparse.Namespace) -> int:
         installed_skill / "scripts" / "codex-ace.cmd",
         installed_skill / "scripts" / "claude-ace",
         installed_skill / "scripts" / "claude-ace.cmd",
+        installed_skill / "scripts" / "cursor-ace",
+        installed_skill / "scripts" / "cursor-ace.cmd",
         installed_skill / "scripts" / "agy-ace",
         installed_skill / "scripts" / "agy-ace.cmd",
         installed_skill / "scripts" / "antigravity-ace",
@@ -4417,6 +5447,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         target,
         instance_id=instance_id,
         root_path=target,
+        installation_mode="isolated" if isolated_install else "shared",
         storage={
             "memory_root": runtime_memory_root,
             "schema_version": int(getattr(args, "storage_schema_version", None) or DEFAULT_STORAGE_SCHEMA_VERSION),
@@ -4456,6 +5487,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     for flag_name, wrapper_name in [
         ("link_codex_memory", "codex-ace"),
         ("link_claude_memory", "claude-ace"),
+        ("link_cursor_memory", "cursor-ace"),
         ("link_agy_memory", "agy-ace"),
         ("link_antigravity_memory", "antigravity-ace"),
         ("link_gemini_memory", "gemini-ace"),
@@ -4598,6 +5630,7 @@ def cmd_install(args: argparse.Namespace) -> int:
             )
         )
     installation_ready_for_activation = runtime_bootstrap_ok and frontend_build_ok and scheduler_install_ok
+    monitor_start_status = "not_requested"
     if (
         getattr(args, "start_monitor", True)
         and installation_ready_for_activation
@@ -4612,9 +5645,11 @@ def cmd_install(args: argparse.Namespace) -> int:
             memory_root=runtime_memory_root,
         )
         if started:
+            monitor_start_status = "verified"
             print(f"started monitor: {detail}")
             _open_monitor_howto(host=monitor_host, port=monitor_port, runner=workflow_settings["monitor_runner"], language=language)
         else:
+            monitor_start_status = "failed"
             print(
                 "warn: monitor start failed; run manually if needed: "
                 + f"{detail}; command={monitor_restart_command(target, runner=workflow_settings['monitor_runner'])}",
@@ -4622,6 +5657,7 @@ def cmd_install(args: argparse.Namespace) -> int:
             )
             installation_ready_for_activation = False
     elif getattr(args, "start_monitor", True) and not installation_ready_for_activation:
+        monitor_start_status = "skipped_incomplete_prerequisites"
         print(
             "warn: monitor start skipped because installation prerequisites are incomplete: "
             + f"runtime_bootstrap_ok={runtime_bootstrap_ok} frontend_build_ok={frontend_build_ok} "
@@ -4629,23 +5665,40 @@ def cmd_install(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     else:
+        if getattr(args, "start_monitor", True):
+            monitor_start_status = "skipped_by_test_environment"
         print("next: run " + monitor_restart_command(target, runner=workflow_settings["monitor_runner"]))
     if installation_ready_for_activation:
-        activated_hook_paths = _activate_installation_hooks(
-            target=target,
-            runtime_memory_root=runtime_memory_root,
-            script_abs=script_abs,
-            hook_renderer=hook_renderer,
-            workspace_roots=workspace_roots,
-        )
-        if activated_hook_paths:
-            print(f"activated hooks as final install step: {len(activated_hook_paths)} files")
+        for hub_action in _ensure_central_hub_and_active_root(
+            target,
+            metadata_root=runtime_memory_root,
+            publish_shared_active_root=not isolated_install,
+        ):
+            print(f"- {hub_action}")
+        try:
+            activated_hook_paths = _activate_installation_hooks(
+                target=target,
+                runtime_memory_root=runtime_memory_root,
+                script_abs=script_abs,
+                hook_renderer=hook_renderer,
+                workspace_roots=workspace_roots,
+            )
+        except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+            installation_ready_for_activation = False
+            print(f"warn: installation hook/global bridge finalization failed: {exc}", file=sys.stderr)
+        else:
+            if activated_hook_paths:
+                print(f"activated hooks as final install step: {len(activated_hook_paths)} files")
     else:
         print(
             "warn: hook activation skipped because installation is not complete; rerun install or repair-installation after fixing prerequisites",
             file=sys.stderr,
         )
-    _run_post_install_checks(target, language=language, include_doctor=installation_ready_for_activation)
+    verification = _run_post_install_checks(
+        target,
+        language=language,
+        include_doctor=installation_ready_for_activation,
+    )
     print(f"next: run {agent_memory_cli_for_root(target)} doctor")
     wrapper_link_results = _verify_global_wrapper_links(args=args, prefix=prefix, suffix=suffix)
     if wrapper_link_results:
@@ -4672,15 +5725,35 @@ def cmd_install(args: argparse.Namespace) -> int:
             language,
             en=(
                 f"installation summary: target={target} memory_root={runtime_memory_root} "
-                f"monitor_port={monitor_port} wrapper_prefix={prefix or '-'} wrapper_suffix={suffix or '-'}"
+                f"monitor_port={monitor_port} monitor_start={monitor_start_status} "
+                f"wrapper_prefix={prefix or '-'} wrapper_suffix={suffix or '-'}"
             ),
             de=(
                 f"Installationszusammenfassung: target={target} memory_root={runtime_memory_root} "
-                f"monitor_port={monitor_port} wrapper_prefix={prefix or '-'} wrapper_suffix={suffix or '-'}"
+                f"monitor_port={monitor_port} monitor_start={monitor_start_status} "
+                f"wrapper_prefix={prefix or '-'} wrapper_suffix={suffix or '-'}"
             ),
         )
     )
-    return 0
+    installation_success = installation_ready_for_activation and all(
+        int(value) == 0 for value in verification.values()
+    )
+    print(
+        _ui_text(
+            language,
+            en=(
+                "installation result: success"
+                if installation_success
+                else "installation result: completed with warnings; review the verification summary above"
+            ),
+            de=(
+                "Installationsergebnis: erfolgreich"
+                if installation_success
+                else "Installationsergebnis: mit Warnungen abgeschlossen; Verifikationszusammenfassung oben pruefen"
+            ),
+        )
+    )
+    return 0 if installation_success else 2
 
 
 def cmd_attach_memory_root(args: argparse.Namespace) -> int:

@@ -6,6 +6,10 @@ inspect the database manually.
 
 ## Scope
 - Status and firewall-state summary display.
+- Installation-specific system-control mode, reason, admission state, and
+  copyable direct-user recovery guidance.
+- Explicit provenance assurance showing that runner events are instrumented,
+  not OS-authenticated user-presence attestations.
 - Loading, empty, and error states for the monitor landing view.
 
 ## Non-Scope
@@ -18,6 +22,9 @@ inspect the database manually.
 - Render compact operational state that fits desktop and narrow viewports.
 - Avoid embedding backend constants that belong in OpenAPI/types.
 - Keep runtime/firewall summary copy in the shared frontend i18n catalog.
+- Never expose a browser mutation for system disable, enable, or recovery.
+- Keep the system-control card visible while suspended; the monitor remains a
+  read-only inspection surface.
 
 ## Inputs / Outputs
 - Inputs: `/api/status`, `/api/firewall-state`.

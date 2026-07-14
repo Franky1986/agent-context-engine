@@ -75,4 +75,5 @@ export type StorageSqliteSummary = components['schemas']['StorageSqliteSummary']
 export type StorageStatus = components['schemas']['StorageStatus'];
 export type StorageTableCount = components['schemas']['StorageTableCount'];
 export type StorageWarning = components['schemas']['StorageWarning'];
+export type SystemControlStatus = components['schemas']['SystemControlStatus'];
 export type TokenTotals = components['schemas']['TokenTotals'];

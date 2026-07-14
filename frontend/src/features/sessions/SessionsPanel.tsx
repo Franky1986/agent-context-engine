@@ -216,12 +216,14 @@ export function SessionsPanel({
                     type="button"
                   >
                     <span className="session-name-cell">
-                      <strong>{label(session.thread_name ?? session.session_id, t(language, 'sessions.untitled'))}</strong>
+                      <strong>{label(session.session_id, t(language, 'sessions.untitled'))}</strong>
+                      {session.thread_name && session.thread_name !== session.session_id ? (
+                        <small className="session-custom-name">{session.thread_name}</small>
+                      ) : null}
                       <small className="session-meta-line">
                         <span>{label(session.project_id)}</span>
                         {originClient ? <span className="session-client-badge session-client-badge-origin">{originClient}</span> : null}
                         {showDreamRunnerBadge ? <span className="session-client-badge session-client-badge-dream">{t(language, 'sessions.preview.dreamRunner')}: {dreamRunner}</span> : null}
-                        <span>{label(session.session_id)}</span>
                       </small>
                       <small className="session-preview">
                         {t(language, 'sessions.preview.latestActivity')}: {compact(session.latest_activity_summary ?? session.summary_preview, t(language, 'sessions.preview.latestActivityFallback'))}

@@ -28,6 +28,7 @@ from ..interfaces.hooks.main import cmd_replay_hook_queue
 from ..infrastructure.locks import acquire_lock, release_lock
 from .summaries import cmd_summarize
 from .summaries import cmd_summarize_windows
+from .system_control import system_admission_open
 from ..ports.clock import Clock
 from ..ports.repositories.sqlite import SQLiteConnectionProvider
 
@@ -181,6 +182,9 @@ class SchedulerUseCase:
         return repaired
 
     def run(self, args: argparse.Namespace) -> int:
+        if not system_admission_open():
+            print("agent-context-engine scheduler skipped: system suspended")
+            return 0
         scheduler_lock = self.ports.acquire_lock("scheduler-run", "global")
         if scheduler_lock is None:
             print("agent-context-engine scheduler skipped: already running")
@@ -218,6 +222,11 @@ class SchedulerUseCase:
 
         exit_code = 0
         for step in self._step_plan(args):
+            if not system_admission_open():
+                print(
+                    f"agent-context-engine scheduler paused before step {step.name}: system suspended"
+                )
+                break
             step_started = _now()
             step_before = self.scheduler_counts(conn)
             step_id = self.with_db_retry(

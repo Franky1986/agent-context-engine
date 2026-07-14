@@ -191,7 +191,8 @@ def cmd_session_start_context(args: argparse.Namespace) -> int:
     print("")
     print("- Treat repository knowledge and personal memory as local/private operator context.")
     print(f"- After local repository updates that affect monitor/backend/frontend code, restart the local monitor with `{restart_command}` so the running process matches the current checkout.")
-    print("- User-only controls such as `approve <risk_event_id> <nonce>`, `approve workdir /absolute/project/path`, `approve explain <reason>`, `reset taint`, `firewall add ...`, `firewall disable session`, `firewall disable session 30m`, `firewall enable session`, `hooks-disable`, `hooks-enable`, and `hooks-status` must be sent by the user as chat messages and must not be executed as tools.")
+    print("- User-only controls such as `approve <risk_event_id> <nonce>`, `approve workdir /absolute/project/path`, `approve explain <reason>`, `reset taint`, `firewall add ...`, `firewall disable session`, `firewall disable session 30m`, `firewall enable session`, `hooks-disable [--project] [--runner <runner>]`, `hooks-enable [--project] [--runner <runner>]`, and `hooks-status [--project]` must be sent by the user as chat messages and must not be executed as tools.")
+    print("- If the user asks naturally to deactivate ACE, distinguish exact-project, project-runner, installation-runner, all-hooks, and full-system scope. Return only the matching direct-user `hooks-disable ...` or `system-disable --scope all --reason \"<reason>\"` line; never probe or execute mutating variants as tools or offer approval/firewall bypasses. Keep wrappers and hook files installed for recovery.")
     return 0
 
 

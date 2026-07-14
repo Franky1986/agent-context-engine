@@ -1650,7 +1650,8 @@ def _session_taint_sources(conn: Any, session_id: str, *, after_event_seq: int, 
         for row in conn.execute(
             """
             select risk_event_id, event_seq, created_at, status, decision, risk_level,
-                   sensitivity, approval_state, source_kind, source_ref, reason, impact, preview
+                   sensitivity, approval_state, source_kind, source_ref, reason, impact, preview,
+                   categories_json, poisoning_flags_json, deterministic_flags_json, taint_context_json
             from risk_events
             where session_id = ?
               and coalesce(event_seq, 0) > ?
@@ -1671,6 +1672,25 @@ def _session_taint_sources(conn: Any, session_id: str, *, after_event_seq: int, 
     ]
 
 
+def _risk_display_reason(item: dict[str, Any]) -> str:
+    flags = set(item.get("categories") or []) | set(item.get("poisoning_flags") or []) | set(item.get("deterministic_flags") or [])
+    reason = str(item.get("reason") or "")
+    impact = str(item.get("impact") or "")
+    text = f"{reason} {impact}".lower()
+    if {"classifier_invalid_output", "classifier_schema_violation"} & flags or "classifier runner failed" in text or "valid policy json" in text:
+        return "Firewall classifier returned invalid structured output; ACE blocked fail-closed for explicit review."
+    taint_context = item.get("taint_context") or []
+    if {"tainted_context_side_effect", "approval_required"} & flags:
+        for source in taint_context:
+            if not isinstance(source, dict):
+                continue
+            source_flags = set(_json_list(source.get("categories_json"))) | set(_json_list(source.get("poisoning_flags_json")))
+            source_reason = str(source.get("reason") or "").lower()
+            if {"classifier_invalid_output", "classifier_schema_violation"} & source_flags or "classifier" in source_reason:
+                return "Earlier firewall classifier failure tainted this session; this follow-up action needs explicit approval."
+    return reason
+
+
 def _decorate_session_risk_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     item = _row_dict(row) if not isinstance(row, dict) else dict(row)
     item["categories"] = _json_list(item.get("categories_json"))
@@ -1688,6 +1708,7 @@ def _decorate_session_risk_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, A
         item["approval_line"] = f"approve {item['risk_event_id']} {approval_token}"
     else:
         item["approval_line"] = ""
+    item["display_reason"] = _risk_display_reason(item)
     item.pop("categories_json", None)
     item.pop("poisoning_flags_json", None)
     item.pop("deterministic_flags_json", None)
@@ -1757,10 +1778,10 @@ def _session_risk_payload(conn: Any, session_id: str, *, limit: int = 25) -> tup
         "latest_risk_event_id": latest.get("risk_event_id"),
         "latest_risk_level": latest.get("risk_level"),
         "latest_risk_status": latest.get("status"),
-        "latest_risk_reason": latest.get("reason"),
+        "latest_risk_reason": latest.get("display_reason") or latest.get("reason"),
         "latest_risk_created_at": latest.get("created_at"),
         "latest_open_risk_event_id": latest_open.get("risk_event_id"),
-        "latest_open_risk_reason": latest_open.get("reason"),
+        "latest_open_risk_reason": latest_open.get("display_reason") or latest_open.get("reason"),
         "latest_open_risk_status": latest_open.get("status"),
         "taint_sources": [_decorate_session_risk_row(item) for item in taint_sources],
         "controls": {

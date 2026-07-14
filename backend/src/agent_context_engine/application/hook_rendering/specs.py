@@ -8,6 +8,7 @@ from ...infrastructure.config import SKILL_ROOT
 
 HOOK_RENDER_SPEC_VERSION = "2026-06-25.1"
 WRAPPER_RENDER_SPEC_VERSION = "2026-06-25.1"
+HUB_RENDER_SPEC_VERSION = "2026-06-25.1"
 
 _HOOK_TEMPLATE_PATHS = {
     "codex": SKILL_ROOT / "templates" / "codex-hooks" / "hook_adapter.sh",
@@ -16,12 +17,20 @@ _HOOK_TEMPLATE_PATHS = {
     "antigravity": SKILL_ROOT / "templates" / "antigravity-hooks" / "hook_adapter.sh",
 }
 
+_HUB_TEMPLATE_PATHS = {
+    "codex": SKILL_ROOT / "templates" / "codex-hooks" / "hook_hub.sh",
+    "claude": SKILL_ROOT / "templates" / "claude-hooks" / "hook_hub.sh",
+    "antigravity": SKILL_ROOT / "templates" / "antigravity-hooks" / "hook_hub.sh",
+    "gemini": SKILL_ROOT / "templates" / "gemini-hooks" / "hook_hub.sh",
+}
+
 _CURSOR_TEMPLATE_PATH = SKILL_ROOT / "templates" / "cursor-hooks" / "hook_adapter.sh"
 _CURSOR_ROOT_LINE = 'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"'
 
 _WRAPPER_CLIENT_COMMANDS = {
     "codex-ace": "codex",
     "claude-ace": "claude",
+    "cursor-ace": "cursor",
     "agy-ace": "agy",
     "antigravity-ace": "agy",
     "gemini-ace": "gemini",
@@ -128,6 +137,27 @@ def build_wrapper_render_spec(
         evidence=evidence,
     )
 
+
+@dataclass(frozen=True)
+class CentralHubSpec:
+    runner: str
+    template_path: Path
+    support_level: str = "supported"
+    evidence: str = "tested"
+    spec_version: str = HUB_RENDER_SPEC_VERSION
+
+
+def build_central_hub_spec(runner: str, *, support_level: str = "supported", evidence: str = "tested") -> CentralHubSpec:
+    normalized_runner = str(runner or "").strip().lower()
+    template_path = _HUB_TEMPLATE_PATHS.get(normalized_runner)
+    if template_path is None:
+        raise ValueError(f"unsupported central hub runner: {runner}")
+    return CentralHubSpec(
+        runner=normalized_runner,
+        template_path=template_path,
+        support_level=support_level,
+        evidence=evidence,
+    )
 
 def supported_wrapper_names() -> set[str]:
     return set(_WRAPPER_CLIENT_COMMANDS.keys())

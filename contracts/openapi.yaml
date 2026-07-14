@@ -744,6 +744,8 @@ components:
           $ref: '#/components/schemas/FirewallState'
         hooks:
           $ref: '#/components/schemas/HookControlState'
+        system_control:
+          $ref: '#/components/schemas/SystemControlStatus'
         hook_queue:
           $ref: '#/components/schemas/HookQueueStatus'
         integrations:
@@ -752,6 +754,56 @@ components:
           $ref: '#/components/schemas/MonitorProcessStatus'
         launchagent:
           $ref: '#/components/schemas/LaunchAgentStatus'
+    SystemControlStatus:
+      type: object
+      additionalProperties: true
+      properties:
+        schema_version:
+          type: integer
+        mode:
+          type: string
+          enum: [enabled, disabling, disabled, enabling, partial]
+        scope:
+          type: string
+        reason:
+          type: string
+        operation_id:
+          type: string
+        disabled_at:
+          type: string
+        updated_at:
+          type: string
+        admission_open:
+          type: boolean
+        state_valid:
+          type: boolean
+        state_path:
+          type: string
+        anchor_path:
+          type: string
+        integrity:
+          type: string
+          enum: [virgin_uninitialized, legacy_unanchored, anchored, invalid]
+        provenance_assurance:
+          type: string
+          enum: [instrumented_runner_event_unverified]
+        memory_root:
+          type: string
+        recovery_command:
+          type: string
+        previous:
+          type: object
+          additionalProperties: true
+        background_drain:
+          type: object
+          additionalProperties: true
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        last_error:
+          type: string
     HookQueueStatus:
       type: object
       additionalProperties: true

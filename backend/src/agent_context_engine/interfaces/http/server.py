@@ -33,6 +33,7 @@ from ...application.monitoring.monitor.analysis import build_session_analysis_re
 from ...application.diagnostics import run_doctor_checks
 from ...application.installation import ensure_monitor_frontend_build, frontend_build_status
 from ...application.risk_api import risk_review_action
+from ...application.system_control import system_admission_open
 from .routes.artifact_api import monitor_dream_graph, monitor_graph_artifact_detail
 from .routes.ask_api import (
     monitor_ask,
@@ -105,6 +106,7 @@ def _persist_monitor_runtime_state(
     language: str,
     status: str,
     url: str,
+    shutdown_token: str = "",
 ) -> None:
     try:
         profile = load_installation_profile(ROOT)
@@ -151,6 +153,7 @@ def _persist_monitor_runtime_state(
             started_at=now_iso if status == "running" else "",
             stopped_at=now_iso if status in {"stopped", "stale"} else "",
             last_known_url=url,
+            shutdown_token=shutdown_token if status == "running" else "",
         )
     except Exception as exc:  # noqa: BLE001
         print(f"warn  monitor runtime persistence skipped: {exc}")
@@ -416,6 +419,16 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 self.send_json(monitor_search(qs.get("q", [""])[0], int(qs.get("limit", ["10"])[0])))
                 return
             if parsed.path == "/api/retrieve":
+                if not system_admission_open(installation_root=ROOT):
+                    self.send_json(
+                        {
+                            "error": "Agent Context Engine is suspended; LLM-backed retrieval is unavailable.",
+                            "error_code": "system_suspended",
+                            "status_path": "/api/status",
+                        },
+                        423,
+                    )
+                    return
                 self.send_json(
                     monitor_retrieve(
                         qs.get("q", [""])[0],
@@ -633,6 +646,25 @@ class MonitorHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("content-length", "0"))
         raw = self.rfile.read(length).decode("utf-8", errors="replace")
         try:
+            if self.path == "/api/runtime/shutdown":
+                token = self._monitor_token_from_headers(self.headers)
+                expected = getattr(self.server, "monitor_token", "")  # type: ignore[attr-defined]
+                if not expected or not secrets.compare_digest(token, expected):
+                    self.send_json({"error": "invalid monitor token", "error_code": "invalidMonitorToken"}, 403)
+                    return
+                self.send_json({"status": "stopping"}, 202)
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
+            if not system_admission_open(installation_root=ROOT):
+                self.send_json(
+                    {
+                        "error": "Agent Context Engine is suspended; the monitor is read-only.",
+                        "error_code": "system_suspended",
+                        "status_path": "/api/status",
+                    },
+                    423,
+                )
+                return
             payload = json.loads(raw) if raw else {}
             if self.path == "/api/analyze-session":
                 token = self._monitor_token_from_headers(self.headers)
@@ -847,6 +879,16 @@ class MonitorHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("content-length", "0"))
         raw = self.rfile.read(length).decode("utf-8", errors="replace")
         try:
+            if not system_admission_open(installation_root=ROOT):
+                self.send_json(
+                    {
+                        "error": "Agent Context Engine is suspended; the monitor is read-only.",
+                        "error_code": "system_suspended",
+                        "status_path": "/api/status",
+                    },
+                    423,
+                )
+                return
             payload = json.loads(raw) if raw else {}
             if self.path == "/api/firewall-override":
                 token = self._monitor_token_from_headers(self.headers)
@@ -945,6 +987,7 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         language=language,
         status="running",
         url=url,
+        shutdown_token=server.monitor_token,  # type: ignore[attr-defined]
     )
     print(f"agent-context-engine monitor {MONITOR_VERSION}: {url}")
     print(f"runner={args.runner} model={runner_model(args.runner, args.runner_model) or '-'} root={ROOT}")

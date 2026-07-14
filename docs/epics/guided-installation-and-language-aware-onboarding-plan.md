@@ -1,7 +1,9 @@
 # Epic / UX Plan: Guided Installation and Language-Aware Onboarding
 
 > Status 2026-06-22: **implemented in the current production slice**.
-> `install-discovery` is read-only, detects checkout root and checkout role,
+> `install-discovery` without an output option is operationally read-only,
+> while `--plan-json` intentionally writes only the requested approval artifact.
+> Discovery detects checkout root and checkout role,
 > finds plausible existing `memory_root` candidates, reports wrapper conflicts
 > and LaunchAgent identity, returns a structured recommended install plan, and
 > suggests safe defaults for `agent-context-engine` such as isolated monitor
@@ -61,7 +63,9 @@ Those values are proposals, not implicit consent.
 
 This epic is materially complete when:
 
-1. `install-discovery` is read-only.
+1. `install-discovery` performs no installation mutation; without an output
+   option it is operationally read-only, while `--plan-json` writes only the
+   explicitly requested approval artifact.
 2. Checkout-role detection distinguishes public, source, and existing-install
    cases.
 3. Discovery output includes target, memory root, monitor port, wrapper

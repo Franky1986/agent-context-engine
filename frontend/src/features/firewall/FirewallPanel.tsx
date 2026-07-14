@@ -23,6 +23,7 @@ import type {
 import './firewall-panel.css';
 
 const FIREWALL_POLL_MS = 5000;
+const FIREWALL_REQUEST_TIMEOUT_MS = 15000;
 
 export type FirewallPanelProps = {
   initialData?: FirewallState;
@@ -99,6 +100,7 @@ export function FirewallPanel({
 }: FirewallPanelProps) {
   const [data, setData] = useState<FirewallState | undefined>(initialData);
   const [riskData, setRiskData] = useState<RiskListResponse | undefined>();
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
 
@@ -109,40 +111,103 @@ export function FirewallPanel({
   useEffect(() => {
     let cancelled = false;
 
+    function withTimeout<T>(request: Promise<T>, requestName: string): Promise<T> {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`Request ${requestName} timed out after ${FIREWALL_REQUEST_TIMEOUT_MS}ms`));
+        }, FIREWALL_REQUEST_TIMEOUT_MS);
+      });
+      return Promise.race([
+        request.finally(() => {
+          if (timeoutId !== undefined) {
+            clearTimeout(timeoutId);
+          }
+        }),
+        timeout,
+      ]);
+    }
+
     const load = async () => {
+      setLoading(true);
+      setError('');
+      const loadErrors: string[] = [];
+
       if (mode === 'rules') {
-        const [state, rulesPayload, suggestionsPayload, risksPayload] = await Promise.all([
-          getFirewallState(),
-          getFirewallRules({ limit: 200 }),
-          getFirewallSuggestions(20),
-          getRisks(80),
+        const [stateResult, rulesResult, suggestionsResult, risksResult] = await Promise.allSettled([
+          withTimeout(getFirewallState(), 'firewall state'),
+          withTimeout(getFirewallRules({ limit: 200 }), 'firewall rules'),
+          withTimeout(getFirewallSuggestions(20), 'firewall suggestions'),
+          withTimeout(getRisks(80), 'risk list'),
         ]);
         if (cancelled) return;
+        if (stateResult.status === 'rejected') {
+          throw stateResult.reason;
+        }
+        const state = stateResult.value;
+        const rules = rulesResult.status === 'fulfilled' ? rulesResult.value : undefined;
+        const suggestions = suggestionsResult.status === 'fulfilled' ? suggestionsResult.value : undefined;
+        const risksPayload = risksResult.status === 'fulfilled' ? risksResult.value : undefined;
+
         const nextState = {
           ...state,
-          rules: rulesPayload.rules ?? state.rules,
-          suggestions: suggestionsPayload.suggestions ?? state.suggestions,
+          rules: rules?.rules ?? state.rules,
+          suggestions: suggestions?.suggestions ?? state.suggestions,
         };
         setData(nextState);
         onStateChange?.(nextState);
-        setRiskData(risksPayload);
+        if (risksPayload) {
+          setRiskData(risksPayload);
+        }
+        if (rulesResult.status === 'rejected') {
+          loadErrors.push(`rules: ${(rulesResult.reason as Error).message ?? 'failed to load'}`);
+        }
+        if (suggestionsResult.status === 'rejected') {
+          loadErrors.push(`suggestions: ${(suggestionsResult.reason as Error).message ?? 'failed to load'}`);
+        }
+        if (risksResult.status === 'rejected') {
+          loadErrors.push(`risks: ${(risksResult.reason as Error).message ?? 'failed to load'}`);
+        }
+        setError(loadErrors.join(' · '));
+        setLoading(false);
         return;
       }
 
-      const [state, risksPayload] = await Promise.all([getFirewallState(), getRisks(80)]);
+      const [stateResult, risksResult] = await Promise.allSettled([
+        withTimeout(getFirewallState(), 'firewall state'),
+        withTimeout(getRisks(80), 'risk list'),
+      ]);
+      if (cancelled) return;
+      if (stateResult.status === 'rejected') {
+        throw stateResult.reason;
+      }
+      const state = stateResult.value;
+      const risksPayload = risksResult.status === 'fulfilled' ? risksResult.value : undefined;
       if (cancelled) return;
       setData(state);
       onStateChange?.(state);
-      setRiskData(risksPayload);
-      setError('');
+      if (risksPayload) {
+        setRiskData(risksPayload);
+      }
+      if (risksResult.status === 'rejected') {
+        loadErrors.push(`risks: ${(risksResult.reason as Error).message ?? 'failed to load'}`);
+      }
+      setError(loadErrors.join(' · '));
+      setLoading(false);
     };
 
     load().catch((err: unknown) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      if (!cancelled) {
+        setError(err instanceof Error ? err.message : String(err));
+        setLoading(false);
+      }
     });
     const timer = window.setInterval(() => {
       load().catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+          setLoading(false);
+        }
       });
     }, FIREWALL_POLL_MS);
 
@@ -172,6 +237,9 @@ export function FirewallPanel({
   const totalRuleCount = fixedRules.length + deterministicRules.length + llmRules.length;
   const warningsCount = suggestions.length;
   const enabled = data?.enabled !== false;
+  const stateLabel = data ? firewallStateLabel(language, data) : loading ? t(language, 'common.loading') : t(language, 'common.unknown');
+  const stateHint = data ? firewallStateHint(language, data) : loading ? t(language, 'common.loading') : t(language, 'common.unknown');
+  const disabledUntilLabel = data ? firewallDisabledUntilLabel(language, data) : loading ? t(language, 'common.loading') : t(language, 'common.unknown');
 
   async function activateFirewall() {
     setActionBusy(true);
@@ -196,8 +264,8 @@ export function FirewallPanel({
       <div className="panel-heading">
         <div>
           <p className="eyebrow">{t(language, 'firewall.heading.control')}</p>
-          <h2>{firewallStateLabel(language, data)}</h2>
-          <p className="firewall-state-copy">{firewallStateHint(language, data)}</p>
+          <h2>{stateLabel}</h2>
+          <p className="firewall-state-copy">{stateHint}</p>
         </div>
         <span>
           {activeOverrideCount} {t(language, 'firewall.kpi.activeOverrides')} · {pendingCount}{' '}
@@ -232,11 +300,11 @@ export function FirewallPanel({
       <div className="firewall-facts">
         <div>
           <dt>{t(language, 'firewall.meta.state')}</dt>
-          <dd>{firewallStateLabel(language, data)}</dd>
+          <dd>{stateLabel}</dd>
         </div>
         <div>
           <dt>{t(language, 'firewall.meta.pausedUntil')}</dt>
-          <dd>{firewallDisabledUntilLabel(language, data)}</dd>
+          <dd>{disabledUntilLabel}</dd>
         </div>
         <div>
           <dt>{t(language, 'firewall.meta.currentReason')}</dt>

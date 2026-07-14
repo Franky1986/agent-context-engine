@@ -62,7 +62,7 @@ export function IntegrationsPanel({ language = 'en', showHeading = true }: Integ
   }, []);
 
   const items: IntegrationStatusItem[] = payload?.items ?? [];
-  const root = text(status?.root, '/Users/frankrichter/projects/agent-memory');
+  const root = text(status?.root, '/Users/example/projects/agent-context-engine');
   const wrapperReadyCount = items.filter((item) => Boolean(item.wrapper_ready)).length;
   const manageableHooks = items.filter((item) => Boolean(item.hooks_manageable));
   const hooksEnabledCount = manageableHooks.filter((item) => Boolean(item.hooks_enabled)).length;

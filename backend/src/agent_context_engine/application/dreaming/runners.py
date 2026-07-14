@@ -298,13 +298,13 @@ def cursor_dream_command(model: str | None = None) -> list[str]:
     return command
 
 
-def gemini_dream_command(model: str | None = None) -> list[str]:
+def gemini_dream_command(model: str | None = None, *, output_format: str = "text") -> list[str]:
     return [
         "gemini",
         "--model",
         model or GEMINI_DREAM_MODEL,
         "--output-format",
-        "text",
+        output_format,
         "--prompt",
     ]
 
@@ -312,9 +312,9 @@ def gemini_dream_command(model: str | None = None) -> list[str]:
 def antigravity_dream_command(model: str | None = None) -> list[str]:
     return [
         "agy",
-        "--print",
         "--model",
         model or ANTIGRAVITY_DREAM_MODEL,
+        "-p",
     ]
 
 
@@ -324,7 +324,7 @@ def opencode_dream_command(model: str | None = None) -> list[str]:
         "run",
         "--dir",
         str(ROOT),
-        "--dangerously-skip-permissions",
+        "--auto",
     ]
     if model or OPENCODE_DREAM_MODEL:
         command.extend(["--model", model or OPENCODE_DREAM_MODEL])

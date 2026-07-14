@@ -34,17 +34,21 @@ Current integration families:
 Special current runtime caveat:
 
 - `antigravity` is implemented across status, hooks, monitor, resume, and
-  runner plumbing, but the concrete headless `agy` prompt contract remains a
-  validation-sensitive path until confirmed against a real local CLI runtime.
+  runner plumbing. Headless `agy` calls must pass the prompt as the value of
+  `-p` / `--print` (`agy --model "Gemini 3.5 Flash (Minimal)" -p "<prompt>"`);
+  appending the prompt as a positional argument after `--print` is not the
+  supported contract. The Antigravity PreTool classifier defaults to
+  `Gemini 3.5 Flash (Minimal)` unless overridden.
 
 This runbook covers both monitor-facing status semantics and the command paths
 an agent should use.
 
 When migrating from older per-project setups, explicitly check for stale
 project-local `.agents/`, `.gemini/`, or `.opencode/` artifacts in external
-projects. Under the current global-only model for Antigravity, Gemini, and
-OpenCode, these leftovers should be removed once the central wrapper-based
-bridge is enabled and verified.
+projects. Antigravity and Gemini can now be activated through the central
+hub-backed project-local bridge; OpenCode remains the global-only case. Treat
+legacy artifacts as drift or migration candidates and remove them only after
+the replacement bridge is enabled and verified.
 
 ## Status Model
 
@@ -196,14 +200,20 @@ User-only commands:
 ```sh
 hooks-disable [--runner <runner>] [--reason "..."]
 hooks-enable [--runner <runner>] [--reason "..."]
-hooks-status
+hooks-status [--runner <runner>]
+hooks-disable --project [--runner <runner>] [--reason "..."]
+hooks-enable --project [--runner <runner>] [--reason "..."]
+hooks-status --project [--runner <runner>]
 ```
 
 Precedence:
 
 - global disabled wins over every runner state
 - otherwise runner overrides apply
+- otherwise an exact-project disable or project-runner disable applies
 - otherwise hooks are effectively enabled
+- enable responses report the effective state; clearing a narrower override
+  does not claim success while a broader disable still wins
 
 Operational rules:
 
@@ -211,6 +221,57 @@ Operational rules:
 - the monitor may display them, but not perform them as a normal mutation
 - when disabled, the relevant hook path must no-op instead of partially
   running
+- `--project` always means the exact current hook workspace; it never walks to
+  a parent directory
+- project controls retain the minimal hook connection so direct user status
+  and re-enable lines remain reachable
+
+## Full-System Suspension
+
+Hook control and system suspension are separate layers. `hooks-disable` changes
+the preserved hook-control document. Full-system suspension leaves that
+document byte-for-byte unchanged behind a closed admission gate.
+
+Direct-user chat controls:
+
+```text
+system-disable --scope all --reason "Maintenance"
+system-enable --scope all --reason "Maintenance complete"
+system-status
+```
+
+Operational contract:
+
+- only the current instrumented native user-prompt hook path may mutate system
+  state through supported ACE entrypoints; this is not OS-authenticated user
+  presence or a boundary against arbitrary same-user code
+- `agent-context-engine system-status [--json]` is read-only; no mutating CLI
+  or monitor endpoint exists
+- state, integrity anchor, and lock are installation-specific under the
+  resolved memory root
+- after initialization, missing, changed, or invalid state is `partial` and
+  fail-closed
+- monitor reads remain available; POST/DELETE and LLM-backed retrieval return
+  HTTP 423 `system_suspended`
+- normal hooks, queue claims, dreams, graph work, sync, maintenance, and
+  scheduler runs do not start while admission is closed
+- work already running is allowed to finish
+- wrappers do not activate or repair projects while suspended
+- `hooks-status` remains available, while hook enable/disable is rejected
+- enable restores only a scheduler proven active in the disable snapshot
+- the exact displayed `system-recover` line rebuilds disabled state but never
+  reloads an unproven scheduler
+
+Recognizable agent-tool attempts to execute these controls, mutate the state or
+anchor, or forge `log-hook` are blocked and audited. This scanner is defense in
+depth for instrumented tool paths, not a same-user filesystem sandbox.
+The corresponding block feedback must not offer a one-time approval or
+persistent firewall exception. It must tell the agent not to retry the command,
+its help form, or an alternate mutation. For a natural-language request to
+deactivate the whole system, the agent should immediately provide the exact
+direct-user `system-disable --scope all --reason "..."` chat line. It must not
+suggest removing global wrappers, because those wrappers are part of the
+status, enable, and recovery path.
 
 ## Global vs Root Wrapper Semantics
 
@@ -223,6 +284,7 @@ A wrapper is global only if the command resolves from any shell location:
 ```sh
 which codex-ace
 which claude-ace
+which cursor-ace
 which agy-ace
 which gemini-ace
 which opencode-ace
@@ -254,12 +316,21 @@ Global/root wrappers and active project context are separate concerns.
   monitor state, and the local CLI.
 - `Project workdir` is the repo/folder the user actually wants to work in.
 
-For the root-managed wrappers (`codex-ace`, `claude-ace`, `agy-ace`,
-`gemini-ace`, `opencode-ace`):
+For the shared wrappers (`codex-ace`, `claude-ace`, `cursor-ace`,
+`agy-ace`, `gemini-ace`, `opencode-ace`):
 
-- the wrapper may start the runner from the Agent Context Engine root
+- canonical shared wrapper symlinks resolve the active Agent Context Engine
+  installation from the shared home `active-root`
+- direct repo-local wrappers and instance-named wrapper symlinks resolve their
+  owning installation instead, preserving side-by-side isolation
 - but it must preserve the original shell folder as the initial workdir
   context when launched from somewhere else
+- `codex-ace`, `claude-ace`, `agy-ace`, and `gemini-ace` then continue from
+  the exact shell folder where the wrapper was started
+- `cursor-ace` activates or verifies the project root that owns the Cursor
+  hook config and exits without starting Cursor
+- `opencode-ace` still starts the runner from the installation root because
+  its plugin/runtime contract requires that
 - later explicit project switches inside the chat change the active workdir for
   the agent task, not the Agent Context Engine root itself
 
@@ -292,12 +363,46 @@ If only the Codex GUI workspace is prepared but `codex` is missing, say that
 explicitly. GUI-only hook capture may work, but `codex-ace`, `codex exec`,
 monitor ask with runner `codex`, and Dreaming do not.
 
+`codex-ace` treats a project as hook-active only when the project-local
+`.codex/hooks.json` is valid JSON, contains the Agent Context Engine command
+hook for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, and
+`Stop`. The command must be a shell-quoted absolute path to the project-local
+`.codex/hooks/hook_adapter.sh` symlink, and that symlink must resolve to the
+active central Codex hub. Legacy relative commands such as
+`./.codex/hooks/hook_adapter.sh` are treated as stale ACE-owned config and
+should be repaired by activation. The project's
+`.codex/agent-memory-binding.json` must also point at the active installation
+root. Missing, malformed, partial, stale, or foreign hook configs or bindings
+should trigger the same language-aware activation prompt as a fresh project.
+Wrapper activation and launch are scoped to the exact current shell directory.
+Parent Git roots, parent Agent Context Engine hook configs, and `$HOME` runner
+configs must not silently become the project root for a nested wrapper launch.
+If the current directory has no complete local hook config, ask whether to
+activate hooks in the current directory. Codex may execute both child and
+parent hook configs when both are present, so the central Codex adapter also
+deduplicates identical native hook payloads before logging.
+Codex' own hook trust review remains separate; use `/hooks` in Codex when the
+files are complete but Codex still does not execute the hook.
+
+Gemini follows the same path-stability rule: `.gemini/settings.json` should
+store shell-quoted absolute commands to the project-local
+`.gemini/hooks/hook_adapter.sh` symlink, followed by the Gemini event name.
+Legacy relative Gemini commands are treated as stale ACE-owned config and
+repaired by activation.
+
+For interactive activation prompts, `codex-ace`, `claude-ace`, `cursor-ace`,
+`agy-ace`, and `gemini-ace` use `AGENT_CONTEXT_ENGINE_LANGUAGE` first, then
+the installation profile's stored `monitor.language`, then the shell locale.
+Agents should
+expect a German install to produce German activation prompts even when the
+terminal locale is neutral.
+
 ### Claude
 
 Primary wrapper:
 
 ```sh
-cd /path/to/agent-context-engine-root && ./scripts/claude-ace
+cd /path/to/project-root && claude-ace
 ```
 
 Global command, only if linked in `PATH`:
@@ -305,6 +410,18 @@ Global command, only if linked in `PATH`:
 ```sh
 claude-ace
 ```
+
+`claude-ace` resolves the active installation according to the shared-versus-
+instance wrapper ownership contract, keeps the current shell directory as the
+project directory, verifies that
+the local adapter points to the central Claude hub, verifies that
+`.claude/agent-memory-binding.json` points at the active installation, and then
+starts `claude` from that directory. Claude project hooks use a
+shell-quoted absolute command to the project-local
+`.claude/hooks/hook_adapter.sh` symlink; older relative
+`./.claude/hooks/hook_adapter.sh` and
+`${CLAUDE_PROJECT_DIR}/.claude/hooks/hook_adapter.sh` ACE hooks are treated as
+repairable legacy entries.
 
 Claude Desktop must not be treated as equivalent to Claude Code CLI here. If
 `claude` is missing, the integration is not headless-ready even if a separate
@@ -315,7 +432,7 @@ GUI/editor experience exists elsewhere.
 Primary wrapper:
 
 ```sh
-cd /path/to/agent-context-engine-root && ./scripts/gemini-ace
+cd /path/to/project-root && gemini-ace
 ```
 
 Global command, only if linked in `PATH`:
@@ -324,11 +441,14 @@ Global command, only if linked in `PATH`:
 gemini-ace
 ```
 
-Gemini loads hooks from the current working directory. The wrapper starts
-Gemini from the central Agent Context Engine root so `.gemini/settings.json` and its
-hook adapter are loaded, then adds the original launch directory back to the
-workspace via `--include-directories`. The hook adapter uses
-`AGENT_MEMORY_LAUNCH_CWD` as the effective project context.
+`gemini-ace` resolves the active installation according to the shared-versus-
+instance wrapper ownership contract, keeps the current shell directory as the
+project directory, verifies that
+the local adapter points to the central Gemini hub, verifies that the Gemini settings
+contain the expected Agent Context Engine hook events, verifies the workspace
+binding, and then starts `gemini` from that directory. Missing, malformed,
+partial, stale, or foreign Gemini hook configs or bindings should trigger the
+same language-aware activation prompt as a fresh project.
 
 Global hook bridge setup (run once per Agent Context Engine root):
 
@@ -336,16 +456,15 @@ Global hook bridge setup (run once per Agent Context Engine root):
 agent-context-engine gemini-enable
 ```
 
-`gemini-enable --target <project-path>` is deprecated and refused. Gemini
-Agent Context Engine is global-only; `gemini` alone in a project does not activate
-Agent Context Engine hooks.
+`gemini-enable --target <project-path>` remains available for explicit
+project-local activation from the CLI when a project does not yet have hooks.
 
 ### Antigravity CLI
 
 Primary wrapper:
 
 ```sh
-cd /path/to/agent-context-engine-root && ./scripts/agy-ace
+cd /path/to/project-root && agy-ace
 ```
 
 Global command, only if linked in `PATH`:
@@ -360,11 +479,14 @@ Compatibility alias:
 antigravity-ace
 ```
 
-Antigravity loads hooks from the current working directory. The wrapper starts
-Antigravity from the central Agent Context Engine root so `.agents/hooks.json` and its
-hook adapter are loaded, then adds the original launch directory back as a
-workspace via `--add-dir`. The hook adapter uses `AGENT_MEMORY_LAUNCH_CWD` as
-the effective project context.
+`agy-ace` resolves the active installation according to the shared-versus-
+instance wrapper ownership contract, keeps the current shell directory as the
+project directory, verifies that
+the local adapter points to the central Antigravity hub, verifies that the Antigravity
+hook config contains the expected Agent Context Engine events, verifies the
+workspace binding, and then starts `agy` from that directory. Missing,
+malformed, partial, stale, or foreign Antigravity hook configs or bindings
+should trigger the same language-aware activation prompt as a fresh project.
 
 Global hook bridge setup (run once per Agent Context Engine root):
 
@@ -372,9 +494,8 @@ Global hook bridge setup (run once per Agent Context Engine root):
 agent-context-engine antigravity-enable
 ```
 
-`antigravity-enable --target <project-path>` is deprecated and refused.
-Antigravity Agent Context Engine is global-only; `agy` alone in a project does not
-activate Agent Context Engine hooks.
+`antigravity-enable --target <project-path>` remains available for explicit
+project-local activation from the CLI when a project does not yet have hooks.
 
 ### Opencode
 
@@ -393,7 +514,10 @@ opencode-ace [project]
 OpenCode loads plugins only from its startup directory. The wrapper starts
 OpenCode from the central Agent Context Engine root so `.opencode/plugins/agent-memory.js`
 is loaded, then passes the original launch directory back as the project
-argument via `AGENT_MEMORY_LAUNCH_CWD`.
+argument via `AGENT_MEMORY_LAUNCH_CWD`. `opencode-ace` resolves the active
+installation through the shared-versus-instance wrapper ownership contract,
+and it refuses to start if the OpenCode plugin bridge
+or `opencode.json` is missing in the active root.
 
 Global plugin bridge setup (run once per Agent Context Engine root):
 
@@ -413,7 +537,26 @@ let `AGENT_MEMORY_LAUNCH_CWD` carry the project context.
 
 ### Cursor
 
-Cursor is not a single global wrapper flow. It is activated per project.
+Cursor is activated per project. `cursor-ace` is a global convenience helper
+for the current project directory; it does not start the Cursor IDE.
+
+Current-project activation from a Cursor integrated terminal:
+
+```sh
+cursor-ace
+```
+
+Non-interactive current-project activation:
+
+```sh
+cursor-ace --activate-here
+```
+
+Status-only check:
+
+```sh
+cursor-ace --status
+```
 
 Project activation:
 
@@ -441,6 +584,8 @@ Operational rules for activation:
 After activation:
 
 - open the target project in Cursor
+- if Cursor does not pick up newly written hooks, restart Cursor once or reload
+  the window
 - work there normally
 - Agent Context Engine hooks act inside that project
 - required background LLM workflows use `codex` or `claude`, not `cursor-agent`

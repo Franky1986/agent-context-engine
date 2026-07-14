@@ -7,9 +7,25 @@ if [ "${AGENT_MEMORY_DREAM:-0}" = "1" ] || [ "${AGENT_MEMORY_INTERNAL_RUN:-0}" =
 fi
 
 EVENT="${1:-}"
-ROOT="__AGENT_CONTEXT_ENGINE_ROOT__"
-SCRIPT="__AGENT_MEMORY_SCRIPT__"
-HOOKS_STATE="$ROOT/memory/local/hooks-state.json"
+ROOT="${AGENT_CONTEXT_ENGINE_ROOT:-}"
+if [ -z "$ROOT" ]; then
+  echo "gemini hook adapter: AGENT_CONTEXT_ENGINE_ROOT is not set" >&2
+  printf '{}\n'
+  exit 0
+fi
+
+SCRIPT="${AGENT_CONTEXT_ENGINE_SCRIPT:-}"
+if [ -z "$SCRIPT" ]; then
+  if [ -f "$ROOT/scripts/agent_context_engine.py" ]; then
+    SCRIPT="$ROOT/scripts/agent_context_engine.py"
+  elif [ -f "$ROOT/docs/skills/agent-context-engine/scripts/agent_context_engine.py" ]; then
+    SCRIPT="$ROOT/docs/skills/agent-context-engine/scripts/agent_context_engine.py"
+  else
+    echo "gemini hook adapter: cannot find agent_context_engine.py under $ROOT" >&2
+    printf '{}\n'
+    exit 0
+  fi
+fi
 LOG="$ROOT/memory/logs/gemini-hook.err.log"
 mkdir -p "$(dirname "$LOG")"
 TMPIN="$(mktemp)"
@@ -17,34 +33,6 @@ TMPPAYLOAD="$(mktemp)"
 TMPOUT="$(mktemp)"
 TMPERR="$(mktemp)"
 trap 'rm -f "$TMPIN" "$TMPPAYLOAD" "$TMPOUT" "$TMPERR"' EXIT
-
-if ! python3 - "$HOOKS_STATE" gemini <<'PY'
-import json
-import sys
-from pathlib import Path
-
-
-path = Path(sys.argv[1])
-runner = sys.argv[2]
-if not path.exists():
-    raise SystemExit(0)
-try:
-    state = json.loads(path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
-if state.get("enabled") is False:
-    raise SystemExit(1)
-runner_state = state.get("runners", {}).get(runner)
-if isinstance(runner_state, dict) and runner_state.get("enabled") is False:
-    raise SystemExit(1)
-if runner_state is False:
-    raise SystemExit(1)
-raise SystemExit(0)
-PY
-then
-  printf '{}\n'
-  exit 0
-fi
 
 cat > "$TMPIN"
 
@@ -176,6 +164,7 @@ PY
 set +e
 env AGENT_CONTEXT_ENGINE_ROOT="$ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client gemini \
   < "$TMPPAYLOAD" \
+  3</dev/null \
   > "$TMPOUT" \
   2> "$TMPERR"
 CODE=$?

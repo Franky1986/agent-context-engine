@@ -20,6 +20,8 @@ between backend and frontend.
 - Keep compatibility aliases documented when they remain supported.
 - Keep protected control-plane behavior explicit in the contract when routes
   intentionally reject classes of mutation requests.
+- Expose system-control state integrity, its anchor path, and the explicit
+  instrumented-but-unverified runner-event provenance assurance.
 
 ## Inputs / Outputs
 - Inputs: OpenAPI YAML edits.

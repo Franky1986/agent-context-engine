@@ -20,6 +20,7 @@ from ...monitor import (
     monitor_search as monitor_search_case,
     monitor_status as monitor_status_case,
 )
+from ...system_control import system_control_status
 
 
 def _with_connection() -> Any:
@@ -29,7 +30,9 @@ def _with_connection() -> Any:
 def monitor_status(runner: str, monitor_context: dict[str, Any] | None = None) -> dict[str, Any]:
     conn = _with_connection()
     try:
-        return monitor_status_case(conn, runner, ROOT, monitor_version=MONITOR_VERSION, monitor_context=monitor_context)
+        payload = monitor_status_case(conn, runner, ROOT, monitor_version=MONITOR_VERSION, monitor_context=monitor_context)
+        payload["system_control"] = system_control_status(installation_root=ROOT)
+        return payload
     finally:
         conn.close()
 

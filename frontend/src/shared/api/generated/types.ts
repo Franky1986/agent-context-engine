@@ -598,10 +598,43 @@ export interface components {
             queued_events?: number;
             firewall?: components["schemas"]["FirewallState"];
             hooks?: components["schemas"]["HookControlState"];
+            system_control?: components["schemas"]["SystemControlStatus"];
             hook_queue?: components["schemas"]["HookQueueStatus"];
             integrations?: components["schemas"]["IntegrationSummary"];
             monitor_process?: components["schemas"]["MonitorProcessStatus"];
             launchagent?: components["schemas"]["LaunchAgentStatus"];
+        } & {
+            [key: string]: unknown;
+        };
+        SystemControlStatus: {
+            schema_version?: number;
+            /** @enum {string} */
+            mode?: "enabled" | "disabling" | "disabled" | "enabling" | "partial";
+            scope?: string;
+            reason?: string;
+            operation_id?: string;
+            disabled_at?: string;
+            updated_at?: string;
+            admission_open?: boolean;
+            state_valid?: boolean;
+            state_path?: string;
+            anchor_path?: string;
+            /** @enum {string} */
+            integrity?: "virgin_uninitialized" | "legacy_unanchored" | "anchored" | "invalid";
+            /** @enum {string} */
+            provenance_assurance?: "instrumented_runner_event_unverified";
+            memory_root?: string;
+            recovery_command?: string;
+            previous?: {
+                [key: string]: unknown;
+            };
+            background_drain?: {
+                [key: string]: unknown;
+            };
+            steps?: {
+                [key: string]: unknown;
+            }[];
+            last_error?: string;
         } & {
             [key: string]: unknown;
         };

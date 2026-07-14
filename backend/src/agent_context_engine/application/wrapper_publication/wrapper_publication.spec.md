@@ -11,6 +11,9 @@ inline.
 - Wrapper command name rendering from prefix/suffix policy.
 - Wrapper script path resolution inside an installation root.
 - Wrapper publication policy inputs for the current active path.
+- Wrapper root ownership after publication: canonical shared symlinks follow
+  shared takeover state, while direct and instance-named wrappers stay pinned
+  to their owning installation.
 
 ## Non-Scope
 
@@ -43,7 +46,9 @@ inline.
 
 - Installation and instance-profile naming use the same command-name renderer.
 - Installation link creation uses a dedicated publication adapter.
-- Current macOS-visible global wrapper behavior remains unchanged.
+- Canonical shared macOS wrapper symlinks continue to follow the shared
+  `active-root`; instance-named symlinks execute their own installation even
+  when a different shared installation is active.
 
 ## Tests / Checks
 

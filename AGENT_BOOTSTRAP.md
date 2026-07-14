@@ -23,13 +23,14 @@ agent should:
    answer onward.
    If the request contains an explicit German install phrase (for example `bitte installieren`),
    force the install language for that interaction to `de`.
-4. Run `python3 scripts/agent_context_engine.py install-discovery` first when this is a
-   fresh public clone or the target/memory-root relationship is still unclear.
+4. Run `python3 scripts/agent_context_engine.py install-discovery --plan-json
+   <file>` first for every agent-driven install. The plan file is the approval
+   artifact even when target and memory-root relationships appear obvious.
    If the user later switches the install conversation language, rerun
    discovery with an explicit `--language de` or `--language en`, and carry
    that same explicit language into the final install command.
-   If execution should be delegated, use `install-discovery --plan-json <file>`
-   and keep the resulting file unchanged until explicit user approval.
+   Keep the resulting file unchanged until explicit user approval, then invoke
+   `install --plan-json <file>` rather than reconstructing its options.
 5. Summarize the suggested target root, memory root, monitor port, wrapper
    naming, and refresh mode, then wait for the user's approval before any
    install or refresh mutation.
@@ -48,6 +49,9 @@ agent should:
    must also state whether the matching terminal CLI is installed and
    authenticated. Codex app/editor usage alone and Claude Desktop alone do not
    satisfy that requirement.
+   A negative auth result from a filesystem- or process-restricted environment
+   is inconclusive. Rerun that exact readiness probe with the required access
+   before reporting a runner as unauthenticated.
 6. If discovery points to the central default install root
    `~/.agent-context-engine/install`, treat that as the default plan even when
    the current checkout itself is fresh. State clearly that the checkout stays
@@ -67,9 +71,24 @@ agent should:
 11. Keep all writes inside the chosen target root and explicit memory root. Do
    not mutate a separate source checkout when working inside
    `agent-context-engine`.
-12. After install, run `doctor` and `check-installation`.
-13. Ensure the installer leaves the local monitor running with the stored default host/port unless the user explicitly opted out.
+12. Read the installer's localized final result line and authoritative
+    post-install headless-CLI readiness. Its automatic
+    post-install pass keeps successful output compact and reports finding
+    counts by severity; run `doctor` and `check-installation` explicitly when
+    detailed diagnostics are needed.
+13. Ensure the installer leaves the local monitor running with the stored
+    default host/port unless the user explicitly opted out. Treat monitor start
+    as successful only when `/api/status` reports the selected installation
+    root and memory root and superseded monitors using that memory root no
+    longer remain active.
 14. Explain how the user starts the selected harness.
+
+Install and repair preserve an existing disabled or fail-closed system-control
+state under the resolved memory root. They must not silently reopen admission
+or reload a scheduler that the direct user suspended. Use the read-only
+`agent-context-engine system-status` command to diagnose that state.
+After system-control initialization, a missing or changed state file must also
+remain fail-closed through its installation-specific integrity anchor.
 
 Do not copy private runtime data into the public repository. Agent Context Engine stores
 runtime state under the default user root `~/.agent-context-engine`, with the default
@@ -95,7 +114,7 @@ defaults before writing files:
   and Cursor when they differ from the central Agent Context Engine root.
 - Global commands: whether to keep the shared public command names on this
   installation. By default the installer relinks `agent-context-engine`,
-  `ace`, `codex-ace`, `claude-ace`, `agy-ace`, `gemini-ace`, and
+  `ace`, `codex-ace`, `claude-ace`, `cursor-ace`, `agy-ace`, `gemini-ace`, and
   `opencode-ace` to the chosen target unless the user explicitly wants an
   isolated instance name instead.
 - Instance name: only needed when the user already has another Agent Context Engine
@@ -126,7 +145,8 @@ Reasonable defaults:
 From the fresh repository clone, discovery is now the preferred first step:
 
 ```sh
-python3 scripts/agent_context_engine.py install-discovery
+python3 scripts/agent_context_engine.py install-discovery \
+  --plan-json /tmp/agent-context-install-plan.json
 ```
 
 That reports:
@@ -178,7 +198,42 @@ is used before writing files in interactive use. Hook configs and GUI
 workspace hooks are the final activation step, and the closing
 `doctor`/`check-installation` pass runs after those hook files exist; if the
 install remains incomplete, leave hooks inactive and rerun install or repair
-after prerequisites are fixed.
+after prerequisites are fixed. Once runtime and frontend prerequisites are
+healthy, `repair-installation --apply` repeats installation-root hook and
+global bridge finalization, including recreation of a missing OpenCode plugin
+bridge. The automatic pass suppresses successful
+`doctor` detail, summarizes findings, and ends with an explicit localized
+installation result. A configured monitor already running for this same
+installation is reported as active rather than as a port conflict. A newly
+started monitor is accepted only after its status API matches both the chosen
+installation and memory root; the installer also verifies that older monitors
+sharing that memory root stay stopped after scheduler replacement.
+Registry or status PIDs are terminated only after loopback, status identity,
+and local process-command ownership checks. The same status identity contract
+applies on Windows; port acceptance alone is insufficient. An incomplete
+requested installation returns a non-zero exit code, and a new monitor is
+rolled back if superseded-monitor cleanup cannot be verified.
+On macOS this includes unloading the exact verified legacy submitted
+`com.agent-context-engine.monitor-<port>` KeepAlive job before terminating its
+superseded monitor process.
+
+For `codex`, `claude`, `antigravity`, and `gemini`, installation writes the
+central hook-adapter hubs under
+`$AGENT_CONTEXT_ENGINE_STORAGE_ROOT/.agent-context-engine/hooks/<runner>/` and
+a plain-text `active-root` file pointing to the chosen installation root. The
+local project adapters are symlinks to those stable hubs, so project configs
+stay valid even when the default installation moves.
+
+For the default memory root, metadata is normalized to
+`$HOME/.agent-context-engine`; install and repair migrate a legacy nested
+`memory/.agent-context-engine/active-root` into a compatibility link/file and
+do not treat that stale path as a second active installation.
+
+The hub derives its metadata root from its own resolved path when runner or IDE
+hooks invoke it without wrapper environment. A normal shared install with an
+external memory root updates both that external hub metadata and the shared
+home `active-root`; an isolated install updates only its own local metadata.
+Instance-named wrapper commands are pinned to their owning installation.
 
 When discovery detects that `agent-context-engine`, `ace`, or the shared
 `*-ace` wrapper names already point at another installation, the default plan
@@ -199,6 +254,7 @@ python3 scripts/agent_context_engine.py install \
   --wrapper-suffix ace \
   --link-codex-ace \
   --link-claude-ace \
+  --link-cursor-ace \
   --link-agy-ace \
   --link-gemini-ace \
   --link-opencode-ace \
@@ -215,6 +271,7 @@ python3 scripts/agent_context_engine.py install \
   --isolated \
   --link-codex-ace \
   --link-claude-ace \
+  --link-cursor-ace \
   --link-agy-ace \
   --link-gemini-ace \
   --link-opencode-ace \
@@ -250,6 +307,7 @@ graph extraction, and optional Neo4j sync.
 If a specific project should be activated for a client:
 
 ```sh
+cursor-ace
 agent-context-engine cursor-enable \
   --target /path/to/project \
   --installation-root /path/to/agent-context-engine-root
@@ -306,8 +364,12 @@ opencode-ace
 
 Cursor IDE:
 
-Open the project folder after `cursor-enable`; reload the Cursor window if it
-was already open.
+```sh
+cursor-ace
+```
+
+`cursor-ace` activates or verifies the current project and prints a reminder to
+reload/restart Cursor if newly written hooks are not picked up immediately.
 
 ## Verification
 

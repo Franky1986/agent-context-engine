@@ -1,7 +1,7 @@
 # Current Status
 
 ## Date
-2026-06-29
+2026-07-14
 
 ## Public Snapshot
 
@@ -35,22 +35,74 @@ workflows. The current public slice includes:
   recent-session context injection, scoped `session-start-context`, and
   user prompt hook messaging that still points to
   `session-start-hook-entry.md`.
+- project-local central hook-adapter hubs now let supported runner wrappers
+  stay in the current project directory while delegating through
+  installation-owned hub symlinks.
+- direct hub calls now derive their metadata root from the resolved hub path;
+  instance-named wrappers and isolated backups remain bound to their owning
+  installation, while shared external-storage installs update the canonical
+  home `active-root` takeover pointer.
+- direct-user system suspension is implemented as an installation-specific,
+  fail-closed admission gate with preserved hook state, owned-scheduler
+  disable/restore, read-only monitor status, bounded audit records, and no
+  public mutating CLI or HTTP endpoint. Initialized state is hash-anchored and
+  suspended CLI admission is default-deny with an explicit
+  safe-while-suspended inspection set. Runner-event provenance is
+  instrumented but not OS-authenticated, so arbitrary same-user code remains
+  outside the security boundary. The 2026-07-14 canonical unit and
+  install-integration buckets are green, and direct startup was confirmed for
+  all six supported wrapper commands. Event-level direct-chat suspension
+  coverage across every runner and real Windows validation remain release
+  gates.
+- direct-user hook controls now distinguish all hooks, one runner, the exact
+  current project, and one runner in that project. Project disable keeps the
+  hook recovery channel installed; agent tool and hook-state file mutations
+  remain hard-blocked.
+- Codex, Claude, Gemini, and Antigravity project hooks now use shell-quoted
+  absolute commands to the project-local adapter symlink, and activation
+  repairs legacy relative or runner-variable hook commands.
+- hook blocking messages and monitor session risk summaries now distinguish
+  invalid firewall classifier output from ordinary policy or tainted-context
+  blocks.
+- PreTool classifier runners now handle structured and event-wrapped output
+  more robustly across Claude, Gemini, Antigravity, and OpenCode, including a
+  one-shot schema repair prompt for text-only runners.
+- Antigravity headless calls use the `agy -p <prompt>` contract; the PreTool
+  classifier uses `Gemini 3.5 Flash (Minimal)` by default after direct local
+  validation of that syntax.
 
 Versioned release snapshot:
 
-- Backend / product: `0.2.10`
-- Monitor: `0.6.8`
+- Backend / product: `0.2.14.dev0` (unreleased)
+- Monitor: `0.6.10`
 
 ## Installation State
 
 The current install flow now supports:
 
-- read-only `install-discovery`,
+- installation-nonmutating `install-discovery`; `--plan-json` intentionally
+  writes only the requested approval artifact,
 - explicit `memory_root` configuration,
 - detection of existing installations and storage candidates,
 - public-checkout guardrails against cross-checkout mutation,
 - automatic post-install verification through `doctor` and
   `check-installation`,
+- compact localized install completion with severity-counted findings, correct
+  recognition of the installation's own active monitor, and migration of the
+  legacy nested default-home `active-root`,
+- mandatory plan-JSON approval handoff for agent-driven installs, authoritative
+  post-install Codex/Claude readiness, and separate historical binding
+  maintenance notices,
+- verified monitor takeover using status identity plus cleanup of
+  registered or locally discovered superseded monitors sharing the memory root,
+  including verified legacy macOS submitted KeepAlive monitor jobs. Registry
+  and status PIDs are never terminated; owned monitors use an authenticated
+  HTTP shutdown or a verified platform launcher and must remain absent through
+  an eight-second stability window. Failed takeover robustly rolls back the
+  newly started owned monitor,
+- Windows monitor startup uses a root-specific owned Task Scheduler launcher
+  and requires matching `/api/status` identity rather than stable port
+  acceptance; incomplete requested installs return non-zero,
 - isolated wrapper naming and local SQLite/runtime storage for side-by-side
   installs,
 - Windows-native `.cmd` publication and PowerShell hook/wrapper generation for
@@ -62,12 +114,19 @@ The current install flow now supports:
   monitor starts only after runtime/bootstrap, frontend build, and scheduler
   setup succeed, and the full `doctor`/`check-installation` pass closes the
   install afterwards.
+- successful installation-root finalization checks the required runner hook
+  configs and the OpenCode plugin bridge. Once runtime and frontend repair are
+  healthy, `repair-installation --apply` repeats that root finalization without
+  implicitly rewriting external workspace adapters.
 
 ## Integration State
 
 - `codex`, `claude`, and `cursor` distinguish GUI-hook readiness from headless
   CLI readiness.
 - `antigravity`, `gemini`, and `opencode` are global-only bridge flows.
+- `codex`, `claude`, `gemini`, and `antigravity` wrappers can use
+  project-local central hook-adapter hubs; `opencode` remains the deprecated
+  global-only exception.
 - Windows now uses native `.cmd` publication plus PowerShell-based hooks and
   wrappers while remaining explicitly below `supported`.
 - Monitor dashboard status uses a fast integration summary; slow external
@@ -117,9 +176,10 @@ Recent validation for the Windows experimental slice confirmed:
   `/api/dreams`, `/api/dream-queue`, and `/api/firewall-state`; firewall state
   reported enabled from the backend while the frontend pilot needed an
   `unknown/loading` state fix to avoid showing missing data as inactive,
-- detached monitor startup through raw `python.exe` / PowerShell proved
-  unreliable on Windows; the operational path now uses `cmd.exe /c start
-  "ace-monitor" /min ...` with explicit install and storage-root environment,
+- detached monitor startup through raw `python.exe`, PowerShell, or command-host
+  processes proved unreliable on Windows; installer autostart now uses a
+  root-specific owned Task Scheduler launcher with explicit install and
+  storage-root environment,
 - `dream --pending --runner deterministic` against the active Windows runtime
   returned `No sessions to dream`, so an empty Dreams view was confirmed as an
   empty-work state rather than a broken Dream endpoint,
@@ -143,9 +203,10 @@ confirmed:
 - `python3 scripts/check_agent_context_engine.py --skip-tests --skip-runtime-db`
   now completes the fresh-install smoke path without the previous interactive
   install stall,
-- the active install currently reports operational drift rather than code-path
-  failure for LaunchAgent and monitor runtime state (`installed: no`,
-  `loaded: no`, no local monitor API on `127.0.0.1:8788`),
+- the active public checkout monitor was restarted on `127.0.0.1:8787` after
+  the suspension hardening pass; `/api/status` reports backend
+  `0.2.14.dev0`, monitor `0.6.10`, the external shared memory root, and no
+  LaunchAgent drift,
 - `doctor` now degrades to a warning when instance metadata cannot be written,
   instead of crashing the diagnostic run.
 - runtime repo-index migration, rebuild-index indexing, and retrieval over the
@@ -187,6 +248,9 @@ Residual risk:
 - Windows support is still `experimental`; real-machine end-to-end validation for
   retrieval and external-project dreams is the remaining blocker for stronger
   support claims.
+- Upgrades from pre-root-specific Windows installs may require manual removal of
+  the legacy `AgentContextEngine\\Monitor-<name>` task and
+  `windows-monitor-start.cmd`; see `docs/setup/WINDOWS_INSTALLATION.md`.
 
 ## Known Follow-Up Areas
 

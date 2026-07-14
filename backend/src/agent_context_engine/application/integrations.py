@@ -11,8 +11,173 @@ from typing import Any
 from ..adapters.runners.cursor import CURSOR_EVENTS, cursor_hook_entry, cursor_paths, enable_cursor_hooks, is_agent_memory_cursor_hook, load_cursor_hooks, write_cursor_hooks
 from .dreaming.runners import runner_auth_status
 from .hooks_state import hook_runner_status
-from ..infrastructure.config import ANTIGRAVITY_DREAM_MODEL, CLAUDE_DREAM_MODEL, CODEX_DREAM_MODEL, OPENCODE_DREAM_MODEL, ROOT, SCRIPT_PATH, SKILL_ROOT
-from .instance_profile import agent_memory_cli_for_root, load_installation_profile, preferred_agent_memory_cli_for_root, resolve_runner_wrapper_name, resolve_wrapper_command_name
+from ..infrastructure.config import (
+    ANTIGRAVITY_DREAM_MODEL,
+    CLAUDE_DREAM_MODEL,
+    CODEX_DREAM_MODEL,
+    OPENCODE_DREAM_MODEL,
+    ROOT,
+    SCRIPT_PATH,
+    SKILL_ROOT,
+    activated_projects_path,
+    active_root_path,
+    central_hub_path,
+    memory_root as configured_memory_root,
+    project_backup_dir,
+    storage_root,
+)
+from .instance_profile import agent_memory_cli_for_root, installation_profile_path, load_installation_profile, preferred_agent_memory_cli_for_root, resolve_runner_wrapper_name, resolve_wrapper_command_name
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _central_metadata_base_for_installation(installation_root: Path | None) -> Path:
+    def metadata_base_from_memory_root(memory_root: Path) -> Path:
+        resolved = memory_root.expanduser().resolve()
+        if resolved.name == "memory" and resolved.parent.name == ".agent-context-engine":
+            return resolved.parent.parent
+        return resolved
+
+    if installation_root is None:
+        return storage_root()
+    profile_path = installation_profile_path(installation_root)
+    if profile_path.exists():
+        profile = load_installation_profile(installation_root)
+        storage = profile.get("storage")
+        if isinstance(storage, dict):
+            memory_root_text = str(storage.get("memory_root") or "").strip()
+            if memory_root_text:
+                try:
+                    candidate = Path(memory_root_text).expanduser()
+                    if not candidate.is_absolute():
+                        candidate = installation_root / candidate
+                    return metadata_base_from_memory_root(candidate)
+                except OSError:
+                    pass
+    try:
+        return metadata_base_from_memory_root(configured_memory_root(installation_root))
+    except OSError:
+        return installation_root.expanduser().resolve()
+
+
+def _central_hub_path_for_installation(client: str, installation_root: Path | None) -> Path:
+    metadata_base = _central_metadata_base_for_installation(installation_root)
+    return (metadata_base / ".agent-context-engine" / "hooks" / client / "hook_adapter.sh").resolve()
+
+
+def _activated_projects_path_for_installation(installation_root: Path | None) -> Path:
+    metadata_base = _central_metadata_base_for_installation(installation_root)
+    return (metadata_base / ".agent-context-engine" / "activated-projects.json").resolve()
+
+
+def _read_activated_projects(*, installation_root: Path | None = None) -> dict[str, Any]:
+    path = _activated_projects_path_for_installation(installation_root)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_activated_projects(payload: dict[str, Any], *, installation_root: Path | None = None) -> None:
+    path = _activated_projects_path_for_installation(installation_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _update_project_registry_status(
+    project_path: Path,
+    client: str,
+    status: str,
+    *,
+    installation_root: Path | None = None,
+    error_detail: str = "",
+) -> None:
+    """Update the central registry entry for a project + runner."""
+    allowed_statuses = {"active", "disabled", "missing", "error"}
+    if status not in allowed_statuses:
+        raise ValueError(f"invalid registry status: {status}")
+    registry = _read_activated_projects(installation_root=installation_root)
+    key = str(project_path.expanduser().resolve())
+    entry = registry.setdefault(key, {})
+    runner_entry = entry.setdefault(client, {})
+    runner_entry["status"] = status
+    runner_entry["updated_at"] = _utc_now()
+    if status == "disabled":
+        runner_entry["disabled_at"] = _utc_now()
+    if error_detail:
+        runner_entry["error_detail"] = error_detail
+    elif "error_detail" in runner_entry:
+        del runner_entry["error_detail"]
+    _write_activated_projects(registry, installation_root=installation_root)
+
+
+def _central_supported_single_hook_clients() -> set[str]:
+    return {"codex", "claude"}
+
+
+def _single_shell_hook_clients() -> set[str]:
+    # Clients where a single event should contain only one command family.
+    # Codex intentionally supports multiple hooks per event; keep it excluded.
+    return {"claude", "antigravity", "gemini", "opencode"}
+
+
+def _iter_central_project_registry(client: str, installation_root: Path | None = None) -> list[tuple[str, dict[str, Any]]]:
+    target_client = str(client or "").strip().lower()
+    payload = _read_activated_projects(installation_root=installation_root)
+    if not isinstance(payload, dict):
+        return []
+    items: list[tuple[str, dict[str, Any]]] = []
+    for raw_path, raw_clients in payload.items():
+        if not isinstance(raw_path, str):
+            continue
+        if not isinstance(raw_clients, dict):
+            continue
+        entry = raw_clients.get(target_client)
+        if not isinstance(entry, dict):
+            continue
+        items.append((raw_path.strip(), entry))
+    return items
+
+
+def _iter_local_project_registry_entries(client: str, memory_root: Path) -> list[tuple[str, dict[str, Any], Path | None]]:
+    payload = _load_integration_projects_registry(memory_root)
+    clients = payload.get("clients", {})
+    if not isinstance(clients, dict):
+        return []
+    raw_entries = clients.get(client, [])
+    if not isinstance(raw_entries, list):
+        return []
+    items: list[tuple[str, dict[str, Any], Path | None]] = []
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            continue
+        path_text = str(entry.get("path") or "").strip()
+        if not path_text:
+            continue
+        try:
+            item_path = Path(path_text).expanduser().resolve()
+        except OSError:
+            continue
+        items.append((str(item_path), dict(entry), item_path))
+    return items
+
+
+def _backup_hook_config(config_path: Path, *, installation_root: Path | None = None) -> Path | None:
+    """Store a timestamped backup of a project hook config in the central storage root."""
+    if not config_path.exists():
+        return None
+    metadata_root = _central_metadata_base_for_installation(installation_root)
+    backup_dir = project_backup_dir(config_path.parent, metadata_root=metadata_root)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    backup_path = backup_dir / f"{config_path.name}.{timestamp}.bak"
+    backup_path.write_bytes(config_path.read_bytes())
+    return backup_path
+
 
 
 GEMINI_MINI_PREFERENCE = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]
@@ -57,6 +222,10 @@ def workspace_binding_path(client: str, *, root: Path = ROOT) -> Path | None:
         return root / ".claude" / "agent-memory-binding.json"
     if client == "cursor":
         return root / ".cursor" / "agent-memory-binding.json"
+    if client == "antigravity":
+        return root / ".agents" / "agent-memory-binding.json"
+    if client == "gemini":
+        return root / ".gemini" / "agent-memory-binding.json"
     return None
 
 
@@ -451,6 +620,7 @@ def shell_hook_adapter_status(client: str, *, root: Path = ROOT, memory_root: Pa
     script_path: Path = spec["script_path"]
     expected_memory_root = (memory_root or root).resolve()
     expected_script = _agent_memory_script_absolute_path(expected_memory_root)
+    expected_hub = _central_hub_path_for_installation(client, expected_memory_root)
     if not script_path.exists():
         return {
             "exists": False,
@@ -458,10 +628,41 @@ def shell_hook_adapter_status(client: str, *, root: Path = ROOT, memory_root: Pa
             "status": "missing",
             "expected_root": str(expected_memory_root),
             "expected_script": str(expected_script),
+            "expected_hub": str(expected_hub),
             "detected_root": "",
             "detected_script": "",
+            "detected_hub": "",
         }
-    text = script_path.read_text(encoding="utf-8", errors="replace")
+    if script_path.is_symlink():
+        try:
+            resolved_target = script_path.resolve(strict=True)
+        except OSError:
+            resolved_target = Path("")
+        if str(resolved_target) == str(expected_hub):
+            return {
+                "exists": True,
+                "managed": True,
+                "status": "ok",
+                "expected_root": str(expected_memory_root),
+                "expected_script": str(expected_script),
+                "expected_hub": str(expected_hub),
+                "detected_root": str(expected_memory_root),
+                "detected_script": str(expected_script),
+                "detected_hub": str(resolved_target),
+            }
+        return {
+            "exists": True,
+            "managed": False,
+            "status": "root_mismatch" if resolved_target else "missing",
+            "expected_root": str(expected_memory_root),
+            "expected_script": str(expected_script),
+            "expected_hub": str(expected_hub),
+            "detected_root": "",
+            "detected_script": "",
+            "detected_hub": str(resolved_target) if resolved_target else "",
+        }
+    inspect_path = script_path.with_suffix(".ps1") if script_path.suffix == ".cmd" and script_path.with_suffix(".ps1").exists() else script_path
+    text = inspect_path.read_text(encoding="utf-8", errors="replace")
     managed = f"log-hook --client {client}" in text
     detected_root = ""
     detected_script = ""
@@ -484,8 +685,10 @@ def shell_hook_adapter_status(client: str, *, root: Path = ROOT, memory_root: Pa
         "status": status,
         "expected_root": str(expected_memory_root),
         "expected_script": str(expected_script),
+        "expected_hub": str(expected_hub),
         "detected_root": detected_root,
         "detected_script": detected_script,
+        "detected_hub": "",
     }
 
 
@@ -643,21 +846,34 @@ def unregister_integration_project(client: str, target: Path, *, memory_root: Pa
     register_integration_project(client, target, memory_root=memory_root)
 
 
-def _project_activation_entry(client: str, target_path: str, *, installation_root: Path | None = None) -> dict[str, Any]:
+def _project_activation_entry(
+    client: str,
+    target_path: str,
+    *,
+    installation_root: Path | None = None,
+    registry_entry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     target = Path(target_path).expanduser()
     resolved = target.resolve()
+    registry_entry = registry_entry or {}
+    registry_status = str(registry_entry.get("status") or "").strip().lower()
+    registry_installation_root = str(registry_entry.get("installation_root") or "").strip()
+    effective_installation_root = Path(registry_installation_root).expanduser().resolve() if registry_installation_root else installation_root
+    registry_error_detail = str(registry_entry.get("error_detail") or "").strip()
     item: dict[str, Any] = {
         "path": str(resolved),
         "name": resolved.name or str(resolved),
         "exists": resolved.exists(),
     }
-    if installation_root is not None:
-        item["installation_root"] = str(installation_root.resolve())
+    if effective_installation_root is not None:
+        item["installation_root"] = str(effective_installation_root.resolve())
     if not resolved.exists():
         item["hooks_state"] = "project_missing"
         return item
     if client == "cursor":
-        status = _cursor_status_with_hooks(root=resolved, installation_root=installation_root)
+        status = _cursor_status_with_hooks(root=resolved, installation_root=effective_installation_root)
+    elif client in {"codex", "claude", "gemini"}:
+        status = _shell_hook_status(client, root=resolved, memory_root=effective_installation_root)
     elif client == "antigravity":
         status = _antigravity_hook_status(root=resolved)
     elif client == "opencode":
@@ -672,50 +888,130 @@ def _project_activation_entry(client: str, target_path: str, *, installation_roo
             "hook_config_path": str(status.get("hook_config_path") or ""),
             "hook_disabled_path": str(status.get("hook_disabled_path") or ""),
             "active_hook_events": list(status.get("active_hook_events") or []),
+            "hook_script_path": str(status.get("hook_script_path") or ""),
         }
     )
+
+    item["registry_status"] = registry_status
+    item["registry_detail"] = registry_error_detail
+    if registry_installation_root:
+        item["registry_installation_root"] = registry_installation_root
+        try:
+            item["registry_installation_root_exists"] = Path(registry_installation_root).expanduser().resolve().exists()
+        except OSError:
+            item["registry_installation_root_exists"] = False
+    else:
+        item["registry_installation_root"] = str(effective_installation_root.resolve()) if effective_installation_root is not None else ""
+        item["registry_installation_root_exists"] = effective_installation_root.exists() if effective_installation_root is not None else False
+
+    if registry_status == "active":
+        if not item.get("exists", False):
+            item["hooks_state"] = "project_missing"
+            item["hooks_enabled"] = False
+            if registry_installation_root:
+                item["registry_status"] = "active"
+                item["registry_detail"] = (registry_error_detail or "registry marks active but project path is missing")
+        elif client in {"codex", "claude", "gemini", "antigravity"}:
+            expected_hub = _central_hub_path_for_installation(client, effective_installation_root)
+            script_path = Path(item.get("hook_script_path") or "")
+            if not script_path.is_symlink():
+                item["hooks_state"] = "error"
+                item["hooks_enabled"] = False
+                item["registry_detail"] = (registry_error_detail or "project is marked active but adapter symlink is missing or not configured")
+            else:
+                try:
+                    resolved_script = script_path.resolve(strict=True)
+                except OSError:
+                    resolved_script = Path("")
+                if str(resolved_script) != str(expected_hub):
+                    item["hooks_state"] = "error"
+                    item["hooks_enabled"] = False
+                    item["registry_detail"] = (registry_error_detail or f"project is marked active but adapter resolves to {resolved_script or 'a missing target'}")
+        elif not bool(item.get("hooks_enabled")):
+            item["hooks_state"] = "error"
+    elif registry_status in {"disabled", "missing", "error"}:
+        if item["hooks_state"] == "enabled":
+            item["hooks_state"] = "error" if registry_status == "error" else registry_status
+            item["hooks_enabled"] = registry_status == "active"
+
     return item
 
 
 def integration_projects_status(client: str, *, memory_root: Path = ROOT, current_root: Path | None = None) -> dict[str, Any]:
     client = str(client or "").strip().lower()
-    payload = _load_integration_projects_registry(memory_root)
-    raw_entries = payload.get("clients", {}).get(client, [])
-    entries_with_install_roots: list[tuple[str, str]] = []
-    if isinstance(raw_entries, list):
-        for entry in raw_entries:
-            if isinstance(entry, dict):
-                path = str(entry.get("path") or "").strip()
-                if path:
-                    installation_root = str(entry.get("installation_root") or "").strip()
-                    entries_with_install_roots.append((path, installation_root))
-    if current_root is not None and client in {"cursor"}:
-        current_path = str(current_root.expanduser().resolve())
-        if client == "cursor":
-            current_status = _cursor_status_with_hooks(root=current_root, installation_root=current_root)
-        if bool(current_status.get("prepared")) and current_path not in {path for path, _installation_root in entries_with_install_roots}:
-            entries_with_install_roots.insert(0, (current_path, str(current_root.expanduser().resolve())))
-    ordered_entries: list[tuple[str, str]] = []
+    central_entries = _iter_central_project_registry(client, installation_root=memory_root) if client in _central_supported_single_hook_clients() or client in {"antigravity", "gemini"} else []
+    local_entries = _iter_local_project_registry_entries(client, memory_root)
+    merged_entries: list[tuple[str, dict[str, Any], str]] = []
     seen: set[str] = set()
-    default_installation_root = str((current_root or memory_root).expanduser().resolve())
-    for path, installation_root in entries_with_install_roots:
-        if path in seen:
+    for path_text, registry_entry in central_entries:
+        try:
+            resolved_path = str(Path(path_text).expanduser().resolve())
+        except OSError:
             continue
-        seen.add(path)
-        ordered_entries.append((path, installation_root or default_installation_root))
+        if resolved_path in seen:
+            continue
+        seen.add(resolved_path)
+        entry_installation_root = str(registry_entry.get("installation_root") or "").strip()
+        if not entry_installation_root:
+            entry_installation_root = str(memory_root.expanduser().resolve())
+        merged_entries.append((resolved_path, dict(registry_entry), entry_installation_root))
+    for path_text, entry, entry_installation_root in local_entries:
+        resolved_path = str(path_text)
+        if resolved_path in seen:
+            continue
+        seen.add(resolved_path)
+        merged_entries.append((resolved_path, dict(entry), str(entry_installation_root) if str(entry_installation_root or "") else str((memory_root).expanduser().resolve())))
+    if client == "cursor" and current_root is not None:
+        current_status = _cursor_status_with_hooks(root=current_root, installation_root=current_root)
+        current_path = str(current_root.expanduser().resolve())
+        if bool(current_status.get("prepared")) and current_path not in seen:
+            merged_entries.insert(0, (current_path, {}, str(current_root.resolve())))
+            seen.add(current_path)
     entries = [
         _project_activation_entry(
             client,
             path,
             installation_root=Path(installation_root).expanduser().resolve() if installation_root else None,
+            registry_entry=registry_entry,
         )
-        for path, installation_root in ordered_entries
+        for path, registry_entry, installation_root in merged_entries
     ]
     return {"activated_projects": entries, "activated_project_count": len(entries)}
 
 
+_SHELL_HOOK_DIRS = {
+    "codex": ".codex",
+    "claude": ".claude",
+    "gemini": ".gemini",
+    "antigravity": ".agents",
+}
+
+
+def _shell_hook_script_name(client: str, *, root: Path = ROOT) -> str:
+    if str(client) not in _SHELL_HOOK_DIRS:
+        raise ValueError(f"unsupported shell-hook client: {client}")
+    hook_dir = _SHELL_HOOK_DIRS[str(client)]
+    return "hook_adapter.cmd" if (root / hook_dir / "hooks" / "hook_adapter.cmd").exists() or os.name == "nt" else "hook_adapter.sh"
+
+
+def _project_local_hook_command(client: str, *, root: Path = ROOT, event: str | None = None) -> str:
+    if str(client) not in _SHELL_HOOK_DIRS:
+        raise ValueError(f"unsupported shell-hook client: {client}")
+    hook_dir = _SHELL_HOOK_DIRS[str(client)]
+    command = _quote_platform_path(root.expanduser().resolve() / hook_dir / "hooks" / _shell_hook_script_name(client, root=root))
+    return f"{command} {event}" if event else command
+
+
+def _legacy_relative_hook_command(client: str, *, root: Path = ROOT, event: str | None = None) -> str:
+    if str(client) not in _SHELL_HOOK_DIRS:
+        raise ValueError(f"unsupported shell-hook client: {client}")
+    hook_dir = _SHELL_HOOK_DIRS[str(client)]
+    command = f"./{hook_dir}/hooks/{_shell_hook_script_name(client, root=root)}"
+    return f"{command} {event}" if event else command
+
+
 def _hook_spec(client: str, *, root: Path = ROOT) -> dict[str, Any]:
-    script_name = "hook_adapter.cmd" if (root / ".codex" / "hooks" / "hook_adapter.cmd").exists() or os.name == "nt" else "hook_adapter.sh"
+    script_name = _shell_hook_script_name(client, root=root)
     if client == "codex":
         return {
             "config_path": root / ".codex" / "hooks.json",
@@ -727,7 +1023,7 @@ def _hook_spec(client: str, *, root: Path = ROOT) -> dict[str, Any]:
             "script_path": root / ".codex" / "hooks" / script_name,
             "template_config": SKILL_ROOT / "templates" / "codex-hooks" / "hooks.json",
             "template_script": SKILL_ROOT / "templates" / "codex-hooks" / "hook_adapter.sh",
-            "command": f"./.codex/hooks/{script_name}",
+            "command": _project_local_hook_command(client, root=root),
         }
     if client == "claude":
         return {
@@ -736,7 +1032,7 @@ def _hook_spec(client: str, *, root: Path = ROOT) -> dict[str, Any]:
             "script_path": root / ".claude" / "hooks" / script_name,
             "template_config": SKILL_ROOT / "templates" / "claude-hooks" / "settings.json",
             "template_script": SKILL_ROOT / "templates" / "claude-hooks" / "hook_adapter.sh",
-            "command": f"./.claude/hooks/{script_name}",
+            "command": _project_local_hook_command(client, root=root),
         }
     if client == "gemini":
         return {
@@ -745,13 +1041,13 @@ def _hook_spec(client: str, *, root: Path = ROOT) -> dict[str, Any]:
             "script_path": root / ".gemini" / "hooks" / script_name,
             "template_config": SKILL_ROOT / "templates" / "gemini-hooks" / "settings.json",
             "template_script": SKILL_ROOT / "templates" / "gemini-hooks" / "hook_adapter.sh",
-            "command": f"./.gemini/hooks/{script_name}",
+            "command": _project_local_hook_command(client, root=root),
         }
     raise ValueError(f"unsupported shell-hook client: {client}")
 
 
 def antigravity_project_paths(root: Path = ROOT) -> dict[str, Path]:
-    script_name = "hook_adapter.cmd" if (root / ".agents" / "hooks" / "hook_adapter.cmd").exists() or os.name == "nt" else "hook_adapter.sh"
+    script_name = _shell_hook_script_name("antigravity", root=root)
     return {
         "config_path": root / ".agents" / "hooks.json",
         "disabled_path": root / ".agents" / "hooks_deactivated.json",
@@ -809,6 +1105,43 @@ def _template_hook_commands(client: str, *, root: Path = ROOT) -> dict[str, set[
     return commands
 
 
+def _legacy_shell_hook_commands(client: str, *, root: Path = ROOT) -> dict[str, set[str]]:
+    if client == "codex":
+        return {event: {_legacy_relative_hook_command(client, root=root)} for event in _expected_hook_events(client)}
+    if client == "gemini":
+        return {event: {_legacy_relative_hook_command(client, root=root, event=event)} for event in _expected_hook_events(client)}
+    if client != "claude":
+        return {}
+    script_name = _shell_hook_script_name(client, root=root)
+    old_command = _legacy_relative_hook_command(client, root=root)
+    env_command = f"${{CLAUDE_PROJECT_DIR}}/.claude/hooks/{script_name}"
+    return {event: {old_command, env_command} for event in _expected_hook_events(client)}
+
+
+def _remove_hook_commands(groups: Any, commands: set[str]) -> list[Any]:
+    if not isinstance(groups, list) or not commands:
+        return groups if isinstance(groups, list) else []
+    cleaned: list[Any] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            cleaned.append(group)
+            continue
+        raw_hooks = group.get("hooks")
+        if not isinstance(raw_hooks, list):
+            cleaned.append(group)
+            continue
+        remaining_hooks = [
+            hook
+            for hook in raw_hooks
+            if not (isinstance(hook, dict) and str(hook.get("command") or "").strip() in commands)
+        ]
+        if remaining_hooks:
+            updated_group = dict(group)
+            updated_group["hooks"] = remaining_hooks
+            cleaned.append(updated_group)
+    return cleaned
+
+
 def _group_contains_command(group: Any, command: str) -> bool:
     if not isinstance(group, dict):
         return False
@@ -825,6 +1158,31 @@ def _group_contains_any_command(group: Any, commands: set[str]) -> bool:
     return any(_group_contains_command(group, command) for command in commands)
 
 
+def _shell_hook_events_contain_non_ace_commands(
+    *, event: str, groups: Any, allowed_commands: set[str]
+) -> tuple[bool, str | None]:
+    if not isinstance(groups, list):
+        return False, None
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        hooks = group.get("hooks")
+        if not isinstance(hooks, list):
+            return True, "non-hook entry"
+        for hook in hooks:
+            if not isinstance(hook, dict):
+                return True, "invalid hook entry"
+            hook_type = str(hook.get("type") or "").strip() or "command"
+            if hook_type != "command":
+                return True, "non-command hook entry"
+            command = str(hook.get("command") or "").strip()
+            if not command:
+                continue
+            if command not in allowed_commands:
+                return True, command
+    return False, None
+
+
 def _active_events_for_shell_hook(data: dict[str, Any], *, expected_commands: dict[str, set[str]]) -> list[str]:
     hooks = data.get("hooks", {})
     if not isinstance(hooks, dict):
@@ -837,7 +1195,31 @@ def _active_events_for_shell_hook(data: dict[str, Any], *, expected_commands: di
     return active
 
 
-def _prepare_shell_hook_client(client: str, *, root: Path = ROOT, memory_root: Path | None = None) -> None:
+
+def _ensure_central_hub_exists(installation_root: Path) -> None:
+    """Create or refresh the central active-root file and supported hub scripts."""
+    from .hook_rendering import build_central_hub_spec, render_central_hub_script
+
+    metadata_base = _central_metadata_base_for_installation(installation_root)
+    meta_dir = metadata_base / ".agent-context-engine"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+
+    active_root = meta_dir / "active-root"
+    active_root.write_text(str(installation_root.resolve()) + "\n", encoding="utf-8")
+
+    for runner in ("codex", "claude", "antigravity", "gemini"):
+        hub_path = meta_dir / "hooks" / runner / "hook_adapter.sh"
+        hub_path.parent.mkdir(parents=True, exist_ok=True)
+        hub_text = render_central_hub_script(build_central_hub_spec(runner))
+        hub_path.write_text(hub_text, encoding="utf-8")
+        import stat
+
+        hub_path.chmod(hub_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def _prepare_shell_hook_client(
+    client: str, *, root: Path = ROOT, memory_root: Path | None = None, use_central_hub: bool = False
+) -> None:
     spec = _hook_spec(client, root=root)
     config_path: Path = spec["config_path"]
     disabled_path = _find_existing_disabled_path(spec)
@@ -847,26 +1229,70 @@ def _prepare_shell_hook_client(client: str, *, root: Path = ROOT, memory_root: P
     if not config_path.exists():
         _write_json(config_path, _replace_hook_commands(_read_json(spec["template_config"]), str(spec["command"])))
     script_memory_root = memory_root or root
-    script_text = _render_shell_hook_script(client, memory_root=script_memory_root)
     script_path: Path = spec["script_path"]
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    if script_path.suffix == ".cmd":
+    if use_central_hub and os.name != "nt":
+        script_memory_root = memory_root or root
+        _ensure_central_hub_exists(script_memory_root)
+        hub_target = _central_hub_path_for_installation(client, script_memory_root)
+        if script_path.is_symlink():
+            try:
+                current_target = script_path.readlink()
+            except OSError:
+                current_target = None
+            if current_target != hub_target:
+                script_path.unlink()
+        if not script_path.exists():
+            script_path.symlink_to(hub_target)
+        _mark_platform_executable(hub_target)
+    elif script_path.suffix == ".cmd":
         from ..adapters.windows import render_cmd_powershell_launcher
 
+        if script_path.exists() or script_path.is_symlink():
+            script_path.unlink()
+        script_text = _render_shell_hook_script(client, memory_root=script_memory_root)
         companion_path = script_path.with_suffix(".ps1")
+        if companion_path.exists() or companion_path.is_symlink():
+            companion_path.unlink()
         companion_path.write_text(script_text, encoding="utf-8")
         script_path.write_text(render_cmd_powershell_launcher(companion_path.name), encoding="utf-8")
         _mark_platform_executable(companion_path)
+        _mark_platform_executable(script_path)
     else:
+        script_text = _render_shell_hook_script(client, memory_root=script_memory_root)
         script_path.write_text(script_text, encoding="utf-8")
-    _mark_platform_executable(script_path)
+        _mark_platform_executable(script_path)
     write_workspace_binding(client, root=root, memory_root=script_memory_root, written_by="hook-prepare")
 
 
-def _merge_shell_hook_client(client: str, *, root: Path = ROOT, memory_root: Path | None = None) -> None:
+def _merge_shell_hook_client(
+    client: str, *, root: Path = ROOT, memory_root: Path | None = None, use_central_hub: bool = False
+) -> None:
     spec = _hook_spec(client, root=root)
-    _prepare_shell_hook_client(client, root=root, memory_root=memory_root)
-    current = _read_json(spec["config_path"])
+    config_path: Path = spec["config_path"]
+    if config_path.exists():
+        _backup_hook_config(config_path, installation_root=memory_root)
+    if client in _single_shell_hook_clients():
+        existing = _read_json(config_path) if config_path.exists() else {}
+        if not isinstance(existing, dict):
+            existing = {}
+        expected_commands = _template_hook_commands(client, root=root)
+        legacy_commands = _legacy_shell_hook_commands(client, root=root)
+        for event, groups in (existing.get("hooks", {}) if isinstance(existing, dict) else {}).items():
+            allowed_commands = set(expected_commands.get(str(event), set()))
+            allowed_commands.update(legacy_commands.get(str(event), set()))
+            has_conflict, bad_command = _shell_hook_events_contain_non_ace_commands(
+                event=str(event),
+                groups=groups,
+                allowed_commands=allowed_commands,
+            )
+            if has_conflict:
+                detail = f"non-ace command present ({bad_command})"
+                raise ValueError(
+                    f"cannot merge shell-hook {client} adapter in {root}: event {event} already has {detail}"
+                )
+    _prepare_shell_hook_client(client, root=root, memory_root=memory_root, use_central_hub=use_central_hub)
+    current = _read_json(config_path) if config_path.exists() else {}
     template = _replace_hook_commands(_read_json(spec["template_config"]), str(spec["command"]))
     hooks = current.setdefault("hooks", {})
     if not isinstance(hooks, dict):
@@ -876,11 +1302,14 @@ def _merge_shell_hook_client(client: str, *, root: Path = ROOT, memory_root: Pat
     if not isinstance(template_hooks, dict):
         template_hooks = {}
     expected_commands = _template_hook_commands(client, root=root)
+    legacy_commands = _legacy_shell_hook_commands(client, root=root)
     for event, template_groups in template_hooks.items():
         groups = hooks.setdefault(event, [])
         if not isinstance(groups, list):
             groups = []
             hooks[event] = groups
+        groups = _remove_hook_commands(groups, legacy_commands.get(str(event), set()))
+        hooks[event] = groups
         if any(_group_contains_any_command(group, expected_commands.get(str(event), set())) for group in groups):
             continue
         if isinstance(template_groups, list):
@@ -952,7 +1381,7 @@ def _antigravity_template(*, root: Path = ROOT) -> dict[str, Any]:
     template = _replace_string_placeholder(
         json.loads(template_path.read_text(encoding="utf-8")),
         "__ANTIGRAVITY_HOOK_SCRIPT__",
-        str(antigravity_project_paths(root)["script_path"].resolve()),
+        _project_local_hook_command("antigravity", root=root),
     )
     if not isinstance(template, dict):
         raise ValueError("invalid antigravity hook template")
@@ -1034,29 +1463,35 @@ def _prepare_antigravity_hook_client(*, root: Path = ROOT, memory_root: Path | N
         disabled_path.replace(config_path)
     if not config_path.exists():
         _write_json(config_path, {})
-    from .hook_rendering import build_shell_hook_adapter_spec
-    from .platform import current_platform_profile
-    from .platform.runtime_selection import select_hook_adapter_renderer
-
-    script_text = select_hook_adapter_renderer(current_platform_profile()).render_shell_hook_adapter(
-        build_shell_hook_adapter_spec(
-            "antigravity",
-            agent_context_engine_root=memory_root,
-            agent_memory_script=str(_agent_memory_script_absolute_path(memory_root)),
-        )
-    )
     script_path = paths["script_path"]
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    if script_path.suffix == ".cmd":
+    if os.name == "nt" or script_path.suffix == ".cmd":
         from ..adapters.windows import render_cmd_powershell_launcher
 
+        if script_path.exists() or script_path.is_symlink():
+            script_path.unlink()
         companion_path = script_path.with_suffix(".ps1")
+        if companion_path.exists() or companion_path.is_symlink():
+            companion_path.unlink()
+        script_text = _render_shell_hook_script("antigravity", memory_root=memory_root)
         companion_path.write_text(script_text, encoding="utf-8")
         script_path.write_text(render_cmd_powershell_launcher(companion_path.name), encoding="utf-8")
         _mark_platform_executable(companion_path)
+        _mark_platform_executable(script_path)
     else:
-        script_path.write_text(script_text, encoding="utf-8")
-    _mark_platform_executable(script_path)
+        _ensure_central_hub_exists(memory_root)
+        hub_target = _central_hub_path_for_installation("antigravity", memory_root)
+        if script_path.is_symlink():
+            try:
+                current_target = script_path.readlink()
+            except OSError:
+                current_target = None
+            if current_target != hub_target:
+                script_path.unlink()
+        if not script_path.exists():
+            script_path.symlink_to(hub_target)
+        _mark_platform_executable(script_path)
+    write_workspace_binding("antigravity", root=root, memory_root=memory_root, written_by="hook-prepare")
 
 
 def _render_antigravity_template(*, root: Path = ROOT) -> dict[str, Any]:
@@ -1143,6 +1578,8 @@ def _antigravity_hook_status(*, root: Path = ROOT) -> dict[str, Any]:
         "hook_script_path": str(script_path),
         "expected_hook_events": expected_events,
         "active_hook_events": sorted(active_events),
+        "registry_status": "",
+        "registry_detail": "",
     }
 
 
@@ -1539,7 +1976,8 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
   }}
 
   const runHookSync = (payload, mode = "auto") => {{
-    if (!hooksEnabled()) return
+    const directSystemControl = payload?.hook_event_name === "UserPromptSubmit" && /^system-(disable|enable|status|recover)(?:\\s|$)/.test(String(payload?.prompt || "").trim())
+    if (!hooksEnabled() && !directSystemControl) return
     const proc = spawnSync(python, [script, "log-hook", "--client", "opencode", "--mode", mode], {{
       cwd: currentCwd(payload?.cwd || ""),
       input: JSON.stringify(payload),
@@ -1549,6 +1987,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
         AGENT_CONTEXT_ENGINE_ROOT: installRoot,
         AGENT_CONTEXT_ENGINE_STORAGE_ROOT: memoryRoot,
       }},
+      stdio: ["pipe", "pipe", "pipe", "ignore"],
     }})
     const stdout = (proc.stdout || "").trim()
     const stderr = (proc.stderr || "").trim()
@@ -1566,7 +2005,7 @@ export const AgentMemoryPlugin = async ({{ directory, worktree }}) => {{
         AGENT_CONTEXT_ENGINE_ROOT: installRoot,
         AGENT_CONTEXT_ENGINE_STORAGE_ROOT: memoryRoot,
       }},
-      stdio: ["pipe", "ignore", "ignore"],
+      stdio: ["pipe", "ignore", "ignore", "ignore"],
       detached: true,
     }})
     proc.on("error", (error) => logAsyncBridgeError("spawn failed", error))
@@ -1741,7 +2180,7 @@ def ensure_antigravity_project(root: Path = ROOT, *, memory_root: Path | None = 
 
 
 def ensure_gemini_project(root: Path = ROOT) -> dict[str, Path]:
-    _merge_shell_hook_client("gemini", root=root)
+    _merge_shell_hook_client("gemini", root=root, use_central_hub=True)
     spec = _hook_spec("gemini", root=root)
     return {
         "config_path": spec["config_path"],
@@ -1812,7 +2251,10 @@ def opencode_status(root: Path = ROOT, *, probe_models: bool = True) -> dict[str
 
 def antigravity_status(*, root: Path = ROOT) -> dict[str, Any]:
     executable = shutil.which("agy")
+    projects_status = integration_projects_status("antigravity", memory_root=root, current_root=root)
     hook_status = _antigravity_hook_status(root=root)
+    activated_projects = list(projects_status.get("activated_projects") or [])
+    current_project = activated_projects[0] if activated_projects else {}
     wrapper_status = _shell_wrapper_state(
         executable_name="agy",
         wrapper_command="./scripts/agy-ace",
@@ -1856,6 +2298,9 @@ def antigravity_status(*, root: Path = ROOT) -> dict[str, Any]:
         "conversation_resume_command": "agy --conversation <conversation-id>",
         "legacy_wrapper_command": "./scripts/antigravity-ace",
         "prepared": bool(wrapper_status["wrapper_path_exists"]) or bool(hook_status["prepared"]),
+        "activated_projects": activated_projects,
+        "activated_project_count": int(projects_status.get("activated_project_count") or 0),
+        "current_project": current_project,
         **wrapper_status,
         **hook_status,
     }, client="antigravity", root=root)
@@ -1865,7 +2310,10 @@ def gemini_status(*, root: Path = ROOT, probe: bool = False) -> dict[str, Any]:
     executable = shutil.which("gemini")
     discovered = probe_gemini_models() if probe and executable else {"ok": False, "models": []}
     recommended = pick_preferred_gemini_mini_model(discovered.get("models", [])) if probe else None
+    projects_status = integration_projects_status("gemini", memory_root=root, current_root=root)
     hook_status = _shell_hook_status("gemini", root=root)
+    activated_projects = list(projects_status.get("activated_projects") or [])
+    current_project = activated_projects[0] if activated_projects else {}
     wrapper_status = _shell_wrapper_state(
         executable_name="gemini",
         wrapper_command="./scripts/gemini-ace",
@@ -1900,6 +2348,9 @@ def gemini_status(*, root: Path = ROOT, probe: bool = False) -> dict[str, Any]:
         "terminal_command": _root_prefixed("./scripts/gemini-ace", root=root),
         "activation_command": _root_prefixed(f"{_agent_memory_cli_display(root)} gemini-enable", root=root),
         "prepared": bool(wrapper_status["wrapper_path_exists"]) or bool(hook_status["prepared"]),
+        "activated_projects": activated_projects,
+        "activated_project_count": int(projects_status.get("activated_project_count") or 0),
+        "current_project": current_project,
         **wrapper_status,
         **hook_status,
     }, client="gemini", root=root)
@@ -1950,6 +2401,7 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
             ),
             "working_root": str(root.resolve()),
             "terminal_command": _root_prefixed("./scripts/codex-ace", root=root),
+            **integration_projects_status("codex", memory_root=root, current_root=root),
             **codex_wrapper,
             **codex_hooks,
             "prepared": bool(codex_wrapper["wrapper_path_exists"]) or bool(codex_hooks["prepared"]),
@@ -1977,6 +2429,7 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
             ),
             "working_root": str(root.resolve()),
             "terminal_command": _root_prefixed("./scripts/claude-ace", root=root),
+            **integration_projects_status("claude", memory_root=root, current_root=root),
             **claude_wrapper,
             **claude_hooks,
             "prepared": bool(claude_wrapper["wrapper_path_exists"]) or bool(claude_hooks["prepared"]),
@@ -2028,16 +2481,30 @@ def static_integration_statuses(*, root: Path = ROOT, probe_gemini: bool = False
 
 def integration_summary(*, root: Path = ROOT, probe_gemini: bool = False, external_probes: bool = True) -> dict[str, Any]:
     items = static_integration_statuses(root=root, probe_gemini=probe_gemini, external_probes=external_probes)
+    project_clients = {"codex", "claude", "cursor", "antigravity", "gemini"}
+    project_activation_total = 0
+    project_activation_active = 0
+    project_activation_errors = 0
     for item in items:
         client = str(item.get("client") or "").strip().lower()
         history = integration_history(root=root, client=client, limit=10)
         item["history"] = history
         item["last_history_entry"] = history[0] if history else None
+        if client in project_clients:
+            project_activation_total += int(item.get("activated_project_count") or 0)
+            for project in list(item.get("activated_projects") or []):
+                if str(project.get("registry_status") or "").strip().lower() == "active":
+                    project_activation_active += 1
+                if str(project.get("hooks_state") or "") in {"error", "project_missing"}:
+                    project_activation_errors += 1
     return {
         "items": items,
         "total": len(items),
         "ready": sum(1 for item in items if item.get("ready")),
         "not_ready": sum(1 for item in items if not item.get("ready")),
+        "project_activation_total": project_activation_total,
+        "project_activation_active": project_activation_active,
+        "project_activation_errors": project_activation_errors,
     }
 
 
@@ -2057,30 +2524,45 @@ def manage_integration_hooks(
     try:
         if client in {"codex", "claude", "gemini"}:
             if action == "enable":
-                _merge_shell_hook_client(client, root=selected_root, memory_root=root)
+                _merge_shell_hook_client(
+                    client,
+                    root=selected_root,
+                    memory_root=root,
+                    use_central_hub=True,
+                )
+                register_integration_project(client, selected_root, memory_root=root)
+                _update_project_registry_status(selected_root, client, "active", installation_root=root)
             else:
                 _disable_shell_hook_client(client, root=selected_root)
+                unregister_integration_project(client, selected_root, memory_root=root)
+                _update_project_registry_status(selected_root, client, "disabled", installation_root=root)
         elif client == "antigravity":
             if action == "enable":
                 _merge_antigravity_hook_client(root=selected_root, memory_root=root)
                 register_integration_project(client, selected_root, memory_root=root)
+                _update_project_registry_status(selected_root, client, "active", installation_root=root)
             else:
                 _disable_antigravity_hook_client(root=selected_root)
                 unregister_integration_project(client, selected_root, memory_root=root)
+                _update_project_registry_status(selected_root, client, "disabled", installation_root=root)
         elif client == "cursor":
             if action == "enable":
                 _enable_cursor_project_hooks(root=selected_root, memory_root=root, background_runner=background_runner)
                 register_integration_project(client, selected_root, memory_root=root)
+                _update_project_registry_status(selected_root, client, "active", installation_root=root)
             else:
                 _disable_cursor_project_hooks(root=selected_root)
                 unregister_integration_project(client, selected_root, memory_root=root)
+                _update_project_registry_status(selected_root, client, "disabled", installation_root=root)
         elif client == "opencode":
             if action == "enable":
                 _enable_opencode_project_hooks(root=selected_root, memory_root=root)
                 register_integration_project(client, selected_root, memory_root=root)
+                _update_project_registry_status(selected_root, client, "active", installation_root=root)
             else:
                 _disable_opencode_project_hooks(root=selected_root)
                 unregister_integration_project(client, selected_root, memory_root=root)
+                _update_project_registry_status(selected_root, client, "disabled", installation_root=root)
         else:
             raise ValueError(f"unsupported integration client: {client}")
     except PermissionError as exc:

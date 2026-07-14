@@ -7,43 +7,34 @@ if [ "${AGENT_MEMORY_DREAM:-0}" = "1" ] || [ "${AGENT_MEMORY_INTERNAL_RUN:-0}" =
   exit 0
 fi
 
-ROOT="__AGENT_CONTEXT_ENGINE_ROOT__"
-SCRIPT="__AGENT_MEMORY_SCRIPT__"
-HOOKS_STATE="$ROOT/memory/local/hooks-state.json"
-LOG="$ROOT/memory/logs/claude-hook.err.log"
+ROOT="${AGENT_CONTEXT_ENGINE_ROOT:-}"
+if [ -z "$ROOT" ]; then
+  echo "claude hook adapter: AGENT_CONTEXT_ENGINE_ROOT is not set" >&2
+  exit 0
+fi
+
+CLIENT="${AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT:-claude}"
+
+SCRIPT="${AGENT_CONTEXT_ENGINE_SCRIPT:-}"
+if [ -z "$SCRIPT" ]; then
+  if [ -f "$ROOT/scripts/agent_context_engine.py" ]; then
+    SCRIPT="$ROOT/scripts/agent_context_engine.py"
+  elif [ -f "$ROOT/docs/skills/agent-context-engine/scripts/agent_context_engine.py" ]; then
+    SCRIPT="$ROOT/docs/skills/agent-context-engine/scripts/agent_context_engine.py"
+  else
+    echo "claude hook adapter: cannot find agent_context_engine.py under $ROOT" >&2
+    exit 0
+  fi
+fi
+
+LOG="$ROOT/memory/logs/${CLIENT}-hook.err.log"
 mkdir -p "$(dirname "$LOG")"
 TMPERR="$(mktemp)"
 trap 'rm -f "$TMPERR"' EXIT
 
-if ! python3 - "$HOOKS_STATE" claude <<'PY'
-import json
-import sys
-from pathlib import Path
-
-
-path = Path(sys.argv[1])
-runner = sys.argv[2]
-if not path.exists():
-    raise SystemExit(0)
-try:
-    state = json.loads(path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
-if state.get("enabled") is False:
-    raise SystemExit(1)
-runner_state = state.get("runners", {}).get(runner)
-if isinstance(runner_state, dict) and runner_state.get("enabled") is False:
-    raise SystemExit(1)
-if runner_state is False:
-    raise SystemExit(1)
-raise SystemExit(0)
-PY
-then
-  exit 0
-fi
-
 set +e
-env AGENT_CONTEXT_ENGINE_ROOT="$ROOT" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client claude \
+env AGENT_CONTEXT_ENGINE_ROOT="$ROOT" AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT="$CLIENT" AGENT_MEMORY_LAUNCH_CWD="${AGENT_MEMORY_LAUNCH_CWD:-${PWD}}" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client "$CLIENT" \
+  3</dev/null \
   2>"$TMPERR"
 CODE=$?
 set -e
@@ -63,5 +54,5 @@ if [ "$CODE" = "0" ]; then
 fi
 
 # Hook errors are non-blocking. Keep Claude Code usable and record diagnostics.
-echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] hook exit $CODE (see above)" >> "$LOG"
+echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ${CLIENT} hook exit $CODE (see above)" >> "$LOG"
 exit 0

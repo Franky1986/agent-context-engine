@@ -1,6 +1,6 @@
 # Agent Context Engine Test Strategy And Validation Status
 
-Last updated: 2026-06-26
+Last updated: 2026-07-14
 
 This document defines a deterministic test order for Agent Context Engine and
 tracks which parts have already been verified in recent installation,
@@ -571,10 +571,42 @@ Most important regressions:
 
 ## Current Validation Status
 
+Current public-checkout validation on 2026-07-14:
+
+- the canonical `./scripts/check --skip-runtime-db
+  --include-install-integration-tests` workflow completed with runtime access;
+- compile, import audit, OpenAPI generation, docs/spec index, fresh-install
+  smoke, Doctor, CLI runtime probes, and install integration were green;
+- the unit bucket ran 384 tests with 88 expected skips;
+- direct startup was confirmed for `codex-ace`, `claude-ace`, `cursor-ace`,
+  `agy-ace`, `gemini-ace`, and `opencode-ace` on the latest validation
+  checkout;
+- event-by-event capture and direct-chat suspension coverage remains separate
+  from wrapper startup validation, and Windows remains experimental.
+
+Direct-user system suspension validation on 2026-07-13:
+
+- focused parser, instrumented-path provenance, anchored-state transaction,
+  isolation, monitor guard, suspended CLI allowlist, and macOS/Windows
+  scheduler-adapter tests are green;
+- synthetic direct-hook status coverage is green for Codex, Claude, Cursor,
+  Gemini, Antigravity, and OpenCode;
+- central-hub isolation tests are green for Codex, Claude, Gemini, and
+  Antigravity, including direct hub execution without wrapper environment;
+- the normal repository test bucket completed with 364 tests green and 87
+  skipped, and the separately selected installation-integration bucket
+  completed with 364 tests green and 277 skipped;
+- the combined check orchestration encountered a transient process/port-state
+  failure that did not reproduce in either separately executed bucket;
+- runner protocols do not provide signed user-presence attestation; the
+  current control boundary is explicitly limited to instrumented ACE paths;
+- real runner direct-chat and real Windows suspension validation remain pending
+  and block release promotion from `0.2.14.dev0`.
+
 Change set under test:
 
-- backend version `0.2.10`
-- monitor version `0.6.8`
+- backend version `0.2.14.dev0` (unreleased)
+- monitor version `0.6.10`
 - installation and integration command surface updated around `--installation-root`
 - isolated install flow updated around deterministic local memory and wrapper behavior
 - installation integration tests are now a separate `install-integration-suite`
@@ -584,6 +616,10 @@ Change set under test:
   with local `memory/`
 - runtime repo-index migration and canonical `memory/knowledge/repos.md`
   indexing/retrieval coverage are included in the focused regression slice
+- central-hub isolation regression coverage now executes a project-local hub
+  without wrapper environment, executes canonical and instance-named wrapper
+  symlinks, verifies installation-scoped backups, and directly renders the
+  native Windows `.cmd`/PowerShell project adapter path
 
 Status legend:
 
@@ -629,14 +665,19 @@ Status legend:
 - [x] session list now shows `cursor` as origin client with separate dream runner metadata, and prefers `last_workdir` in session table paths.
 - [x] session rows now render explicit origin/dream badges for quick provenance checks.
 - [x] install-wide `doctor` / `check-installation` now mirror external Cursor project activations into `workspace_roots.cursor`, so the install-wide view matches `cursor-status --target ...`.
-- [ ] full runner matrix for `codex-ace`, `claude-ace`, `agy-ace`, `gemini-ace`, and `opencode-ace` from dedicated project roots is still open.
+- [x] direct startup of `codex-ace`, `claude-ace`, `cursor-ace`, `agy-ace`,
+  `gemini-ace`, and `opencode-ace` was confirmed on the latest validation
+  checkout; the dedicated project-root event matrix remains tracked in the
+  next phase.
 
 ### D. Hook Capture
 
 - [x] recent `test29` state shows one codex session and one cursor session in `last`.
 - [x] the Cursor project activation recorded `9/9` active hook events.
 - [ ] explicit per-event validation for assistant messages, tool events, and session-end events across every runner is still open.
-- [ ] direct revalidation that `agy-ace` and `opencode-ace` sessions appear reliably after the latest fixes is still open.
+- [x] direct `agy-ace` and `opencode-ace` startup was revalidated after the
+  latest fixes; reliable per-event capture remains part of the explicit matrix
+  above.
 
 ### E. Firewall And Risk
 
@@ -680,7 +721,10 @@ Status legend:
 - [x] `dream-queue-status` in `test29` reported `queued=0 running=0 failed=0 terminal_failed=0 succeeded=2`.
 - [x] `dream-queue-status` in `refactor-2` reported `queued=0 running=0 failed=0 terminal_failed=0 succeeded=3` after the isolated validation runs.
 - [x] `test29` monitor API confirmed the activated Cursor project and its hook state.
-- [ ] `curl -sf http://127.0.0.1:8788/api/status` failed during this pass because no local monitor process was running for the public checkout root.
+- [x] `/api/status` on the restarted public-checkout monitor at
+  `127.0.0.1:8787` reports backend `0.2.14.dev0`, monitor `0.6.10`, the shared
+  external memory root, `virgin_uninitialized` system-control integrity, and
+  no LaunchAgent drift.
 - [x] `/api/status`, `/api/integrations`, `/api/dreams`, `/api/dream-queue`,
   and `/api/firewall-state` answered on the active Windows monitor; firewall
   backend state was enabled and the empty Dream view matched `No sessions to
@@ -689,7 +733,53 @@ Status legend:
 
 ### I. Repair And Reinstall
 
-- [ ] no current branch pass has intentionally broken symlinks and then validated `repair-installation --apply`.
+- [x] focused install regressions cover compact localized completion, own-port
+  monitor recognition, and default-home legacy nested `active-root` migration.
+- [x] 2026-07-14 split validation passed: the normal bucket ran 365 tests with
+  87 expected skips, the install-integration bucket ran 365 tests with 278
+  expected skips, and all 28 central-hub/wrapper tests passed. The canonical
+  `./scripts/check --skip-runtime-db --include-install-integration-tests` pass
+  also completed successfully with runtime access.
+- [x] 2026-07-14 installation-reporting and monitor-takeover hardening passed
+  the canonical `./scripts/check --skip-runtime-db
+  --include-install-integration-tests` workflow with runtime access. The unit
+  bucket ran 374 tests with 87 expected skips; the fresh-install smoke,
+  install-integration bucket, docs/spec index, Doctor, status, retrieval, and
+  graph checks all passed. Focused coverage includes bare CLI help,
+  direct-user deactivation guidance, plan-JSON handoff, authoritative
+  post-install runner readiness, maintenance-notice grouping, POSIX monitor
+  identity/takeover, unchanged Windows monitor launch behavior, and forced
+  browser-open suppression across canonical check subprocesses.
+- [x] 2026-07-14 monitor-process safety and incomplete-install semantics passed
+  the canonical split validation. The unit bucket ran 376 tests with 87
+  expected skips, and the installation bucket ran 376 tests with 289 expected
+  skips. Coverage now rejects stale registry PIDs, non-loopback status hosts,
+  unrelated local process commands, Windows listeners with the wrong status
+  identity, file-edit attempts against system-control metadata, and exit-code
+  zero for incomplete requested installs. The combined sandboxed check reached
+  green test buckets; its home-runtime probes were then rerun with required
+  SQLite-WAL access through `./scripts/check --skip-tests --skip-runtime-db`,
+  where Doctor, status, retrieval, graph, OpenAPI, docs/spec, and fresh-install
+  smoke checks all passed.
+- [x] 2026-07-14 authenticated monitor shutdown and project-scoped direct-user
+  hook controls passed the full canonical workflow with runtime access:
+  `./scripts/check --skip-runtime-db --include-install-integration-tests`.
+  The unit bucket ran 382 tests with 87 expected skips; the install-integration
+  bucket, Fresh-Install-Smoke, OpenAPI, docs/spec index, Doctor, status,
+  retrieval, and graph checks all passed. Coverage includes token-redacted
+  monitor status/discovery, no PID-based takeover termination, delayed monitor
+  reappearance, owned-child rollback escalation, root-specific Windows tasks,
+  unknown structured file mutators, exact-project hook disable/re-enable, and
+  rejection of quoted hook-control examples.
+- [x] 2026-07-14 post-`fb627cb` validation passed with
+  `./scripts/check --skip-runtime-db --include-install-integration-tests`.
+  The unit suite ran 383 tests with 87 expected skips; fresh-install smoke,
+  install integration, OpenAPI, docs/spec index, Doctor, status, retrieval,
+  and graph checks passed after fail-closed monitor takeover and all-runner
+  effective-enable changes.
+- [ ] no current branch pass has intentionally removed or dangled the OpenCode
+  bridge and then validated the real `repair-installation --apply` path without
+  mocking root finalization.
 - [ ] no current branch pass has rerun a fresh reinstall smoke specifically to prove there is no more `--force` guesswork for normal takeover installs.
 
 ### J. Multi-Install, Takeover, And Isolation
@@ -734,7 +824,7 @@ From `test29`:
   - dream model: `gpt-5.4-mini`
 
 - cursor session `35578cb9-a3e0-4e0c-869d-90537c0000fc`
-  - transcript path was under the `pr-llm-service` Cursor project
+  - transcript path was under the `<service-test-project>` Cursor project
   - `cursor-status` recorded one session for the activated project
   - `status --limit 10` still showed `dream=dream_pending`
   - dream queue entry for that session succeeded

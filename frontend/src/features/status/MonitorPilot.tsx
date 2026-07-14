@@ -18,6 +18,14 @@ function valueText(value: unknown, fallback = '-') {
   return String(value);
 }
 
+function systemModeLabel(language: MonitorLanguage, mode: string) {
+  if (mode === 'disabling') return t(language, 'pilot.systemMode.disabling');
+  if (mode === 'disabled') return t(language, 'pilot.systemMode.disabled');
+  if (mode === 'enabling') return t(language, 'pilot.systemMode.enabling');
+  if (mode === 'partial') return t(language, 'pilot.systemMode.partial');
+  return t(language, 'pilot.systemMode.enabled');
+}
+
 export function MonitorPilot({ initialStatus, initialFirewall, language = 'en' }: MonitorPilotProps) {
   const [state, setState] = useState<LoadState>(initialStatus ? 'ready' : 'idle');
   const [status, setStatus] = useState<MonitorStatus | undefined>(initialStatus);
@@ -49,6 +57,8 @@ export function MonitorPilot({ initialStatus, initialFirewall, language = 'en' }
   const firewallKnown = Boolean(effectiveFirewall);
   const firewallEnabled = effectiveFirewall?.enabled === true;
   const overrides = effectiveFirewall?.overrides ?? [];
+  const systemControl = status?.system_control;
+  const systemMode = valueText(systemControl?.mode, 'enabled');
 
   return (
     <section className="monitor-shell" aria-busy={state === 'loading'}>
@@ -86,6 +96,28 @@ export function MonitorPilot({ initialStatus, initialFirewall, language = 'en' }
           </strong>
         </article>
       </div>
+
+      <section className="panel-card" data-system-mode={systemMode}>
+        <div>
+          <p className="eyebrow">{t(language, 'pilot.systemControl')}</p>
+          <h2>{systemModeLabel(language, systemMode)}</h2>
+        </div>
+        <p>
+          {systemControl?.admission_open === false
+            ? t(language, 'pilot.systemSuspended')
+            : t(language, 'pilot.systemEnabled')}
+        </p>
+        {systemControl?.reason ? <p>{t(language, 'pilot.systemReason')}: {systemControl.reason}</p> : null}
+        {systemControl?.provenance_assurance ? (
+          <p>{t(language, 'pilot.systemProvenance')}: {t(language, 'pilot.systemProvenanceInstrumented')}</p>
+        ) : null}
+        {systemControl?.recovery_command ? (
+          <>
+            <p>{t(language, 'pilot.systemRecovery')}</p>
+            <code className="integrations-command">{systemControl.recovery_command}</code>
+          </>
+        ) : null}
+      </section>
 
       <section className="panel-card">
         <div>

@@ -23,6 +23,12 @@ runtime local and inspectable, and gives you retrieval, condensed handovers,
 monitoring, graph extraction, and firewall-style safety controls without
 requiring cloud infrastructure.
 
+<p align="center">
+  <video src="videos/agent-context-engine-demo/agent-context-engine-demo.mp4" controls width="900">
+    Your browser does not support the video tag.
+  </video>
+</p>
+
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE),
 [NOTICE](NOTICE), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
@@ -30,8 +36,8 @@ Created and maintained by [Frank Richter](https://www.linkedin.com/in/frank-rich
 
 Current public versions:
 
-- Backend / product: `0.2.10`
-- Monitor: `0.6.8`
+- Backend / product: `0.2.14.dev0` (unreleased)
+- Monitor: `0.6.10`
 
 Platform support posture:
 
@@ -70,6 +76,9 @@ agent-context-engine doctor
 agent-context-engine check-installation
 agent-context-engine launchagent-status
 ```
+
+Running `agent-context-engine` without arguments prints the command overview
+and the copyable direct-user system-control forms.
 
 ## How It Works
 
@@ -139,8 +148,7 @@ guided defaults relink the shared public commands
 `agent-context-engine`, `ace`, and the `*-ace` wrappers to the chosen
 installation, bootstrap the local runtime, and start the monitor after install.
 
-For deterministic agent-driven execution from a fresh checkout, prefer a two-step
-plan flow:
+Agent-driven execution from a fresh checkout must use this two-step plan flow:
 
 ```sh
 python3 scripts/agent_context_engine.py install-discovery --plan-json /tmp/agent-context-install-plan.json
@@ -158,6 +166,7 @@ Headless runner prerequisite:
 - If the intended setup should use `codex-ace`, `claude-ace`, monitor ask, dreaming, query expansion, or Cursor background workflows, the matching terminal CLI must be installed and authenticated as well.
 - Codex app/editor usage does not replace the `codex` CLI. Claude Desktop does not replace the `claude` CLI.
 - Verify that readiness with `codex login status` or `claude auth status`; authenticate with `codex login` or `claude auth login` before the first headless run.
+- A negative auth result from a restricted agent environment is inconclusive until the same probe is rerun with the required process and home access. The approved installer's post-install readiness line is authoritative.
 
 If discovery points at the central default target
 `~/.agent-context-engine/install`, that is the default installation plan even
@@ -171,6 +180,21 @@ discovery runs can avoid known active monitor ports before proposing defaults.
 The installer then performs one more final monitor-port reconciliation
 immediately before writing the install profile, so a stale discovery result can
 still be corrected at install time.
+Install completion additionally requires the started monitor's `/api/status`
+identity to match the selected installation and memory roots. Superseded
+monitors sharing that memory root are discovered from both registry and
+verified local process/status evidence and must remain stopped. Registry and
+status PIDs are diagnostic only and are never passed to process termination.
+Owned monitors stop through a token-authenticated loopback shutdown request or
+a verified ACE LaunchAgent/Windows Task Scheduler handle. Tokenless unmanaged
+monitors produce an explicit manual-stop failure. The old endpoint must remain
+absent for eight seconds before and after startup. Windows uses the same status
+identity check; port acceptance alone is insufficient. An incomplete requested
+install exits non-zero, and a newly started owned monitor is terminated,
+force-killed if necessary, and identity-checked when takeover cleanup cannot be
+verified.
+On macOS, takeover also unloads an exact verified legacy submitted
+`com.agent-context-engine.monitor-<port>` KeepAlive job before shutdown.
 
 ```sh
 python3 scripts/agent_context_engine.py install \
@@ -179,6 +203,7 @@ python3 scripts/agent_context_engine.py install \
   --project "project-b=/path/to/project-b" \
   --link-codex-ace \
   --link-claude-ace \
+  --link-cursor-ace \
   --link-agy-ace \
   --link-gemini-ace \
   --link-opencode-ace \
@@ -196,6 +221,12 @@ This installs:
 <target>/.claude/hooks/hook_adapter.sh or hook_adapter.cmd
 <memory-root>/knowledge/repos.md
 ```
+
+Codex, Claude, Gemini, and Antigravity hook entries use shell-quoted absolute
+commands pointing at the project-local adapter symlink. The symlink resolves to
+the central hook hub, so the wrappers can launch from nested folders and from
+project paths containing spaces without depending on relative hook
+working-directory behavior.
 
 In a production handoff, this gives the operator three concrete anchors:
 
@@ -220,7 +251,11 @@ When someone says "installier das", a practical external-agent handoff is:
 1. run `install-discovery` from the checked-out source and store the generated plan (`--plan-json`) to show exactly what will be changed.
 2. review that generated plan file with the user and get explicit approval in chat.
 3. confirm whether the intended headless runner is `codex` or `claude`, and verify that the matching terminal CLI is installed and authenticated. Codex app alone or Claude Desktop alone is not sufficient for headless workflows.
-4. run `install --plan-json` and then run `doctor` + `check-installation`.
+4. run `install --plan-json`, verify its explicit final installation-result
+   line and authoritative headless-runner readiness, and use `doctor` +
+   `check-installation` when detailed follow-up is needed. The automatic
+   post-install pass is intentionally compact; historical project-binding
+   drift is reported separately as maintenance notices.
 5. hand over to the monitor workflow (`agent-context-engine status` / monitor URL) for ongoing production trust.
 
 With wrapper link flags, it can also create:
@@ -229,6 +264,7 @@ With wrapper link flags, it can also create:
 ~/.local/bin/agent-context-engine -> <target>/scripts/agent-context-engine
 ~/.local/bin/codex-ace -> <target>/scripts/codex-ace
 ~/.local/bin/claude-ace -> <target>/scripts/claude-ace
+~/.local/bin/cursor-ace -> <target>/scripts/cursor-ace
 ~/.local/bin/agy-ace -> <target>/scripts/agy-ace
 ~/.local/bin/gemini-ace -> <target>/scripts/gemini-ace
 ~/.local/bin/opencode-ace -> <target>/scripts/opencode-ace
@@ -246,6 +282,7 @@ python3 scripts/agent_context_engine.py install \
   --isolated \
   --link-codex-ace \
   --link-claude-ace \
+  --link-cursor-ace \
   --link-agy-ace \
   --link-gemini-ace \
   --link-opencode-ace
@@ -257,6 +294,11 @@ python3 scripts/agent_context_engine.py install \
 - an auto-derived instance name and prefixed wrapper names
 - no takeover of shared `agent-context-engine`, `ace`, or unprefixed `*-ace`
   commands
+
+Instance-prefixed wrapper commands stay pinned to their owning installation,
+even when a different shared installation is active. A non-isolated install
+with an external `--memory-root` still takes over canonical shared commands and
+updates the shared home `active-root` accordingly.
 
 It creates prefixed wrapper names in `~/.local/bin/`. The local CLI remains
 scoped to that root: `/path/to/second-agent-context-engine-root/scripts/agent-context-engine`.
@@ -313,6 +355,12 @@ selected headless workflow still needs the matching terminal CLI.
 workspace adapter already points at a different root or script, the command
 will report that mismatch first and only rewrite it when
 `--rewrite-workspace-hook-adapters` is explicitly added.
+
+Once runtime and frontend prerequisites are healthy, repair also repeats the
+installation-root hook finalization. This recreates missing root integration
+artifacts such as the global OpenCode bridge at
+`.opencode/plugins/agent-memory.js` without rewriting unrelated external
+workspace adapters.
 
 ## After Install
 
@@ -476,7 +524,13 @@ Cursor Memory is project-local and opt-in per opened folder:
 
 ```sh
 cd <target>
-agent-context-engine cursor-enable
+cursor-ace
+```
+
+For non-interactive activation in the current folder:
+
+```sh
+cursor-ace --activate-here
 ```
 
 From the central Agent Context Engine root, enable a different project without
@@ -526,7 +580,8 @@ agent-context-engine cursor-status --target /path/to/project
 ```
 
 After enabling or disabling, reload the Cursor window or reopen the project
-folder. The commands preserve non-Agent-Memory Cursor hooks by backing up and
+folder. `cursor-ace` prints the same restart/reload hint after successful
+activation. The commands preserve non-Agent-Memory Cursor hooks by backing up and
 removing only the `./.cursor/hooks/hook_adapter.sh` entries.
 For external Cursor projects, treat `cursor-status --target /path/to/project`
 as the authoritative activation check.
@@ -535,6 +590,42 @@ Cursor `afterAgentResponse`/`stop` payloads include token usage and model
 metadata. The hook writes those values into `token_usage` and `turn_metrics`.
 
 ## Monitor
+
+### Suspend The Effective Runtime
+
+From an already activated runner chat, the user can suspend normal hooks, new
+background work, and the installation-owned scheduler while keeping the
+monitor available read-only:
+
+```text
+system-disable --scope all --reason "Maintenance"
+system-status
+system-enable --scope all --reason "Maintenance complete"
+```
+
+These are direct-user chat controls. Agents must not execute them as tools.
+For a natural-language request to deactivate ACE, the agent first distinguishes
+the exact current project (`hooks-disable --project`), one project runner
+(`hooks-disable --project --runner <runner>`), an installation-wide runner
+(`hooks-disable --runner <runner>`), all hooks (`hooks-disable`), and full-system
+suspension, then returns the exact copyable direct-user line. It must not probe
+mutation/help variants or offer an approval/firewall bypass. Project hook
+controls are effective no-op gates; wrappers and hook files stay installed for
+status and recovery through `hooks-enable --project`.
+The supported hook path identifies them as instrumented runner events, not as
+cryptographically or OS-authenticated user presence. The guard blocks normal
+agent, CLI, and monitor mutation paths; it is not a sandbox against arbitrary
+code already running with the same user privileges.
+Terminal diagnostics are read-only:
+
+```sh
+agent-context-engine system-status --json
+```
+
+Wrappers remain installed and skip activation/repair prompts while suspended.
+After the first state write, a missing or changed state file fails closed via
+an integrity anchor and reports the exact direct-user `system-recover` line
+required to rebuild a conservative disabled state.
 
 Start a read-only local web monitor:
 
@@ -869,8 +960,12 @@ AGENT_MEMORY_CLASSIFIER_MODE=deterministic
 - Stage-specific overrides are also supported, for example
   `AGENT_MEMORY_CLASSIFIER_PRE_ACTION_RUNNER=claude` and
   `AGENT_MEMORY_CLASSIFIER_PRE_ACTION_MODEL=claude-haiku-4-5-20251001`.
-  Any invalid LLM classifier output is stored as a classifier run and the item
-  is quarantined.
+  Classifier runners use structured output flags where supported and extract
+  risk JSON from event-wrapped CLI output. Text-only runners get one schema
+  repair attempt before ACE stores invalid LLM classifier output as a
+  classifier run and quarantines the item. If that failure blocks a hook or
+  taints a later side-effect action, the hook message and monitor risk summary
+  name the classifier failure explicitly and describe the block as fail-closed.
 - PostToolUse stores only a compact output summary and metadata. Raw output is
   scanned in-process for immediate risk handling, then discarded.
 - Agent-Memory CLI calls such as

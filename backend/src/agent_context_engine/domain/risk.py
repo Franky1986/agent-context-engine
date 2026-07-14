@@ -25,6 +25,7 @@ HARD_BLOCK_FLAGS = {
     "destructive_git",
     "firewall_disable_attempt",
     "hook_integrity_change",
+    "system_control_state_change",
     "tainted_context_side_effect",
 }
 NON_OVERRIDABLE_HARD_BLOCK_FLAGS = HARD_BLOCK_FLAGS - {"tainted_context_side_effect"}
@@ -414,6 +415,7 @@ def shell_action_class(command: str) -> str:
 def tool_action_class(tool_name: str | None, tool_input: Any, *, hook_event_name: str | None = None) -> str:
     event_name = str(hook_event_name or "").strip().lower()
     normalized_tool = str(tool_name or "").strip().lower()
+    compact_tool = re.sub(r"[^a-z0-9]+", "", normalized_tool)
     command = extract_command_from_tool_input(tool_input)
     if normalized_tool in {"bash", "shell", "exec_command"}:
         return shell_action_class(command)
@@ -421,9 +423,7 @@ def tool_action_class(tool_name: str | None, tool_input: Any, *, hook_event_name
         return "read"
     if _tool_input_has_remote_reference(tool_input):
         return "network"
-    if normalized_tool in {"read", "readfile", "open", "view"} and _tool_input_looks_like_local_read(tool_input):
-        return "read"
-    if _tool_input_looks_like_local_read(tool_input):
+    if compact_tool in {"read", "readfile", "open", "view", "listdir", "listdirectory"}:
         return "read"
     return "unknown"
 
@@ -485,8 +485,29 @@ def apply_taint_to_decision(decision: RiskDecision, *, action_class: str, taint_
 
 def scan_tool_input(tool_name: str | None, tool_input: Any) -> RiskDecision:
     command = extract_command_from_tool_input(tool_input)
-    source_kind = "shell_command" if str(tool_name or "").lower() in {"bash", "shell", "exec_command"} else "tool_input"
+    normalized_tool = str(tool_name or "").strip().lower()
+    source_kind = "shell_command" if normalized_tool in {"bash", "shell", "exec_command"} else "tool_input"
+    action_class = tool_action_class(tool_name, tool_input)
+    file_mutation = (
+        source_kind == "shell_command" and not is_simple_read_only_shell_command(command)
+    ) or is_file_mutation_tool(normalized_tool, tool_input) or (
+        action_class not in {"read", "verify", "protect_secret"}
+        and tool_input_has_structured_file_target(tool_input)
+    )
     result = scan_text(command, source_kind=source_kind)
+    if is_system_control_mutation_attempt(command):
+        _add(result, category="approval_required", flag="system_control_mutation_attempt")
+        _add(result, category="approval_required", flag="agent_self_approval_attempt")
+        _escalate(
+            result,
+            decision="block",
+            risk_level="critical",
+            injection_policy="never_auto",
+            memory_action="reference_only",
+            impact="Would forge or invoke a direct-user-only Agent Context Engine system-control mutation.",
+            reason="Instrumented Agent Context Engine tool paths do not permit system-control mutation or forged hook payloads.",
+            confidence=0.99,
+        )
     if is_agent_memory_cli_command(command):
         if (
             is_agent_memory_self_approval_command(command)
@@ -506,7 +527,7 @@ def scan_tool_input(tool_name: str | None, tool_input: Any) -> RiskDecision:
             )
         else:
             result.deterministic_flags.append("agent_memory_cli_allowlisted")
-    if source_kind == "shell_command" and not is_simple_read_only_shell_command(command) and targets_hook_integrity(command):
+    if file_mutation and targets_hook_integrity(command):
         _add(result, category="hook_integrity", flag="hook_integrity_change")
         _escalate(
             result,
@@ -517,6 +538,21 @@ def scan_tool_input(tool_name: str | None, tool_input: Any) -> RiskDecision:
             impact="Would modify Agent Context Engine hook configuration or adapter files that enforce capture and policy controls.",
             reason="Hook configuration changes are security-sensitive and must not be altered through ordinary agent tool execution.",
             confidence=0.98,
+        )
+    if file_mutation and (
+        targets_system_control_integrity(command)
+        or tool_input_targets_system_control_integrity(tool_input)
+    ):
+        _add(result, category="system_control_integrity", flag="system_control_state_change")
+        _escalate(
+            result,
+            decision="block",
+            risk_level="critical",
+            injection_policy="never_auto",
+            memory_action="reference_only",
+            impact="Would modify or remove Agent Context Engine suspension state or its integrity anchor.",
+            reason="System-control state files are protected security metadata in instrumented tool paths.",
+            confidence=0.99,
         )
     if source_kind == "shell_command" and is_simple_read_only_shell_command(command):
         result.deterministic_flags.append("simple_read_only_shell_allowlisted")
@@ -536,6 +572,97 @@ def scan_tool_input(tool_name: str | None, tool_input: Any) -> RiskDecision:
     if str(tool_name or "").lower() in {"bash", "shell", "exec_command"} and result.is_risky and result.decision == "quarantine":
         result.decision = "block"
     return result
+
+
+def is_file_mutation_tool(tool_name: str, tool_input: Any) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "", str(tool_name or "").lower())
+    mutation_tools = {
+        "applypatch",
+        "create",
+        "createfile",
+        "delete",
+        "deletefile",
+        "edit",
+        "editfile",
+        "move",
+        "movefile",
+        "multiedit",
+        "notebookedit",
+        "patch",
+        "replace",
+        "replacefilecontent",
+        "multireplacefilecontent",
+        "write",
+        "writefile",
+    }
+    if normalized in mutation_tools:
+        return True
+    return isinstance(tool_input, str) and tool_input.lstrip().startswith("*** Begin Patch")
+
+
+_FILE_TARGET_KEYS = {
+    "directory",
+    "directorypath",
+    "destination",
+    "destinationpath",
+    "file",
+    "filename",
+    "filepath",
+    "newpath",
+    "oldpath",
+    "path",
+    "source",
+    "sourcepath",
+    "target",
+    "targetpath",
+}
+
+
+def _structured_file_targets(tool_input: Any) -> list[str]:
+    targets: list[str] = []
+
+    def visit(value: Any, key: str = "") -> None:
+        normalized_key = re.sub(r"[^a-z0-9]+", "", key.lower())
+        if normalized_key in _FILE_TARGET_KEYS and isinstance(value, (str, int)):
+            targets.append(str(value))
+            return
+        if isinstance(value, dict):
+            for nested_key, nested_value in value.items():
+                visit(nested_value, str(nested_key))
+        elif isinstance(value, (list, tuple)):
+            for nested_value in value:
+                visit(nested_value, key)
+
+    visit(tool_input)
+    if isinstance(tool_input, str) and tool_input.lstrip().startswith("*** Begin Patch"):
+        targets.extend(
+            match.group(1).strip()
+            for match in re.finditer(
+                r"^\*\*\* (?:Add|Delete|Update|Move to) File:\s*(.+)$",
+                tool_input,
+                flags=re.MULTILINE,
+            )
+        )
+    if isinstance(tool_input, dict):
+        patch_text = tool_input.get("patch")
+        if isinstance(patch_text, str):
+            targets.extend(
+                match.group(1).strip()
+                for match in re.finditer(
+                    r"^\*\*\* (?:Add|Delete|Update|Move to) File:\s*(.+)$",
+                    patch_text,
+                    flags=re.MULTILINE,
+                )
+            )
+    return targets
+
+
+def tool_input_has_structured_file_target(tool_input: Any) -> bool:
+    return bool(_structured_file_targets(tool_input))
+
+
+def tool_input_targets_system_control_integrity(tool_input: Any) -> bool:
+    return any(targets_system_control_integrity(target) for target in _structured_file_targets(tool_input))
 
 
 def is_agent_memory_cli_command(command: str) -> bool:
@@ -633,6 +760,25 @@ def is_agent_memory_hook_mutation_command(command: str) -> bool:
     return "disable" in lowered
 
 
+def is_system_control_mutation_attempt(command: str) -> bool:
+    if is_simple_read_only_shell_command(command) or is_simple_read_only_shell_pipeline(command):
+        return False
+    normalized = " ".join(str(command or "").strip().split())
+    if not normalized:
+        return False
+    try:
+        parts = shlex.split(normalized)
+    except ValueError:
+        return False
+    lowered = [part.lower() for part in parts]
+    mutators = {"system-disable", "system-enable", "system-recover"}
+    if any(part in mutators for part in lowered):
+        return True
+    return "log-hook" in lowered and any(
+        part.endswith(("agent-context-engine", "agent_context_engine.py")) for part in lowered
+    )
+
+
 def targets_hook_integrity(command: str) -> bool:
     normalized = " ".join(str(command or "").strip().split())
     if not normalized:
@@ -646,10 +792,33 @@ def targets_hook_integrity(command: str) -> bool:
         ".agents/hooks.json",
         "hooks_deactivated.json",
         "hook_adapter.sh",
+        "hooks-state.json",
         ".opencode/plugins/agent-memory.js",
         ".opencode/plugins/agent-memory_deactivated.js",
     )
     return any(pattern in normalized for pattern in patterns)
+
+
+def targets_system_control_integrity(command: str) -> bool:
+    normalized = " ".join(str(command or "").strip().split()).lower()
+    if not normalized:
+        return False
+    if any(
+        pattern in normalized
+        for pattern in (
+            "system-control.json",
+            "system-control.anchor.json",
+            "system-control-audit.jsonl",
+        )
+    ):
+        return True
+    slash_normalized = normalized.replace("\\", "/")
+    return bool(
+        re.search(
+            r"(?:^|[\s'\"=:])(?:[^\s'\"]*/)?(?:\.agent-context-engine/)?memory/local(?:[/\s'\"]|$)",
+            slash_normalized,
+        )
+    )
 
 
 def is_simple_read_only_shell_command(command: str) -> bool:
@@ -1057,10 +1226,15 @@ def invalid_classifier_decision(*, source_kind: str, existing: RiskDecision | No
     result.risk_level = result.risk_level if result.risk_level == "critical" else levels.get(source_kind, "medium")
     result.injection_policy = "quarantine"
     result.memory_action = "quarantine"
-    result.impact = "Classifier returned invalid structured output; source content may have influenced or broken the safety classifier."
-    result.reason = "Classifier output was not valid JSON or did not match the risk schema."
+    result.impact = (
+        "The firewall classifier response was unusable and may have been malformed or prompt-influenced. "
+        "Agent Context Engine blocked fail-closed so the user can review the tool call explicitly."
+    )
+    result.reason = "Firewall classifier returned invalid structured output; no reliable policy decision was available."
     result.confidence = max(result.confidence, 0.85)
     _add(result, category="classifier_invalid_output", flag="classifier_schema_violation")
+    if "classifier_output_untrusted" not in result.poisoning_flags:
+        result.poisoning_flags.append("classifier_output_untrusted")
     return result
 
 

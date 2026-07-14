@@ -23,6 +23,12 @@ hält die Laufzeit lokal und inspizierbar und gibt dir Retrieval, kompakte
 Handovers, Monitoring, Graph-Extraktion und firewall-artige Sicherheitsregeln,
 ohne Cloud-Infrastruktur vorauszusetzen.
 
+<p align="center">
+  <video src="videos/agent-context-engine-demo/agent-context-engine-demo.mp4" controls width="900">
+    Dein Browser unterstützt das Video-Tag nicht.
+  </video>
+</p>
+
 Lizenziert unter der Apache License, Version 2.0. Siehe [LICENSE](LICENSE),
 [NOTICE](NOTICE) und [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
@@ -30,8 +36,8 @@ Erstellt und gepflegt von [Frank Richter](https://www.linkedin.com/in/frank-rich
 
 Aktuelle öffentliche Versionen:
 
-- Backend / Produkt: `0.2.10`
-- Monitor: `0.6.8`
+- Backend / Produkt: `0.2.14.dev0` (unveroeffentlicht)
+- Monitor: `0.6.10`
 
 Plattformstatus:
 
@@ -70,6 +76,9 @@ agent-context-engine doctor
 agent-context-engine check-installation
 agent-context-engine launchagent-status
 ```
+
+`agent-context-engine` ohne Argumente zeigt die Kommando-Uebersicht und die
+kopierbaren direkten System-Control-Zeilen fuer Nutzer an.
 
 ## Wie Es Funktioniert
 
@@ -141,8 +150,8 @@ den exakten Installationsbefehl. Die geführten Defaults verlinken die
 auf die gewählte Installation, bootstrappen die lokale Runtime und starten den
 Monitor nach der Installation.
 
-Für deterministische agentische Ausführung aus einem frischen Checkout ist ein
-zweistufiger Plan-Flow vorzuziehen:
+Agentische Ausfuehrung aus einem frischen Checkout muss diesen zweistufigen
+Plan-Flow verwenden:
 
 ```sh
 python3 scripts/agent_context_engine.py install-discovery --plan-json /tmp/agent-context-install-plan.json
@@ -160,6 +169,7 @@ Voraussetzung fuer Headless-Runner:
 - Wenn das Setup `codex-ace`, `claude-ace`, Monitor-Ask, Dreaming, Query-Expansion oder Cursor-Hintergrund-Workflows nutzen soll, muss die passende Terminal-CLI ebenfalls installiert und authentifiziert sein.
 - Die Codex-App bzw. ein Codex-Editor-Workspace ersetzt die `codex`-CLI nicht. Claude Desktop ersetzt die `claude`-CLI nicht.
 - Pruefe diese Bereitschaft mit `codex login status` oder `claude auth status`; authentifiziere dich bei Bedarf mit `codex login` oder `claude auth login`, bevor der erste Headless-Lauf startet.
+- Ein negatives Auth-Ergebnis aus einer eingeschraenkten Agent-Umgebung ist nicht aussagekraeftig, bis derselbe Check mit dem erforderlichen Prozess- und Home-Zugriff wiederholt wurde. Massgeblich ist die Post-Installationsbereitschaft des freigegebenen Installers.
 
 Wenn Discovery bereits auf das zentrale Default-Ziel
 `~/.agent-context-engine/install` zeigt, bleibt das der Standardplan, auch wenn
@@ -171,6 +181,24 @@ Agent Context Engine führt außerdem ein zentrales Monitor-Runtime-Register unt
 Instanz, Host, Port, PID und Zeitstempel hinein, damit spätere Discovery-Läufe
 bekannte aktive Ports vermeiden können. Direkt vor dem Schreiben des
 Install-Profils erfolgt zusätzlich noch einmal eine finale Port-Abstimmung.
+Der Installationsabschluss verlangt ausserdem, dass die `/api/status`-Identitaet
+des gestarteten Monitors zum gewaehlten Installations- und Memory-Root passt.
+Abgeloeste Monitore mit demselben Memory-Root werden ueber Registry sowie
+verifizierte lokale Prozess-/Statusdaten erkannt und muessen gestoppt bleiben.
+Registry- und Status-PIDs dienen nur der Diagnose und werden nie an eine
+Prozessbeendigung uebergeben. Eigene Monitore werden ueber einen
+token-authentifizierten Loopback-Shutdown oder einen verifizierten ACE-
+LaunchAgent/Windows-Task beendet. Tokenlose, nicht verwaltete Monitore fuehren
+zu einer expliziten manuellen Stop-Anweisung. Der alte Endpunkt muss vor und
+nach dem Start acht Sekunden lang verschwunden bleiben. Windows verwendet
+dieselbe Statusidentitaet; ein erreichbarer Port allein reicht nicht. Eine
+angeforderte, aber unvollstaendige Installation endet mit einem Exit-Code
+ungleich null. Ein neu gestarteter eigener Monitor wird bei fehlgeschlagener
+Uebernahme erst beendet, bei Bedarf erzwungen beendet und danach per Identitaet
+als verschwunden verifiziert.
+Unter macOS entlaedt die Uebernahme ausserdem einen exakt verifizierten alten
+submitted KeepAlive-Job `com.agent-context-engine.monitor-<port>` vor dem
+Shutdown.
 
 ```sh
 python3 scripts/agent_context_engine.py install \
@@ -179,6 +207,7 @@ python3 scripts/agent_context_engine.py install \
   --project "project-b=/path/to/project-b" \
   --link-codex-ace \
   --link-claude-ace \
+  --link-cursor-ace \
   --link-agy-ace \
   --link-gemini-ace \
   --link-opencode-ace \
@@ -196,6 +225,12 @@ Das installiert unter anderem:
 <target>/.claude/hooks/hook_adapter.sh oder hook_adapter.cmd
 <memory-root>/knowledge/repos.md
 ```
+
+Codex-, Claude-, Gemini- und Antigravity-Hook-Einträge verwenden
+shell-gequotete absolute Befehle auf den projektlokalen Adapter-Symlink. Der
+Symlink zeigt auf den zentralen Hook-Hub, damit die Wrapper auch aus
+Unterordnern und aus Projektpfaden mit Leerzeichen starten können, ohne von
+relativen Hook-Arbeitsverzeichnissen abhängig zu sein.
 
 In einer produktiven Uebergabe gibt das dem Operator drei konkrete Anker:
 
@@ -220,7 +255,12 @@ Uebergabe praktisch:
 1. `install-discovery` aus dem ausgecheckten Source-Tree ausfuehren und den erzeugten Plan per `--plan-json` speichern, damit exakt sichtbar ist, was geaendert werden soll.
 2. Diese erzeugte Plan-Datei gemeinsam mit dem Nutzer pruefen und die explizite Freigabe im Chat einholen.
 3. Klaeren, ob als Headless-Runner `codex` oder `claude` vorgesehen ist, und pruefen, dass die passende Terminal-CLI installiert und authentifiziert ist. Die Codex-App allein oder Claude Desktop allein reicht fuer Headless-Workflows nicht aus.
-4. `install --plan-json` ausfuehren und danach `doctor` plus `check-installation` laufen lassen.
+4. `install --plan-json` ausfuehren, die eindeutige abschliessende
+   Ergebniszeile sowie die massgebliche Headless-Runner-Bereitschaft pruefen
+   und `doctor` plus `check-installation` nur bei Bedarf fuer die ausfuehrliche
+   Diagnose laufen lassen. Die automatische Post-Installationspruefung bleibt
+   bewusst kompakt; historischer Projekt-Binding-Drift erscheint getrennt als
+   Wartungshinweis.
 5. Anschliessend an den Monitor-Workflow (`agent-context-engine status` bzw. Monitor-URL) fuer den laufenden Produktivbetrieb uebergeben.
 
 Mit Wrapper-Link-Flags können zusätzlich entstehen:
@@ -229,6 +269,7 @@ Mit Wrapper-Link-Flags können zusätzlich entstehen:
 ~/.local/bin/agent-context-engine -> <target>/scripts/agent-context-engine
 ~/.local/bin/codex-ace -> <target>/scripts/codex-ace
 ~/.local/bin/claude-ace -> <target>/scripts/claude-ace
+~/.local/bin/cursor-ace -> <target>/scripts/cursor-ace
 ~/.local/bin/agy-ace -> <target>/scripts/agy-ace
 ~/.local/bin/gemini-ace -> <target>/scripts/gemini-ace
 ~/.local/bin/opencode-ace -> <target>/scripts/opencode-ace
@@ -246,6 +287,7 @@ python3 scripts/agent_context_engine.py install \
   --isolated \
   --link-codex-ace \
   --link-claude-ace \
+  --link-cursor-ace \
   --link-agy-ace \
   --link-gemini-ace \
   --link-opencode-ace
@@ -256,6 +298,11 @@ python3 scripts/agent_context_engine.py install \
 - target-lokales Runtime-Storage unter `<target>/memory`
 - einen automatisch abgeleiteten Instanznamen und präfixierte Wrapper-Namen
 - keine Übernahme der geteilten `agent-context-engine`-, `ace`- oder ungepräfixten `*-ace`-Kommandos
+
+Wrapper mit Instanz-Prefix bleiben an ihre eigene Installation gebunden, auch
+wenn parallel eine andere Shared-Installation aktiv ist. Eine nicht isolierte
+Installation mit externem `--memory-root` übernimmt weiterhin die kanonischen
+Shared-Kommandos und aktualisiert dafür den gemeinsamen Home-`active-root`.
 
 Der lokale CLI-Pfad bleibt dabei root-spezifisch:
 `/path/to/second-agent-context-engine-root/scripts/agent-context-engine`.
@@ -307,6 +354,12 @@ gewählter Headless-Workflow noch die passende Terminal-CLI benötigt.
 Workspace-Adapter bereits auf ein anderes Root oder Script zeigt, meldet der
 Befehl das zuerst und schreibt erst mit
 `--rewrite-workspace-hook-adapters` tatsächlich um.
+
+Sobald Runtime- und Frontend-Voraussetzungen gesund sind, wiederholt Repair
+auch die Hook-Finalisierung im Installations-Root. Dadurch werden fehlende
+Root-Integrationsartefakte wie die globale OpenCode-Bridge unter
+`.opencode/plugins/agent-memory.js` wiederhergestellt, ohne davon unabhängige
+externe Workspace-Adapter umzuschreiben.
 
 ## Nach Der Installation
 
@@ -427,7 +480,13 @@ Cursor Memory ist projektlokal und pro geöffnetem Ordner opt-in:
 
 ```sh
 cd <target>
-agent-context-engine cursor-enable
+cursor-ace
+```
+
+Für nicht-interaktive Aktivierung im aktuellen Ordner:
+
+```sh
+cursor-ace --activate-here
 ```
 
 Aus dem zentralen Agent-Context-Engine-Root kann ein anderes Projekt ohne
@@ -477,7 +536,8 @@ agent-context-engine cursor-status --target /path/to/project
 ```
 
 Nach Enable oder Disable das Cursor-Fenster neu laden oder das Projekt neu
-öffnen. Die Kommandos erhalten nicht von Agent Memory stammende Cursor-Hooks,
+öffnen. `cursor-ace` gibt diesen Hinweis nach erfolgreicher Aktivierung ebenfalls
+aus. Die Kommandos erhalten nicht von Agent Memory stammende Cursor-Hooks,
 indem nur die `./.cursor/hooks/hook_adapter.sh`-Einträge entfernt werden.
 Für externe Cursor-Projekte gilt `cursor-status --target /path/to/project` als
 autoritative Aktivierungsprüfung.
@@ -487,6 +547,43 @@ Modell-Metadaten. Der Hook schreibt diese Werte in `token_usage` und
 `turn_metrics`.
 
 ## Monitor
+
+### Effektive Runtime anhalten
+
+In einem bereits aktivierten Runner-Chat kann der Nutzer normale Hooks, neue
+Hintergrundarbeit und den installationsspezifischen Scheduler anhalten. Der
+Monitor bleibt dabei read-only erreichbar:
+
+```text
+system-disable --scope all --reason "Wartung"
+system-status
+system-enable --scope all --reason "Wartung beendet"
+```
+
+Diese Zeilen sind direkte Nutzer-Chat-Controls. Agents duerfen sie nicht als
+Tools ausfuehren. Bei einer natuerlich formulierten Bitte zur Deaktivierung
+unterscheidet der Agent zwischen dem exakten aktuellen Projekt
+(`hooks-disable --project`), einem Runner in diesem Projekt
+(`hooks-disable --project --runner <runner>`), einem installationsweiten Runner
+(`hooks-disable --runner <runner>`), allen Hooks (`hooks-disable`) und der
+vollstaendigen System-Suspension. Danach gibt er nur die exakte kopierbare
+Nutzerzeile aus. Er probiert weder Mutation noch Help-Varianten aus und bietet
+keinen Approval-/Firewall-Bypass an. Projekt-Controls sind effektive No-op-
+Gates; Wrapper und Hook-Dateien bleiben fuer Status und Wiederherstellung mit
+`hooks-enable --project` installiert. Der unterstuetzte Hook-Pfad erkennt sie als instrumentierte
+Runner-Ereignisse, nicht als kryptografisch oder vom Betriebssystem
+authentifizierte Nutzerpraesenz. Der Schutz blockiert normale Agent-, CLI- und
+Monitor-Mutationspfade, ist aber keine Sandbox gegen beliebigen Code mit
+denselben Benutzerrechten. Die Terminal-Diagnose ist read-only:
+
+```sh
+agent-context-engine system-status --json
+```
+
+Wrapper bleiben installiert und ueberspringen waehrend der Suspension
+Aktivierungs- und Reparaturdialoge. Nach dem ersten State-Write erkennt ein
+Integritaetsanker fehlenden oder geaenderten Steuerzustand, schliesst die
+Admission fail-closed und zeigt die exakte direkte `system-recover`-Zeile an.
 
 Starte einen read-only lokalen Web-Monitor:
 
@@ -580,7 +677,14 @@ Zentrale Regeln:
 - Personal-Memory-Proposals durchlaufen denselben Klassifikationspfad
 - `retrieve` klassifiziert den Kontext, den es gleich ausgeben würde
 - Retrieval schließt medium/high/critical risk, `secret`, `quarantine` und `never_auto` standardmäßig aus
-- invalides oder schema-brechendes Klassifikator-Output führt deterministisch zu Quarantäne
+- Classifier-Runner nutzen strukturierte Ausgabe-Flags, wo der jeweilige CLI
+  sie unterstützt, und extrahieren Risk-JSON auch aus event-verpackter
+  CLI-Ausgabe; text-only Runner bekommen einen Schema-Reparaturversuch, bevor
+  invalides oder schema-brechendes Klassifikator-Output deterministisch zu
+  Quarantäne führt
+- wenn ein Classifier-Fehler einen Hook blockiert oder eine Folgeaktion
+  getaintet wird, nennen Hook-Meldung und Monitor-Risiko den
+  Klassifikator-Fehler explizit als fail-closed Block
 - Cursor-Aktivierung braucht `codex` oder `claude` für Headless-Workflows
 - command-shaped Text ist nicht automatisch Prompt Injection; die Klassifikation muss konkrete Wirkung bewerten
 - tainteter Kontext beeinflusst spätere Side-Effect-Entscheidungen über Metadaten

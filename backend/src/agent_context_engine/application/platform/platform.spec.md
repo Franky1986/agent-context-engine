@@ -79,6 +79,9 @@ assumptions.
   the monitor and diagnostics.
 - Runtime selection for scaffolded/unsupported profiles stays explicit about
   support/evidence and defaults to non-active adapter behavior.
+- System suspension delegates scheduler status, disable, and restore through a
+  platform port. Unsupported platforms report explicit inactive/unsupported
+  state and never claim a successful disable of an active scheduler.
 
 ## Tests / Checks
 

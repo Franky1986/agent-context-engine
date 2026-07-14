@@ -32,7 +32,8 @@ This mode is useful when:
 
 - you want one shared Agent Context Engine installation
 - you work across multiple repositories
-- the client integration expects startup from the Agent Context Engine root
+- the wrapper should resolve the active installation and then launch against
+  the current project's local hook config
 
 ### Central-installation mode
 

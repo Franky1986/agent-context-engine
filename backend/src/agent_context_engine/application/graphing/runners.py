@@ -95,9 +95,9 @@ def gemini_graph_command(model: str | None = None) -> list[str]:
 def antigravity_graph_command(model: str | None = None) -> list[str]:
     return [
         "agy",
-        "--print",
         "--model",
         model or ANTIGRAVITY_DREAM_MODEL,
+        "-p",
     ]
 
 
@@ -107,7 +107,7 @@ def opencode_graph_command(model: str | None = None) -> list[str]:
         "run",
         "--dir",
         str(ROOT),
-        "--dangerously-skip-permissions",
+        "--auto",
     ]
     if model or OPENCODE_DREAM_MODEL:
         command.extend(["--model", model or OPENCODE_DREAM_MODEL])

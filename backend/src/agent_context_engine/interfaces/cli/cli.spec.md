@@ -28,6 +28,25 @@ application services.
   flags: `cursor-enable`, `antigravity-enable`, `gemini-enable`,
   `opencode-enable`, and `integration-hooks` must refer to the owning
   installation root explicitly, not mislabel it as a runtime memory root.
+- Expose only read-only `system-status [--json]` for full-system suspension.
+  Mutating `system-disable`, `system-enable`, and `system-recover` remain
+  runner-native direct-user controls and must not be added as public CLI verbs.
+- Reject lifecycle, hook, scheduler, dreaming, graph, maintenance, monitor
+  mutation, and LLM-backed retrieval commands while the installation-specific
+  system admission gate is closed.
+- Use a reviewed safe-while-suspended allowlist for top-level and nested
+  commands. Bounded inspection metadata refreshes are permitted, but explicit
+  output-writing options such as `install-discovery --plan-json` are denied.
+  Unknown future commands default to denied.
+- Require `repair-installation --apply --legacy-installation-mode
+  shared|isolated` when a legacy root-local profile with a custom wrapper
+  prefix cannot be classified safely.
+- Treat installation-root hook finalization as successful only when every
+  required artifact exists, including `opencode.json` and
+  `.opencode/plugins/agent-memory.js`.
+- After healthy runtime and frontend repair, `repair-installation --apply`
+  repeats installation-root hook and global bridge finalization. Failed
+  prerequisites keep activation skipped.
 
 ## Inputs / Outputs
 - Inputs: command line arguments, environment flags, current working directory.
@@ -39,6 +58,8 @@ application services.
 - Thin launcher `scripts/agent_context_engine.py`.
 
 ## Failure Modes
+- A bare `agent-context-engine` invocation prints the public help, including
+  direct-user system-control guidance, and exits successfully.
 - Invalid arguments fail with argparse/help behavior.
 - Application failures are surfaced without Python tracebacks in expected
   user-error cases.
@@ -50,6 +71,8 @@ application services.
 ## Observability / Audit
 - Commands that access memory or mutate risk/firewall state must call
   application paths that audit those effects.
+- Direct-user system-control mutations are audited by the application service;
+  CLI status remains read-only.
 
 ## Acceptance Criteria
 - `agent-context-engine --help` and core commands remain stable.
@@ -57,6 +80,8 @@ application services.
 - JSON output stays parseable where documented.
 - Install discovery and install execution agree on shared-command takeover
   semantics for `agent-context-engine`, `ace`, and `*-ace` wrapper links.
+- Agent-driven discovery writes a plan JSON approval artifact; approved install
+  execution applies that file unchanged instead of reconstructing flags.
 - `--isolated` is a deterministic install mode: target-local runtime storage by
   default, instance-specific wrapper naming, and no takeover of shared
   `agent-context-engine` / `ace` commands.
@@ -93,6 +118,49 @@ application services.
   very end, after those hook files exist. Incomplete installs must leave hooks
   inactive and must not start a monitor for an unbuilt frontend or unusable
   backend.
+- The automatic post-install pass must keep successful `doctor` output compact,
+  summarize errors, warnings, and historical project-binding maintenance
+  notices separately, report authoritative Codex/Claude headless readiness from
+  the install environment, and end with an explicit localized
+  installation-result line. Explicit `doctor` and `check-installation` calls
+  retain their detailed output.
+- `check-installation` must use the same normalized metadata root as hub
+  installation and repair. For the default memory root this is
+  `$HOME/.agent-context-engine`, never the legacy nested
+  `$HOME/.agent-context-engine/memory/.agent-context-engine` path.
+- A configured monitor port owned by an active runtime entry for the same
+  installation is `active`, not a port conflict. A listener owned by another
+  installation remains a conflict.
+- POSIX monitor autostart must verify `/api/status` against the selected
+  installation root and memory root. It must discover verified unregistered
+  monitor processes sharing that memory root, stop owned superseded instances, and
+  fail installation finalization when an older monitor reappears or takeover
+  cannot be verified. On macOS, a verified superseded monitor owned by the
+  legacy submitted `com.agent-context-engine.monitor-<port>` KeepAlive job must
+  have that exact job unloaded before shutdown.
+- Registry and status PIDs are diagnostics only and must never be passed to a
+  process-termination API. Superseded monitors may be stopped only through a
+  token-authenticated loopback shutdown request or a verified ACE-owned
+  LaunchAgent/Task Scheduler handle. Tokenless unmanaged monitors make install
+  finalization fail with an explicit manual-stop instruction. Shutdown tokens
+  remain in the permission-restricted local runtime registry and must not be
+  exposed by discovery or monitor status payloads.
+- A registry entry that is still marked active but temporarily unreachable is
+  also a takeover failure; the installer must not silently proceed while its
+  launcher may still restart it.
+- The installer-started monitor does not use `--replace-existing`. After old
+  launcher removal or authenticated shutdown, old endpoints must remain absent
+  for an eight-second stability window before takeover is accepted; the same
+  check runs after the new monitor starts.
+- Windows monitor autostart uses an installation-specific Task Scheduler
+  launcher and must satisfy the same
+  `/api/status` installation/memory identity contract as POSIX; stable port
+  acceptance alone is not success.
+- Requested prerequisite, scheduler, monitor, hook-finalization, or final
+  verification failure must produce a non-zero install exit code. If a new
+  POSIX monitor starts but takeover cleanup fails, terminate and then force-kill
+  only that owned child if needed, and verify its monitor identity no longer
+  responds before returning the incomplete result.
 - Install discovery, install execution, and repo-context commands must treat
   `memory/knowledge/repos.md` under the active memory root as the canonical
   runtime repo index. Legacy `docs/knowledge/repos.md` files may be imported as

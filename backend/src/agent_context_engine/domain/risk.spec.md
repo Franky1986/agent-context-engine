@@ -21,6 +21,11 @@ firewall, retrieval safety, classifier, and review flows.
 - Normalize structured tool-input variants consistently enough that CLI
   allowlists and local-read heuristics continue to apply across casing and
   payload-shape differences.
+- Select classifier policy JSON only from runner-specific assistant output
+  fields. Reject prompt echoes, arbitrary nested event content, and multiple
+  matching policy objects as invalid or ambiguous.
+- Protect recognizable writes to system-control state, anchor, and audit files
+  while allowing tokenized read-only static review commands.
 
 ## Inputs / Outputs
 - Inputs: normalized classifier/policy payloads and risk metadata.
