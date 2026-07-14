@@ -36,7 +36,7 @@ Created and maintained by [Frank Richter](https://www.linkedin.com/in/frank-rich
 
 Current public versions:
 
-- Backend / product: `0.2.14.dev0` (unreleased)
+- Backend / product: `0.2.14`
 - Monitor: `0.6.10`
 
 Platform support posture:

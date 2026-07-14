@@ -36,7 +36,7 @@ Erstellt und gepflegt von [Frank Richter](https://www.linkedin.com/in/frank-rich
 
 Aktuelle öffentliche Versionen:
 
-- Backend / Produkt: `0.2.14.dev0` (unveroeffentlicht)
+- Backend / Produkt: `0.2.14`
 - Monitor: `0.6.10`
 
 Plattformstatus:

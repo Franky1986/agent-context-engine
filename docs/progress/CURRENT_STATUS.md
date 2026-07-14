@@ -73,7 +73,7 @@ workflows. The current public slice includes:
 
 Versioned release snapshot:
 
-- Backend / product: `0.2.14.dev0` (unreleased)
+- Backend / product: `0.2.14`
 - Monitor: `0.6.10`
 
 ## Installation State
@@ -205,7 +205,7 @@ confirmed:
   install stall,
 - the active public checkout monitor was restarted on `127.0.0.1:8787` after
   the suspension hardening pass; `/api/status` reports backend
-  `0.2.14.dev0`, monitor `0.6.10`, the external shared memory root, and no
+  `0.2.14`, monitor `0.6.10`, the external shared memory root, and no
   LaunchAgent drift,
 - `doctor` now degrades to a warning when instance metadata cannot be written,
   instead of crashing the diagnostic run.

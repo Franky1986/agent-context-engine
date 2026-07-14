@@ -2,14 +2,14 @@
 
 All notable changes to Agent Context Engine are documented in this file.
 
-This repository currently has one public baseline commit:
+The initial public baseline was:
 
 - `0.1.3` backend / product
 - `0.5.7` monitor
 
 The entries below document the changes added since that initial public release.
 
-## Unreleased (target: Backend 0.2.14)
+## Backend 0.2.14
 
 ### Changed
 
