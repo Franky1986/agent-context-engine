@@ -1861,6 +1861,15 @@ def _opencode_dream_provider_details() -> tuple[str, str]:
     return provider_id or OPENCODE_DEFAULT_PROVIDER, model_name or OPENCODE_DREAM_MODEL
 
 
+def _opencode_provider_model_aliases(provider_id: str, model_id: str) -> set[str]:
+    aliases = {str(model_id).strip()}
+    # Ollama can expose a cloud-capable model through OpenCode with a
+    # ``-cloud`` suffix while ``ollama list`` reports the local/base id.
+    if provider_id == "ollama" and model_id.endswith("-cloud"):
+        aliases.add(model_id[: -len("-cloud")])
+    return {alias for alias in aliases if alias}
+
+
 def render_opencode_config(
     *,
     existing_config: dict[str, Any] | None = None,
@@ -2203,10 +2212,20 @@ def opencode_status(root: Path = ROOT, *, probe_models: bool = True) -> dict[str
         except json.JSONDecodeError:
             pass
     ollama_ids = {item["id"] for item in ollama.get("models", [])}
+    discovered_ids = {item["id"] for item in discovered.get("models", [])}
     dream_provider_id, dream_provider_model = _opencode_dream_provider_details()
     runtime_ready = shutil.which("opencode") is not None
     dream_provider_available = shutil.which(dream_provider_id) is not None
-    dream_ready = probe_models and runtime_ready and dream_provider_available and dream_provider_model in ollama_ids
+    dream_model_aliases = _opencode_provider_model_aliases(dream_provider_id, dream_provider_model)
+    dream_ready = (
+        probe_models
+        and runtime_ready
+        and dream_provider_available
+        and (
+            bool(dream_model_aliases.intersection(ollama_ids))
+            or f"{dream_provider_id}/{dream_provider_model}" in discovered_ids
+        )
+    )
     hook_status = _opencode_hook_status(root=root)
     wrapper_status = _simple_wrapper_state(executable_name="opencode", wrapper_command="./scripts/opencode-ace", root=root)
     global_wrapper_name = _resolved_global_wrapper_name("opencode", root=root)
@@ -2247,6 +2266,23 @@ def opencode_status(root: Path = ROOT, *, probe_models: bool = True) -> dict[str
         **hook_status,
         "prepared": bool(wrapper_status["wrapper_path_exists"]) or bool(hook_status["prepared"]),
     }, client="opencode", root=root)
+
+
+def workspace_integration_status(
+    client: str,
+    *,
+    workspace_root: Path,
+    installation_root: Path,
+) -> dict[str, Any]:
+    """Evaluate project hooks against the installation they are bound to."""
+    selected_client = str(client or "").strip().lower()
+    selected_root = workspace_root.expanduser().resolve()
+    expected_root = installation_root.expanduser().resolve()
+    if selected_client in {"codex", "claude", "gemini"}:
+        return _shell_hook_status(selected_client, root=selected_root, memory_root=expected_root)
+    if selected_client == "cursor":
+        return _cursor_status_with_hooks(root=selected_root, installation_root=expected_root)
+    raise ValueError(f"unsupported workspace integration client: {selected_client}")
 
 
 def antigravity_status(*, root: Path = ROOT) -> dict[str, Any]:

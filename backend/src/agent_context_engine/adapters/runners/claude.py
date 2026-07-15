@@ -70,7 +70,15 @@ def _content_text(content: object) -> str:
 
 
 def _next_seq(conn: sqlite3.Connection, session_id: str) -> int:
-    row = conn.execute("select coalesce(max(seq), 0) as seq from events where session_id = ?", (session_id,)).fetchone()
+    row = conn.execute(
+        """
+        select max(
+          coalesce((select max(seq) from events where session_id = ?), 0),
+          coalesce((select last_reserved_event_seq from sessions where session_id = ?), 0)
+        ) as seq
+        """,
+        (session_id, session_id),
+    ).fetchone()
     return int(row["seq"]) + 1
 
 
@@ -131,6 +139,10 @@ def sync_transcript_events_claude(conn: sqlite3.Connection, session_id: str, tra
                     """
                     update sessions
                     set last_event_seq = case when last_event_seq < ? then ? else last_event_seq end,
+                        last_reserved_event_seq = case
+                          when last_reserved_event_seq < ? then ?
+                          else last_reserved_event_seq
+                        end,
                         last_event_at = case
                           when last_event_at is null or last_event_at < ? then ?
                           else last_event_at
@@ -140,7 +152,7 @@ def sync_transcript_events_claude(conn: sqlite3.Connection, session_id: str, tra
                         dream_status = 'dream_pending'
                     where session_id = ?
                     """,
-                    (seq, seq, timestamp, timestamp, str(path), session_id),
+                    (seq, seq, seq, seq, timestamp, timestamp, str(path), session_id),
                 )
             max_recorded_at = timestamp if max_recorded_at is None or timestamp > max_recorded_at else max_recorded_at
             inserted += 1

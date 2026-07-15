@@ -1594,6 +1594,14 @@ def cmd_replay_hook_queue(args: argparse.Namespace) -> int:
             write_hook_worker_status(running=True, reason="replay-hook-queue", started_at=started_at, heartbeat_at=started_at)
         recovered = recover_failed_hook_queue_events(client=args.client, limit=max(args.limit, getattr(args, "recover_limit", args.limit)))
         if not root.exists():
+            if recovered["failed"] == 0:
+                append_hook_queue_log(
+                    "queue replay completed",
+                    replayed=0,
+                    remaining=0,
+                    recovered=recovered["recovered"],
+                    dead_letters=recovered["remaining"],
+                )
             print(
                 "replayed queued hook events: 0 "
                 f"remaining=0 failed={recovered['failed']} recovered={recovered['recovered']} dead_letters={recovered['remaining']}"
@@ -1672,6 +1680,14 @@ def cmd_replay_hook_queue(args: argparse.Namespace) -> int:
         remaining = len(list(root.glob("*/*.json")))
         if replayed:
             spawn_scheduler_kick("hook-replay")
+        if failed == 0:
+            append_hook_queue_log(
+                "queue replay completed",
+                replayed=replayed,
+                remaining=remaining,
+                recovered=recovered["recovered"],
+                dead_letters=recovered["remaining"],
+            )
         print(
             f"replayed queued hook events: {replayed} remaining={remaining} failed={failed} "
             f"recovered={recovered['recovered']} dead_letters={recovered['remaining']}"

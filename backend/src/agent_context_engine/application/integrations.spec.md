@@ -119,6 +119,14 @@ Each integration item must expose separable status axes:
 22. Hook-config backups must resolve the backup metadata root from the
     activating installation profile. An isolated activation must not write
     backups into the process-global home metadata root.
+23. Install-wide workspace diagnostics must evaluate Codex, Claude, and Cursor
+    hook bindings against the owning installation root. Evaluating an external
+    workspace against itself creates a false `not_prepared` or inactive state
+    and is not permitted.
+24. OpenCode Dream readiness accepts provider-reported aliases when OpenCode
+    uses an Ollama cloud model id with `-cloud` while `ollama list` reports the
+    same base id without that suffix. Exact OpenCode model discovery remains a
+    valid readiness signal as well.
 ## Client Families
 
 ### Shell-hook clients

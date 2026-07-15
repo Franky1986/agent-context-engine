@@ -1,6 +1,6 @@
 # Agent Context Engine Test Strategy And Validation Status
 
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 This document defines a deterministic test order for Agent Context Engine and
 tracks which parts have already been verified in recent installation,
@@ -606,7 +606,7 @@ Direct-user system suspension validation on 2026-07-13:
 
 Change set under test:
 
-- backend version `0.2.14` (released 2026-07-14)
+- backend version `0.2.15` (release candidate 2026-07-15)
 - monitor version `0.6.10`
 - installation and integration command surface updated around `--installation-root`
 - isolated install flow updated around deterministic local memory and wrapper behavior
@@ -621,6 +621,10 @@ Change set under test:
   without wrapper environment, executes canonical and instance-named wrapper
   symlinks, verifies installation-scoped backups, and directly renders the
   native Windows `.cmd`/PowerShell project adapter path
+- focused 0.2.15 regressions cover Claude payload deduplication and reserved
+  transcript sequencing, terminal Dream pending-sweep behavior, OpenCode
+  cloud/base model aliases, and external workspace status against the owning
+  installation root
 
 Status legend:
 
@@ -723,7 +727,7 @@ Status legend:
 - [x] `dream-queue-status` in `refactor-2` reported `queued=0 running=0 failed=0 terminal_failed=0 succeeded=3` after the isolated validation runs.
 - [x] `test29` monitor API confirmed the activated Cursor project and its hook state.
 - [x] `/api/status` on the restarted public-checkout monitor at
-  `127.0.0.1:8787` reports backend `0.2.14`, monitor `0.6.10`, the shared
+  `127.0.0.1:8787` reports backend `0.2.15`, monitor `0.6.10`, the shared
   external memory root, `virgin_uninitialized` system-control integrity, and
   no LaunchAgent drift.
 - [x] `/api/status`, `/api/integrations`, `/api/dreams`, `/api/dream-queue`,

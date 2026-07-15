@@ -89,6 +89,7 @@ from ....application.integrations import (
     integration_projects_status,
     opencode_status,
     shell_hook_adapter_status,
+    workspace_integration_status,
     workspace_binding_status,
     write_workspace_binding,
 )
@@ -3038,9 +3039,12 @@ def _resolved_installation_profile(root: Path, args: argparse.Namespace) -> dict
     }
 
 
-def _workspace_hook_status(client: str, workspace_root: Path) -> dict[str, object]:
-    summary = integration_summary(root=workspace_root, probe_gemini=False)
-    return next((item for item in summary["items"] if item.get("client") == client), {})
+def _workspace_hook_status(client: str, workspace_root: Path, installation_root: Path) -> dict[str, object]:
+    return workspace_integration_status(
+        client,
+        workspace_root=workspace_root,
+        installation_root=installation_root,
+    )
 
 
 def _port_conflict_status(host: str, port: int) -> dict[str, object]:
@@ -4006,7 +4010,7 @@ def _installation_check_payload(*, root: Path, args: argparse.Namespace) -> dict
     }
     for client, roots in workspace_roots.items():
         for workspace_root in roots:
-            item = _workspace_hook_status(client, workspace_root)
+            item = _workspace_hook_status(client, workspace_root, root)
             requires_confirmation, adapter_status = _workspace_rewrite_requires_confirmation(client, workspace_root, root)
             binding_status = workspace_binding_status(client, root=workspace_root, expected_memory_root=root)
             if requires_confirmation:

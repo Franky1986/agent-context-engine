@@ -667,6 +667,59 @@ class AgentContextEngineWindowTests(AgentContextEngineTestCase):
             queued = conn.execute("select * from dream_queue where session_id='interval-session'").fetchone()
             self.assertIsNone(queued)
 
+    def test_terminal_failed_dream_is_not_swept_again_until_new_events_mark_it_pending(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            am = load_agent_memory(root)
+            conn = am.connect()
+            with conn:
+                conn.execute(
+                    """
+                    insert into sessions (
+                      session_id, client_type, project_id, cwd, started_at,
+                      last_event_at, status, last_event_seq, last_dream_event_seq,
+                      dream_status, dream_runner_status
+                    ) values (
+                      'terminal-failed-dream', 'gemini', 'demoProject', ?, ?, ?,
+                      'stopped', 3, 0, 'failed', 'runner no longer supported'
+                    )
+                    """,
+                    (str(root), "2026-07-15T10:00:00+00:00", "2026-07-15T10:05:00+00:00"),
+                )
+
+            from agent_context_engine.adapters.sqlite.repositories import dreamable_sessions
+            from agent_context_engine.application.dream_queue import enqueue_pending_dream_jobs
+
+            self.assertNotIn(
+                "terminal-failed-dream",
+                {row["session_id"] for row in dreamable_sessions(conn, True)},
+            )
+            self.assertEqual(
+                enqueue_pending_dream_jobs(
+                    conn,
+                    runner="same-as-session",
+                    runner_model=None,
+                    runner_timeout=60,
+                    created_by="unit_test",
+                ),
+                0,
+            )
+            with conn:
+                conn.execute(
+                    """
+                    update sessions
+                    set last_event_seq = 4,
+                        dream_status = 'dream_pending',
+                        dream_runner_status = null
+                    where session_id = 'terminal-failed-dream'
+                    """
+                )
+            self.assertIn(
+                "terminal-failed-dream",
+                {row["session_id"] for row in dreamable_sessions(conn, True)},
+            )
+            conn.close()
+
     def test_dream_pipeline_v2_mock_run_writes_stages_semantics_and_audit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2602,6 +2655,69 @@ class AgentContextEngineWindowTests(AgentContextEngineTestCase):
             self.assertFalse(worker["worker"]["running"])
             self.assertTrue(worker["worker"]["last_exit_at"])
 
+    def test_claude_transcript_sync_does_not_consume_reserved_queue_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            transcript = root / "claude-transcript.jsonl"
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "uuid": "assistant-turn-1",
+                        "timestamp": "2026-07-15T11:14:12+00:00",
+                        "cwd": str(root),
+                        "message": {"content": [{"type": "text", "text": "Queued work completed."}]},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            queued = run_cli(
+                root,
+                "log-hook",
+                "--client",
+                "claude",
+                stdin={
+                    "session_id": "claude-reserved-sequence",
+                    "hook_event_name": "Stop",
+                    "cwd": str(root),
+                    "transcript_path": str(transcript),
+                },
+                extra_env={"AGENT_MEMORY_TEST_AUTO_REPLAY": "0"},
+            )
+            self.assertEqual(queued.returncode, 0, queued.stdout + queued.stderr)
+
+            am = load_agent_memory(root)
+            conn = am.connect()
+            from agent_context_engine.adapters.runners.claude import sync_transcript_events_claude
+
+            self.assertEqual(sync_transcript_events_claude(conn, "claude-reserved-sequence", str(transcript)), 1)
+            transcript_event = conn.execute(
+                "select seq, event_name from events where session_id = ?",
+                ("claude-reserved-sequence",),
+            ).fetchone()
+            self.assertEqual(transcript_event["seq"], 2)
+            self.assertEqual(transcript_event["event_name"], "TranscriptAssistant")
+            conn.close()
+
+            replay = run_cli(root, "replay-hook-queue", "--worker")
+            self.assertEqual(replay.returncode, 0, replay.stdout + replay.stderr)
+            conn = am.connect()
+            events = list(
+                conn.execute(
+                    "select seq, event_name from events where session_id = ? order by seq",
+                    ("claude-reserved-sequence",),
+                )
+            )
+            self.assertEqual([(row["seq"], row["event_name"]) for row in events], [(1, "Stop"), (2, "TranscriptAssistant")])
+            audit = conn.execute(
+                "select status, error from hook_queue_audit where session_id = ?",
+                ("claude-reserved-sequence",),
+            ).fetchone()
+            self.assertEqual(audit["status"], "processed")
+            self.assertFalse(audit["error"])
+            conn.close()
+
     def test_hook_queue_kick_ignores_debounce_when_events_are_queued(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -3916,6 +4032,28 @@ class AgentContextEngineEndToEndTests(AgentContextEngineTestCase):
             self.assertIn("recent_hook_bridge_error", queue_status["degradation_reasons"])
             self.assertEqual(queue_status["failed_events"], 1)
             self.assertEqual(queue_status["bridge_log"]["has_error"], True)
+            conn.close()
+
+    def test_successful_hook_queue_replay_clears_historical_log_degradation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            am = load_agent_memory(root)
+            logs_dir = root / "memory" / "logs"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            (logs_dir / "hooks-queue.log").write_text(
+                json.dumps({"timestamp": "2026-07-15T10:00:00+00:00", "message": "queue replay failed"}) + "\n",
+                encoding="utf-8",
+            )
+
+            replay = run_cli(root, "replay-hook-queue", "--worker")
+            self.assertEqual(replay.returncode, 0, replay.stdout + replay.stderr)
+
+            from agent_context_engine.application.monitor import monitor_status
+
+            conn = am.connect()
+            queue_status = monitor_status(conn, "codex", root, monitor_version="test", monitor_context={})["hook_queue"]
+            self.assertFalse(queue_status["degraded"], queue_status)
+            self.assertEqual(queue_status["queue_log"]["last_message"], "queue replay completed")
             conn.close()
 
     def test_hook_integrity_disable_command_is_blocked(self) -> None:
@@ -11852,7 +11990,7 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertEqual(instance_metadata["instance_id"], "install-root")
             self.assertEqual(instance_metadata["installation_root"], str(install_root.resolve()))
             self.assertEqual(instance_metadata["memory_root"], str(memory_root.resolve()))
-            self.assertEqual(instance_metadata["product_version"], "0.2.14")
+            self.assertEqual(instance_metadata["product_version"], "0.2.15")
             self.assertEqual(instance_metadata["monitor_version"], "0.6.10")
             self.assertEqual(instance_metadata["monitor_port"], 8899)
             self.assertEqual(instance_metadata["wrapper_suffix"], "-ace")
@@ -14060,6 +14198,16 @@ The session reconciled stale queue state and resumed pending dreams.
             self.assertIn('TEMPLATE="$ROOT/templates/codex-hooks/hook_adapter.sh"', codex_adapter)
             cursor_adapter = (cursor_workspace / ".cursor" / "hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
             self.assertIn(str(root.resolve()), cursor_adapter)
+            from agent_context_engine.interfaces.cli.commands import installation as install_commands
+
+            for client, workspace in (
+                ("codex", codex_workspace),
+                ("claude", claude_workspace),
+                ("cursor", cursor_workspace),
+            ):
+                with self.subTest(client=client):
+                    workspace_status = install_commands._workspace_hook_status(client, workspace, root)
+                    self.assertEqual(workspace_status["hooks_state"], "enabled")
 
     def test_repair_installation_skips_workspace_adapter_rewrite_without_explicit_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -15357,7 +15505,7 @@ print("{}")
                     "provider": "ollama",
                     "models": [
                         {"id": "gemma4:latest", "provider": "ollama", "label": "gemma4:latest"},
-                        {"id": "gpt-oss:20b-cloud", "provider": "ollama", "label": "gpt-oss:20b-cloud"},
+                        {"id": "gpt-oss:20b", "provider": "ollama", "label": "gpt-oss:20b"},
                     ],
                 }
                 status = integrations.opencode_status(root)

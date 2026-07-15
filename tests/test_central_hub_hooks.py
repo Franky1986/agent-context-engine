@@ -84,6 +84,10 @@ class StorageRootHelpersTest(unittest.TestCase):
         self.assertIn('installation_root != expected_root', wrapper_text)
         self.assertIn('PROJECT_DIR="$LAUNCH_CWD"', wrapper_text)
         self.assertNotIn('SEARCH_DIR="$LAUNCH_CWD"', wrapper_text)
+        template_text = (SKILL_ROOT / "templates" / "claude-hooks" / "hook_adapter.sh").read_text(encoding="utf-8")
+        self.assertIn('PAYLOAD_HASH="$(shasum -a 256 "$PAYLOAD_TMP"', template_text)
+        self.assertIn('memory/runtime/hook-dedupe/${CLIENT}', template_text)
+        self.assertIn('<"$PAYLOAD_TMP"', template_text)
 
     def test_antigravity_and_gemini_wrappers_check_hook_config_completeness(self) -> None:
         antigravity_wrapper = (SKILL_ROOT / "scripts" / "agy-ace").read_text(encoding="utf-8")

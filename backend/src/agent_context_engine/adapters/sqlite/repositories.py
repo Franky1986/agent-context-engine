@@ -23,8 +23,10 @@ def dreamable_sessions(conn: sqlite3.Connection, pending_only: bool) -> list[sql
     sql = "select * from sessions"
     if pending_only:
         sql += """
-        where last_event_seq > last_dream_event_seq
-           or exists (
+        where coalesce(dream_status, 'dream_pending') <> 'failed'
+          and (
+            last_event_seq > last_dream_event_seq
+            or exists (
                 select 1
                 from events e
                 where e.session_id = sessions.session_id
@@ -36,7 +38,7 @@ def dreamable_sessions(conn: sqlite3.Connection, pending_only: bool) -> list[sql
                       and e.seq between dr.input_event_seq_from and dr.input_event_seq_to
                   )
            )
-           or exists (
+            or exists (
                 select 1
                 from dream_runs dr
                 where dr.session_id = sessions.session_id
@@ -49,7 +51,8 @@ def dreamable_sessions(conn: sqlite3.Connection, pending_only: bool) -> list[sql
                       and ga.artifact_type = 'patch'
                       and ga.status = 'valid'
                   )
-           )
+            )
+          )
         """
     sql += " order by last_event_at desc"
     return list(conn.execute(sql))

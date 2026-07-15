@@ -84,6 +84,10 @@ The installation-specific template is fully dynamic:
 - It uses `AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT` for runner-specific
   control-plane checks.
 - It contains no hard-coded paths or placeholder replacements.
+- Codex and Claude templates hash the native stdin payload and suppress an
+  identical delivery for a short bounded window. This keeps migration overlap
+  between user-level and project-level runner hooks idempotent without
+  suppressing later distinct events.
 
 ## Wrapper contract
 

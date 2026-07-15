@@ -29,11 +29,52 @@ fi
 
 LOG="$ROOT/memory/logs/${CLIENT}-hook.err.log"
 mkdir -p "$(dirname "$LOG")"
+PAYLOAD_TMP="$(mktemp)"
 TMPERR="$(mktemp)"
-trap 'rm -f "$TMPERR"' EXIT
+trap 'rm -f "$TMPERR" "$PAYLOAD_TMP"' EXIT
+cat > "$PAYLOAD_TMP"
+
+# Claude merges user-level and project-level hooks. During migrations both
+# scopes can temporarily point at Agent Context Engine and deliver the exact
+# same native payload. Keep that overlap idempotent at the adapter boundary.
+DEDUP_ROOT="$ROOT/memory/runtime/hook-dedupe/${CLIENT}"
+mkdir -p "$DEDUP_ROOT"
+
+if command -v shasum >/dev/null 2>&1; then
+  PAYLOAD_HASH="$(shasum -a 256 "$PAYLOAD_TMP" | awk '{print $1}')"
+elif command -v sha256sum >/dev/null 2>&1; then
+  PAYLOAD_HASH="$(sha256sum "$PAYLOAD_TMP" | awk '{print $1}')"
+else
+  PAYLOAD_HASH=""
+fi
+if [ -n "$PAYLOAD_HASH" ]; then
+  DEDUP_LOCK="$DEDUP_ROOT/$PAYLOAD_HASH.lock"
+  if ! mkdir "$DEDUP_LOCK" 2>/dev/null; then
+    if python3 - "$DEDUP_LOCK" <<'PY'
+import sys
+import time
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    age = time.time() - path.stat().st_mtime
+except OSError:
+    raise SystemExit(0)
+raise SystemExit(0 if age > 10 else 1)
+PY
+    then
+      rm -rf "$DEDUP_LOCK"
+      mkdir "$DEDUP_LOCK" 2>/dev/null || exit 0
+    else
+      exit 0
+    fi
+  fi
+  touch "$DEDUP_LOCK"
+fi
 
 set +e
 env AGENT_CONTEXT_ENGINE_ROOT="$ROOT" AGENT_CONTEXT_ENGINE_GLOBAL_WRAPPER_CLIENT="$CLIENT" AGENT_MEMORY_LAUNCH_CWD="${AGENT_MEMORY_LAUNCH_CWD:-${PWD}}" AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC="${AGENT_MEMORY_CLASSIFIER_TOOL_OUTPUT_ASYNC:-1}" python3 "$SCRIPT" log-hook --client "$CLIENT" \
+  <"$PAYLOAD_TMP" \
   3</dev/null \
   2>"$TMPERR"
 CODE=$?

@@ -1,7 +1,7 @@
 # Current Status
 
 ## Date
-2026-07-14
+2026-07-15
 
 ## Public Snapshot
 
@@ -71,10 +71,17 @@ workflows. The current public slice includes:
   classifier and dream runner share the directly validated
   `Gemini 3.5 Flash (Low)` default. Current `agy` releases reject the removed
   `Minimal` thinking-level label.
+- Claude hook overlap between user and project scopes is now idempotent, and
+  transcript synchronization cannot consume queue-reserved event sequences.
+- Terminal Dream failures remain out of automatic pending sweeps until a new
+  hook event marks the session pending again.
+- External workspace diagnostics now use the owning installation root, and
+  OpenCode status recognizes the Ollama base id behind a configured `-cloud`
+  Dream model.
 
 Versioned release snapshot:
 
-- Backend / product: `0.2.14`
+- Backend / product: `0.2.15`
 - Monitor: `0.6.10`
 
 ## Installation State
@@ -206,7 +213,7 @@ confirmed:
   install stall,
 - the active public checkout monitor was restarted on `127.0.0.1:8787` after
   the suspension hardening pass; `/api/status` reports backend
-  `0.2.14`, monitor `0.6.10`, the external shared memory root, and no
+  `0.2.15`, monitor `0.6.10`, the external shared memory root, and no
   LaunchAgent drift,
 - `doctor` now degrades to a warning when instance metadata cannot be written,
   instead of crashing the diagnostic run.

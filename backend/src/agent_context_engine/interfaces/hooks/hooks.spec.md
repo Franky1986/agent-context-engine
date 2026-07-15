@@ -18,6 +18,11 @@ pre-action safety checks, and enqueue or persist events for later processing.
 - Keep hook handling fast and robust under concurrent agent activity.
 - Fail closed for risky pre-action checks when required.
 - Preserve queued payloads when SQLite is temporarily unavailable.
+- Keep duplicate native payload delivery idempotent when a runner merges
+  user-level and project-level hook scopes.
+- Transcript import must allocate synthetic event sequences above both
+  persisted and queue-reserved sequences so replay cannot collide with a
+  synthetic event written while the queue item was waiting.
 - Keep asynchronous queue scheduling observable so operators can see whether a
   worker is running, stale, or replaying queued events.
 - Distinguish local read-only file/context access from network reads so tainted
@@ -53,11 +58,16 @@ pre-action safety checks, and enqueue or persist events for later processing.
 - Session correlation should preserve launch and working directory context.
 - Queue health, bridge error logs, and worker status must be externally
   inspectable through diagnostics and monitor status payloads.
+- A replay pass without failures appends a `queue replay completed` health
+  marker, including empty passes, so a repaired queue no longer remains
+  degraded solely because its previous operator-log entry was an error.
 
 ## Acceptance Criteria
 - Existing Codex/Claude/Cursor/Antigravity/Gemini/Opencode integrations continue to work.
 - Hook paths do not run dream/graph work inline.
 - Queue replay can recover accepted events.
+- Claude queue replay remains lossless when transcript synchronization runs
+  after reservation but before replay.
 - Minimal SessionStart hook context must surface the original launch/work
   folder whenever a root-managed wrapper started the runner from a different
   shell directory than the Agent Context Engine root.

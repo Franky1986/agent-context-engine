@@ -171,6 +171,10 @@ activate hooks in the current directory.
 Because Codex may still execute multiple hook configs along a parent chain, the
 Codex central adapter deduplicates identical native hook payloads before
 persisting them.
+Claude can merge user-level and project-level settings during migration. Its
+adapter applies the same short-window exact-payload deduplication, and Claude
+transcript synchronization allocates synthetic event sequences above any
+already reserved queue sequence so asynchronous replay stays lossless.
 
 Codex' current documented hook discovery still supports project-local
 `<repo>/.codex/hooks.json`; this is not a known breaking change to user-level
@@ -263,6 +267,10 @@ context via `AGENT_MEMORY_LAUNCH_CWD` and passed back to OpenCode as the
 positional project argument. The wrapper resolves the active installation
 through the central `active-root` file before falling back to its script
 location and refuses to start when the OpenCode plugin bridge is missing.
+Explicit OpenCode readiness accepts the Ollama cloud alias used by the
+configured Dream model when `ollama list` exposes the same base model without
+the `-cloud` suffix; a successful exact OpenCode model listing remains valid
+evidence as well.
 
 Codex, Claude, Antigravity, and Gemini are started through the shared
 `codex-ace`, `claude-ace`, `agy-ace`, and `gemini-ace`
@@ -456,6 +464,9 @@ That binding is part of the effective hook state:
 - if the binding file is missing, hooks are treated as inactive
 - if the binding points to a missing Agent Context Engine root, hooks are treated as inactive
 - the monitor shows the binding path, target root, target instance, binding error, and effective inactive reason
+- `check-installation` evaluates an external workspace against that owning
+  installation root, matching `cursor-status --target ...` instead of treating
+  the workspace itself as the expected installation
 
 The following clients expose shared global wrappers. You can still activate
 their project-local hook configs explicitly, but a central install commonly

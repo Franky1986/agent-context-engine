@@ -33,6 +33,10 @@ graph repair, sync, cleanup, and recovery.
 - SQLite busy/locked errors are retryable when safe.
 - Step hard failures are recorded without hiding later steps.
 - Missing optional integrations do not fail unrelated core steps.
+- A session whose latest Dream state is terminal `failed` is not selected by
+  the automatic pending sweep again. Explicit reruns remain available, and a
+  newly accepted hook event changes the session back to `dream_pending`, which
+  makes the new event window eligible.
 - Check the installation-specific system admission gate before acquiring the
   scheduler run lock or claiming work. Suspended and fail-closed partial modes
   skip successfully.
@@ -48,6 +52,8 @@ graph repair, sync, cleanup, and recovery.
 ## Acceptance Criteria
 - `scheduler-status` and `scheduler-run` remain behavior-compatible.
 - Replay and repair steps are visible in scheduler step history.
+- Terminal Dream failures do not create an endless sequence of new
+  `pending_sweep` queue jobs when no session events changed.
 - No LaunchAgent implementation detail leaks into core scheduling policy.
 
 ## Tests / Checks

@@ -13,6 +13,15 @@
   <img alt="Windows" src="https://img.shields.io/badge/Windows-experimenteller%20Runtime%20Pfad-0078D4?logo=windows&logoColor=white">
 </p>
 
+<p align="center">
+  <img alt="Codex unterstützt" src="https://img.shields.io/badge/Codex-unterst%C3%BCtzt-111827?logo=openai&logoColor=white">
+  <img alt="Claude Code unterstützt" src="https://img.shields.io/badge/Claude%20Code-unterst%C3%BCtzt-D97757?logo=anthropic&logoColor=white">
+  <img alt="Cursor unterstützt" src="https://img.shields.io/badge/Cursor-unterst%C3%BCtzt-111827?logo=cursor&logoColor=white">
+  <img alt="Antigravity unterstützt" src="https://img.shields.io/badge/Antigravity-unterst%C3%BCtzt-4285F4?logo=google&logoColor=white">
+  <img alt="Gemini unterstützt" src="https://img.shields.io/badge/Gemini-unterst%C3%BCtzt-8E75B2?logo=googlegemini&logoColor=white">
+  <img alt="OpenCode unterstützt" src="https://img.shields.io/badge/OpenCode-unterst%C3%BCtzt-2563EB?logo=opencode&logoColor=white">
+</p>
+
 # Agent Context Engine
 
 Lokale, harness-übergreifende Context-Engine für Coding-Agents mit Memory,
@@ -36,7 +45,7 @@ Erstellt und gepflegt von [Frank Richter](https://www.linkedin.com/in/frank-rich
 
 Aktuelle öffentliche Versionen:
 
-- Backend / Produkt: `0.2.14`
+- Backend / Produkt: `0.2.15`
 - Monitor: `0.6.10`
 
 Plattformstatus:
@@ -80,6 +89,17 @@ agent-context-engine launchagent-status
 `agent-context-engine` ohne Argumente zeigt die Kommando-Uebersicht und die
 kopierbaren direkten System-Control-Zeilen fuer Nutzer an.
 
+<table>
+  <tr>
+    <th width="50%">1. Erkannten Installationsplan prüfen</th>
+    <th width="50%">2. Abgeschlossene Installation verifizieren</th>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/installation-discovery-plan.png" alt="Discovery und Freigabeplan der Agent-Context-Engine-Installation"></td>
+    <td><img src="docs/assets/showcase/installation-success-summary.png" alt="Erfolgreiche Zusammenfassung der Agent-Context-Engine-Installation"></td>
+  </tr>
+</table>
+
 ## Wie Es Funktioniert
 
 1. Hooks erfassen Session-Aktivität aus unterstützten Runnern.
@@ -88,6 +108,66 @@ kopierbaren direkten System-Control-Zeilen fuer Nutzer an.
 3. Retrieval- und Handover-Flows machen frühere Arbeit wieder nutzbar.
 4. Hintergrund-Scheduling hält Summaries, Dreams, Graph-Extraktion und Wartung am Laufen.
 5. Der lokale Monitor bündelt Runtime-Zustand, Integrationen, Risiken und Storage.
+
+## Wie Alles Zusammenspielt
+
+```mermaid
+flowchart LR
+  subgraph Clients["Runner-Clients"]
+    Codex[Codex]
+    Claude[Claude Code]
+    Cursor[Cursor]
+    Agy[Antigravity]
+    Gemini[Gemini CLI]
+    OpenCode[OpenCode]
+  end
+
+  subgraph Entry["ACE-Start und Aktivierung"]
+    CodexAce[codex-ace]
+    ClaudeAce[claude-ace]
+    CursorAce[cursor-ace]
+    AgyAce[agy-ace]
+    GeminiAce[gemini-ace]
+    OpenCodeAce[opencode-ace]
+  end
+
+  Codex --> CodexAce
+  Claude --> ClaudeAce
+  Cursor --> CursorAce
+  Agy --> AgyAce
+  Gemini --> GeminiAce
+  OpenCode --> OpenCodeAce
+
+  CodexAce --> Ingress[Native Hooks und Plugin-Bridge]
+  ClaudeAce --> Ingress
+  CursorAce --> Ingress
+  AgyAce --> Ingress
+  GeminiAce --> Ingress
+  OpenCodeAce --> Ingress
+
+  Ingress --> Guard[Admission, Risk-Klassifikator und Firewall]
+  Guard --> DB[(Lokaler SQLite Event- und Audit-Store)]
+  DB --> Retrieval[Suche, Retrieval und Handover]
+  Retrieval --> Context[Kontext für den nächsten Agent-Turn]
+
+  DB --> Scheduler[Scheduler und persistente Queues]
+  Scheduler --> DreamQueue[Dream-Queue]
+  DreamQueue --> RunnerPolicy[Session-Runner oder konfigurierter Delegate]
+  RunnerPolicy --> Dream[Dream-v2-Stages]
+  Dream --> Artifacts[Summaries, Handovers und Audit-Artefakte]
+  Dream --> Graph[(Semantischer Graph und Evidence)]
+  Artifacts --> Retrieval
+  Graph --> Retrieval
+
+  Monitor[Lokale Monitor-API und UI] -. liest .-> DB
+  Monitor -. inspiziert .-> Artifacts
+  Monitor -. inspiziert .-> Graph
+```
+
+Das gesamte Runtime-Memory bleibt lokal. Die Wrapper bewahren den
+Projektkontext, die Ingress-Schicht hält Capture und Policy-Prüfung schnell,
+und Hintergrundarbeit nutzt standardmäßig den Session-Runner. Integrationen
+wie Cursor können dafür einen Headless-Delegate konfigurieren.
 
 ## Dokumentation
 
@@ -363,6 +443,32 @@ externe Workspace-Adapter umzuschreiben.
 
 ## Nach Der Installation
 
+Beim ersten Projektstart fragt der Wrapper, bevor lokale Hooks ergänzt werden.
+Codex und Claude verwenden dasselbe explizite Aktivierungsmodell; der zentrale
+Hub hält den Projekt-Adapter unabhängig von einem bestimmten Checkout-Pfad.
+
+<table>
+  <tr>
+    <th width="50%">Codex-Projektaktivierung</th>
+    <th width="50%">Claude-Projektaktivierung</th>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/codex-project-hook-activation.png" alt="codex-ace fragt nach der Aktivierung der Projekt-Hooks"></td>
+    <td><img src="docs/assets/showcase/claude-project-hook-activation.png" alt="claude-ace fragt nach der Aktivierung der Projekt-Hooks"></td>
+  </tr>
+</table>
+
+Nach der Aktivierung sind Hook-Events im Runner sichtbar und frühere Arbeit
+kann über die unterstützten Clients hinweg abgerufen werden.
+
+<p align="center">
+  <img src="docs/assets/showcase/codex-hooked-session.png" alt="Codex-Session mit erfolgreichen Agent-Context-Engine-Hooks" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/assets/showcase/multi-runner-session-recall.png" alt="Codex, Claude und Antigravity mit gemeinsamem Agent-Context-Engine-Memory" width="900">
+</p>
+
 ### Codex
 
 ```sh
@@ -630,6 +736,32 @@ Er bietet unter anderem:
 - stündliche Token-Statistiken
 - optionalen Neo4j-Graph-Source, wenn `AGENT_MEMORY_NEO4J_PASSWORD` gesetzt ist
 
+Die Sessions-Ansicht verbindet erfasste Runner-Aktivität mit Queue- und
+Dream-Fortschritt. Die Auswahl einer Zeile öffnet die persistierten Events und
+Run-Details.
+
+<table>
+  <tr>
+    <th width="50%">Sessions-Übersicht</th>
+    <th width="50%">Dream-Fortschritt</th>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/monitor-sessions-overview.png" alt="Sessions-Übersicht im Agent-Context-Engine-Monitor"></td>
+    <td><img src="docs/assets/showcase/monitor-session-dream-progress.png" alt="Monitor-Session mit laufendem Dream-Prozess"></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/assets/showcase/monitor-session-detail.png" alt="Detaillierte Session-Ansicht im Agent-Context-Engine-Monitor" width="900">
+</p>
+
+Die Dream-Inspektion zeigt Runner und Modell, Stage-Ergebnis, Event-Fenster,
+Laufzeit, Token-Accounting, semantisches Signal und Persistenzwirkung.
+
+<p align="center">
+  <img src="docs/assets/showcase/monitor-dream-inspection.png" alt="Erfolgreiche Dream-v2-Inspektion mit Tokens und semantischer Wirkung" width="900">
+</p>
+
 Der Q&A-Endpunkt baut einen kleinen Retrieval-Prompt aus SQLite-FTS-Chunks und
 lokalem Graph-Kontext und ruft dann den gewählten Runner im no-tools/read-only-
 Modus auf.
@@ -703,6 +835,13 @@ firewall disable session 30m
 firewall enable session
 approve workdir /absolute/project/path
 ```
+
+Agents führen diese nutzergebundenen Controls nicht selbst aus. Sie geben die
+exakte kopierbare Zeile zurück und warten auf den Nutzer.
+
+<p align="center">
+  <img src="docs/assets/showcase/direct-user-control-guardrail.png" alt="Agent gibt direkte Firewall-Controls für den Nutzer zurück, ohne sie selbst auszuführen" width="900">
+</p>
 
 Persistente Firewall-Regeln werden ebenfalls nur über direkte User-Messages
 angelegt, nicht über agentisch ausgeführte Tools. Beispiel:

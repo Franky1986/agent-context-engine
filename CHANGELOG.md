@@ -9,6 +9,32 @@ The initial public baseline was:
 
 The entries below document the changes added since that initial public release.
 
+## Backend 0.2.15
+
+### Changed
+
+- Added a GitHub-renderable system flow diagram, runner-support badges, and a
+  contextual installation/runtime/monitor screenshot walkthrough to both
+  public READMEs.
+
+### Fixed
+
+- Claude hook adapters now deduplicate identical payloads when user-level and
+  project-level hook scopes overlap. Claude transcript synchronization also
+  stays above queue-reserved event sequences so delayed Stop replay cannot
+  collide with synthetic transcript events.
+- Terminal failed Dream sessions are no longer re-enqueued by every scheduler
+  pending sweep without new events. A new accepted event still changes the
+  session back to `dream_pending` and makes the new window eligible.
+- OpenCode readiness now recognizes the Ollama base-model inventory alias for
+  configured `-cloud` Dream models that OpenCode can run successfully.
+- `check-installation` now evaluates external Codex, Claude, and Cursor
+  workspace hooks against their owning installation root, keeping its result
+  aligned with runner-specific target status.
+- Successful hook-queue replay passes now record a healthy completion marker,
+  clearing stale monitor degradation after the previous replay error has been
+  resolved.
+
 ## Backend 0.2.14
 
 - `search` now reports matching repository knowledge as separate, path-safe

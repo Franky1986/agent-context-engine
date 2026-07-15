@@ -13,6 +13,15 @@
   <img alt="Windows" src="https://img.shields.io/badge/Windows-experimental%20runtime%20path-0078D4?logo=windows&logoColor=white">
 </p>
 
+<p align="center">
+  <img alt="Codex supported" src="https://img.shields.io/badge/Codex-supported-111827?logo=openai&logoColor=white">
+  <img alt="Claude Code supported" src="https://img.shields.io/badge/Claude%20Code-supported-D97757?logo=anthropic&logoColor=white">
+  <img alt="Cursor supported" src="https://img.shields.io/badge/Cursor-supported-111827?logo=cursor&logoColor=white">
+  <img alt="Antigravity supported" src="https://img.shields.io/badge/Antigravity-supported-4285F4?logo=google&logoColor=white">
+  <img alt="Gemini supported" src="https://img.shields.io/badge/Gemini-supported-8E75B2?logo=googlegemini&logoColor=white">
+  <img alt="OpenCode supported" src="https://img.shields.io/badge/OpenCode-supported-2563EB?logo=opencode&logoColor=white">
+</p>
+
 # Agent Context Engine
 
 Local-first cross-harness context engine for coding agents with memory,
@@ -36,7 +45,7 @@ Created and maintained by [Frank Richter](https://www.linkedin.com/in/frank-rich
 
 Current public versions:
 
-- Backend / product: `0.2.14`
+- Backend / product: `0.2.15`
 - Monitor: `0.6.10`
 
 Platform support posture:
@@ -80,6 +89,17 @@ agent-context-engine launchagent-status
 Running `agent-context-engine` without arguments prints the command overview
 and the copyable direct-user system-control forms.
 
+<table>
+  <tr>
+    <th width="50%">1. Review the discovered installation plan</th>
+    <th width="50%">2. Verify the completed installation</th>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/installation-discovery-plan.png" alt="Agent Context Engine installation discovery and approval plan"></td>
+    <td><img src="docs/assets/showcase/installation-success-summary.png" alt="Successful Agent Context Engine installation summary"></td>
+  </tr>
+</table>
+
 ## How It Works
 
 1. Hooks capture session activity from supported runners.
@@ -87,6 +107,66 @@ and the copyable direct-user system-control forms.
 3. Retrieval and handover flows turn prior work into usable context for the next agent session.
 4. Background scheduling keeps summaries, dreams, graph extraction, and maintenance moving forward.
 5. The local monitor exposes runtime state, integrations, risks, and storage in one place.
+
+## How Everything Connects
+
+```mermaid
+flowchart LR
+  subgraph Clients["Runner clients"]
+    Codex[Codex]
+    Claude[Claude Code]
+    Cursor[Cursor]
+    Agy[Antigravity]
+    Gemini[Gemini CLI]
+    OpenCode[OpenCode]
+  end
+
+  subgraph Entry["ACE launch and activation"]
+    CodexAce[codex-ace]
+    ClaudeAce[claude-ace]
+    CursorAce[cursor-ace]
+    AgyAce[agy-ace]
+    GeminiAce[gemini-ace]
+    OpenCodeAce[opencode-ace]
+  end
+
+  Codex --> CodexAce
+  Claude --> ClaudeAce
+  Cursor --> CursorAce
+  Agy --> AgyAce
+  Gemini --> GeminiAce
+  OpenCode --> OpenCodeAce
+
+  CodexAce --> Ingress[Native hooks and plugin bridge]
+  ClaudeAce --> Ingress
+  CursorAce --> Ingress
+  AgyAce --> Ingress
+  GeminiAce --> Ingress
+  OpenCodeAce --> Ingress
+
+  Ingress --> Guard[Admission, risk classifier, and firewall]
+  Guard --> DB[(Local SQLite event and audit store)]
+  DB --> Retrieval[Search, retrieval, and handover]
+  Retrieval --> Context[Context for the next agent turn]
+
+  DB --> Scheduler[Scheduler and durable queues]
+  Scheduler --> DreamQueue[Dream queue]
+  DreamQueue --> RunnerPolicy[Same-session runner or configured delegate]
+  RunnerPolicy --> Dream[Dream v2 stages]
+  Dream --> Artifacts[Summaries, handovers, and audit artifacts]
+  Dream --> Graph[(Semantic graph and evidence)]
+  Artifacts --> Retrieval
+  Graph --> Retrieval
+
+  Monitor[Local monitor API and UI] -. reads .-> DB
+  Monitor -. inspects .-> Artifacts
+  Monitor -. inspects .-> Graph
+```
+
+All runtime memory stays local. The wrappers preserve project context, the
+ingress layer keeps capture and policy enforcement fast, and background work
+uses the session's runner by default unless an integration such as Cursor is
+configured with a headless delegate.
 
 ## Documentation
 
@@ -363,6 +443,32 @@ artifacts such as the global OpenCode bridge at
 workspace adapters.
 
 ## After Install
+
+The first project launch asks before adding local hooks. Codex and Claude use
+the same explicit activation model, while the installed central hub keeps the
+project-local adapter independent from a particular checkout path.
+
+<table>
+  <tr>
+    <th width="50%">Codex project activation</th>
+    <th width="50%">Claude project activation</th>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/codex-project-hook-activation.png" alt="codex-ace asking to activate project hooks"></td>
+    <td><img src="docs/assets/showcase/claude-project-hook-activation.png" alt="claude-ace asking to activate project hooks"></td>
+  </tr>
+</table>
+
+Once active, hook events are visible in the runner and previous work can be
+recalled across supported clients.
+
+<p align="center">
+  <img src="docs/assets/showcase/codex-hooked-session.png" alt="Codex session with successful Agent Context Engine hooks" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/assets/showcase/multi-runner-session-recall.png" alt="Codex, Claude, and Antigravity using shared Agent Context Engine memory" width="900">
+</p>
 
 ### Codex
 
@@ -689,6 +795,31 @@ The monitor binds to `127.0.0.1` by default and opens
 - grouped D3 token bars: wider bars for session token usage and narrower adjacent bars for Dream-process total tokens
 - optional Neo4j graph source when `AGENT_MEMORY_NEO4J_PASSWORD` is configured
 
+The Sessions view connects captured runner activity with queue and Dream
+progress; selecting a row opens the persisted event and run detail.
+
+<table>
+  <tr>
+    <th width="50%">Sessions overview</th>
+    <th width="50%">Dream progress</th>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/monitor-sessions-overview.png" alt="Agent Context Engine monitor sessions overview"></td>
+    <td><img src="docs/assets/showcase/monitor-session-dream-progress.png" alt="Monitor session row showing Dream progress"></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/assets/showcase/monitor-session-detail.png" alt="Detailed Agent Context Engine monitor session view" width="900">
+</p>
+
+Dream inspection exposes the selected runner and model, stage outcome, event
+window, timing, token accounting, semantic signal, and persistence impact.
+
+<p align="center">
+  <img src="docs/assets/showcase/monitor-dream-inspection.png" alt="Successful Dream v2 run inspection with tokens and semantic impact" width="900">
+</p>
+
 The Q&A endpoint builds a small retrieval prompt from SQLite FTS chunks and local
 graph context, then calls the selected runner in no-tools/read-only mode.
 
@@ -835,6 +966,14 @@ firewall enable session
 
   Hook block messages and session monitor views should surface these exact
   lines when they are relevant.
+
+  Agents do not execute these user-only controls themselves; they return the
+  exact copyable line and wait for the user.
+
+<p align="center">
+  <img src="docs/assets/showcase/direct-user-control-guardrail.png" alt="Agent returning direct-user firewall controls without executing them" width="900">
+</p>
+
 - A human can also approve a local project directory for the current session:
 
 ```text

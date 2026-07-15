@@ -425,6 +425,13 @@ shell-quoted absolute command to the project-local
 `${CLAUDE_PROJECT_DIR}/.claude/hooks/hook_adapter.sh` ACE hooks are treated as
 repairable legacy entries.
 
+Claude may invoke both user-level and project-level hooks when an older global
+ACE hook still overlaps with a newly activated workspace. The central adapter
+deduplicates identical native payloads within a short bounded window. Queue
+reservations also take precedence over synthetic transcript event numbering,
+so transcript import cannot occupy a sequence that a queued Stop event still
+needs to replay.
+
 Claude Desktop must not be treated as equivalent to Claude Code CLI here. If
 `claude` is missing, the integration is not headless-ready even if a separate
 GUI/editor experience exists elsewhere.
@@ -654,6 +661,11 @@ Use `check-installation` when the issue could involve:
 - a stored workflow choice such as Dreaming or monitor ask that still requires
   a headless CLI although only GUI hooks were prepared
 
+For external workspaces, `check-installation` must evaluate hook and binding
+state against the owning installation root. Its result should agree with the
+runner-specific target status command; a workspace must not become
+`not_prepared` merely because its binding correctly points outside itself.
+
 Use `repair-installation --apply` only after the user agrees with the proposed
 repair actions. The monitor must stay read-only for these integration repairs;
 it may show the exact agent command, but it must not execute the change itself.
@@ -691,6 +703,11 @@ Discovery sources:
 
 - Opencode model listing
 - local Ollama inventory
+
+Ollama may report a cloud-backed OpenCode model such as
+`gpt-oss:20b-cloud` under the base inventory id `gpt-oss:20b`. Treat that
+specific `-cloud` alias as the same readiness candidate; do not generalize
+unrelated model names.
 
 If the preferred model is missing:
 
