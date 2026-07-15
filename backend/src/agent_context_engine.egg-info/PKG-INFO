@@ -1,6 +1,7 @@
 Metadata-Version: 2.4
 Name: agent-context-engine
-Version: 0.2.1
+Version: 0.2.14
 Summary: Local agent context engine backend
+License-Expression: Apache-2.0
 Requires-Python: >=3.11
-Requires-Dist: PyYAML<7,>=6
+Requires-Dist: PyYAML==6.0.2

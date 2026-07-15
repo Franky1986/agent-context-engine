@@ -10,9 +10,6 @@ Memory:
 - `handover "<session|title|search terms>"`
 - `retrieve`
 - `search`
-- Matching searches may also report separate `repo-context "<identifier>"`
-  follow-up commands; treat them as repository knowledge candidates, not
-  session-memory evidence.
 
 More:
 - `session-start-context`
@@ -20,15 +17,6 @@ More:
 - `personal-context`
 - `retrieval-runs`
 - `monitor`
-
-Installation recovery:
-- An approved install plan does not authorize a later
-  `repair-installation --apply`. If installation finishes incomplete, show the
-  exact repair command and wait for new explicit user chat approval.
-- Repair may publish the active root and finalize hooks only after the enabled
-  configured monitor is identity-verified. A direct user monitor restart opens
-  the browser by default; add `--no-open` only when the user or environment
-  explicitly requests headless startup.
 
 Direct-user system controls (send these yourself in chat; agents must not run them as tools):
 
