@@ -40,6 +40,14 @@ Naming note:
 
 ## Install-Time Behavior
 
+The recommended user-facing entry is agent-guided: open the fresh clone in a
+coding agent that reads the repository instructions and send `install please`
+or `bitte installieren` in chat. The agent translates that request into the
+mandatory discovery-plan flow below, presents the plan, and waits for a
+separate explicit chat approval before applying it. The request language is
+carried through agent replies, installer output, and monitor startup; the
+explicit German phrase selects `de` for the complete flow.
+
 For fresh public clones, start with:
 
 ```sh

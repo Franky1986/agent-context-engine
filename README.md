@@ -67,7 +67,51 @@ See [CHANGELOG.md](CHANGELOG.md) for release history since the initial public re
 
 ## Quick Start
 
-From a fresh clone:
+### Install with a coding agent (recommended)
+
+1. Open the fresh clone as the current project in Codex or another coding
+   agent that reads the repository instructions.
+2. Ask for the installation in normal chat language, for example:
+
+   ```text
+   install please
+   ```
+
+   or:
+
+   ```text
+   bitte installieren
+   ```
+
+   The agent first runs read-only discovery and presents the detected target
+   root, memory root, monitor port, wrapper names, runner readiness, and other
+   proposed changes. Nothing is installed at that point.
+
+3. Review that plan and explicitly approve it in chat. Tool or sandbox approval
+   alone does not count as installation consent. After chat approval, the agent
+   applies the unchanged plan, verifies the result, and leaves the local monitor
+   running.
+
+The install request also selects the interaction language. An English request
+keeps the agent, installer output, and monitor in English. An explicit German
+request such as `bitte installieren` switches the complete flow, including the
+monitor, to German. The screenshots below were captured from this agent-guided
+Codex flow.
+
+<table>
+  <tr>
+    <th width="50%">1. Review the plan prepared by the agent</th>
+    <th width="50%">2. Verify the approved installation</th>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/installation-discovery-plan.png" alt="Agent Context Engine installation discovery and approval plan"></td>
+    <td><img src="docs/assets/showcase/installation-success-summary.png" alt="Successful Agent Context Engine installation summary"></td>
+  </tr>
+</table>
+
+### Install manually
+
+From the fresh clone, run:
 
 ```sh
 python3 scripts/agent_context_engine.py install
@@ -88,17 +132,6 @@ agent-context-engine launchagent-status
 
 Running `agent-context-engine` without arguments prints the command overview
 and the copyable direct-user system-control forms.
-
-<table>
-  <tr>
-    <th width="50%">1. Review the discovered installation plan</th>
-    <th width="50%">2. Verify the completed installation</th>
-  </tr>
-  <tr>
-    <td><img src="docs/assets/showcase/installation-discovery-plan.png" alt="Agent Context Engine installation discovery and approval plan"></td>
-    <td><img src="docs/assets/showcase/installation-success-summary.png" alt="Successful Agent Context Engine installation summary"></td>
-  </tr>
-</table>
 
 ## How It Works
 

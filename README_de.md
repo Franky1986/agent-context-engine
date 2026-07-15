@@ -67,7 +67,52 @@ Siehe [CHANGELOG.md](CHANGELOG.md) für die Release-Historie seit dem ersten öf
 
 ## Schnellstart
 
-Aus einem frischen Clone:
+### Mit einem Coding-Agent installieren (empfohlen)
+
+1. Öffne den frischen Clone als aktuelles Projekt in Codex oder einem anderen
+   Coding-Agent, der die Repository-Anweisungen liest.
+2. Bitte den Agent in normaler Chat-Sprache um die Installation, zum Beispiel:
+
+   ```text
+   bitte installieren
+   ```
+
+   oder auf Englisch:
+
+   ```text
+   install please
+   ```
+
+   Der Agent führt zuerst eine rein lesende Discovery aus und zeigt den
+   erkannten Ziel-Root, Memory-Root, Monitor-Port, die Wrapper-Namen,
+   Runner-Bereitschaft und alle weiteren geplanten Änderungen. Zu diesem
+   Zeitpunkt wird noch nichts installiert.
+
+3. Prüfe diesen Plan und bestätige ihn ausdrücklich im Chat. Eine Tool- oder
+   Sandbox-Freigabe allein ist keine Zustimmung zur Installation. Nach der
+   Chat-Bestätigung wendet der Agent den unveränderten Plan an, verifiziert das
+   Ergebnis und lässt den lokalen Monitor gestartet.
+
+Die Sprache der Installationsanfrage bestimmt den gesamten Ablauf. Bei einer
+expliziten deutschen Anfrage wie `bitte installieren` antwortet der Agent auf
+Deutsch, der Installer verwendet Deutsch und auch der Monitor startet auf
+Deutsch. Eine englische Anfrage hält alle drei Oberflächen auf Englisch. Die
+folgenden Screenshots stammen aus genau diesem agentengeführten Codex-Ablauf.
+
+<table>
+  <tr>
+    <th width="50%">1. Vom Agent vorbereiteten Plan prüfen</th>
+    <th width="50%">2. Freigegebene Installation verifizieren</th>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/installation-discovery-plan.png" alt="Discovery und Freigabeplan der Agent-Context-Engine-Installation"></td>
+    <td><img src="docs/assets/showcase/installation-success-summary.png" alt="Erfolgreiche Zusammenfassung der Agent-Context-Engine-Installation"></td>
+  </tr>
+</table>
+
+### Manuell installieren
+
+Führe im frischen Clone aus:
 
 ```sh
 python3 scripts/agent_context_engine.py install
@@ -88,17 +133,6 @@ agent-context-engine launchagent-status
 
 `agent-context-engine` ohne Argumente zeigt die Kommando-Uebersicht und die
 kopierbaren direkten System-Control-Zeilen fuer Nutzer an.
-
-<table>
-  <tr>
-    <th width="50%">1. Erkannten Installationsplan prüfen</th>
-    <th width="50%">2. Abgeschlossene Installation verifizieren</th>
-  </tr>
-  <tr>
-    <td><img src="docs/assets/showcase/installation-discovery-plan.png" alt="Discovery und Freigabeplan der Agent-Context-Engine-Installation"></td>
-    <td><img src="docs/assets/showcase/installation-success-summary.png" alt="Erfolgreiche Zusammenfassung der Agent-Context-Engine-Installation"></td>
-  </tr>
-</table>
 
 ## Wie Es Funktioniert
 

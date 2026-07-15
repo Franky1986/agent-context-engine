@@ -16,6 +16,11 @@ The entries below document the changes added since that initial public release.
 - Added a GitHub-renderable system flow diagram, runner-support badges, and a
   contextual installation/runtime/monitor screenshot walkthrough to both
   public READMEs.
+- Clarified the recommended natural-language install path in both READMEs:
+  open the fresh clone in a coding agent, request installation in English or
+  German, review the read-only discovery plan, and approve it explicitly in
+  chat. The selected language now appears clearly as the language used for the
+  agent, installer, and monitor.
 
 ### Fixed
 

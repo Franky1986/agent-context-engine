@@ -12,6 +12,20 @@ Current platform posture:
 - Windows is an experimental native runtime path
 - Linux and WSL remain scaffolded
 
+## User-Facing Quick Path
+
+Users do not need to know the installer CLI before starting an agent-driven
+setup. From a fresh clone, they can open the repository in Codex or another
+coding agent that reads the repository instructions and send a normal chat
+request such as `install please` or `bitte installieren`.
+
+Treat that request as authorization to run read-only discovery only. Present
+the resulting installation plan and wait for a separate, explicit approval in
+chat before applying it. Carry the request language through the agent replies,
+discovery, final install command, installer output, and monitor startup. In
+particular, `bitte installieren` selects `de`; an English install request keeps
+the flow on `en` unless the user chooses another language.
+
 ## Agent Contract
 
 When a user says something like "clone agent-context-engine and initialize it", the
