@@ -127,7 +127,7 @@ CODEX_DREAM_MODEL = os.environ.get("AGENT_MEMORY_CODEX_DREAM_MODEL", "gpt-5.4-mi
 CLAUDE_DREAM_MODEL = os.environ.get("AGENT_MEMORY_CLAUDE_DREAM_MODEL", "claude-haiku-4-5-20251001")
 CURSOR_DREAM_MODEL = os.environ.get("AGENT_MEMORY_CURSOR_DREAM_MODEL", "gpt-5.4-mini-medium")
 GEMINI_DREAM_MODEL = os.environ.get("AGENT_MEMORY_GEMINI_DREAM_MODEL", "gemini-3.1-flash-lite")
-ANTIGRAVITY_DREAM_MODEL = os.environ.get("AGENT_MEMORY_ANTIGRAVITY_DREAM_MODEL", "Gemini 3.5 Flash (Minimal)")
+ANTIGRAVITY_DREAM_MODEL = os.environ.get("AGENT_MEMORY_ANTIGRAVITY_DREAM_MODEL", "Gemini 3.5 Flash (Low)")
 OPENCODE_DREAM_MODEL = os.environ.get("AGENT_MEMORY_OPENCODE_DREAM_MODEL", "ollama/gpt-oss:20b-cloud")
 
 

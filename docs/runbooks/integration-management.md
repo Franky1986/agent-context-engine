@@ -35,10 +35,12 @@ Special current runtime caveat:
 
 - `antigravity` is implemented across status, hooks, monitor, resume, and
   runner plumbing. Headless `agy` calls must pass the prompt as the value of
-  `-p` / `--print` (`agy --model "Gemini 3.5 Flash (Minimal)" -p "<prompt>"`);
+  `-p` / `--print` (`agy --model "Gemini 3.5 Flash (Low)" -p "<prompt>"`);
   appending the prompt as a positional argument after `--print` is not the
   supported contract. The Antigravity PreTool classifier defaults to
-  `Gemini 3.5 Flash (Minimal)` unless overridden.
+  the same `Gemini 3.5 Flash (Low)` model as dreaming unless overridden.
+  Current `agy` releases expose the Flash thinking levels as `Low`, `Medium`,
+  and `High`; the removed `Minimal` label must not be used as a default.
 
 This runbook covers both monitor-facing status semantics and the command paths
 an agent should use.

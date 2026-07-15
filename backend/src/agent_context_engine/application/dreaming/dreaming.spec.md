@@ -67,6 +67,9 @@ memory artifacts and graph-ready proposals.
   conversation window over paraphrase from dream summaries.
 - Antigravity-backed dream stages use the current non-interactive
   `agy --model "<model>" -p "<prompt>"` command contract.
+- The default Antigravity dream model is accepted by the current `agy` CLI,
+  and the Antigravity classifier derives its fallback from that same central
+  model default so the two execution paths cannot drift independently.
 - Semantic extraction and reconciliation use the same resilient JSON parsing
   contract across all supported runners and fall back deterministically when
   parsing fails.

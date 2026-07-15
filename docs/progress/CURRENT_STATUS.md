@@ -68,8 +68,9 @@ workflows. The current public slice includes:
   more robustly across Claude, Gemini, Antigravity, and OpenCode, including a
   one-shot schema repair prompt for text-only runners.
 - Antigravity headless calls use the `agy -p <prompt>` contract; the PreTool
-  classifier uses `Gemini 3.5 Flash (Minimal)` by default after direct local
-  validation of that syntax.
+  classifier and dream runner share the directly validated
+  `Gemini 3.5 Flash (Low)` default. Current `agy` releases reject the removed
+  `Minimal` thinking-level label.
 
 Versioned release snapshot:
 

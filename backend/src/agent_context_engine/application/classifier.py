@@ -198,7 +198,7 @@ def classifier_model_for_runner(runner: str, stage: str, requested: str | None) 
     if runner == "cursor":
         return os.environ.get("AGENT_MEMORY_CURSOR_CLASSIFIER_MODEL") or CURSOR_DREAM_MODEL
     if runner == "antigravity":
-        return os.environ.get("AGENT_MEMORY_ANTIGRAVITY_CLASSIFIER_MODEL") or "Gemini 3.5 Flash (Minimal)"
+        return os.environ.get("AGENT_MEMORY_ANTIGRAVITY_CLASSIFIER_MODEL") or ANTIGRAVITY_DREAM_MODEL
     if runner == "gemini":
         return os.environ.get("AGENT_MEMORY_GEMINI_CLASSIFIER_MODEL") or GEMINI_DREAM_MODEL
     if runner == "opencode":

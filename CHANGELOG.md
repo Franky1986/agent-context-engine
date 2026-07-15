@@ -78,6 +78,10 @@ The entries below document the changes added since that initial public release.
 
 ### Fixed
 
+- Antigravity dream and classifier defaults now use the current
+  `Gemini 3.5 Flash (Low)` model. Recent `agy` releases reject the removed
+  `Minimal` label, and the classifier now derives its fallback from the same
+  central model default as dreaming.
 - Monitor takeover now retries bounded status probes, preserves unreachable
   process-discovered shared-memory candidates as explicit blockers, and may
   stop an unreachable candidate only through a verified owned launcher.
@@ -211,7 +215,7 @@ The entries below document the changes added since that initial public release.
   runner responses once with a schema-repair prompt before failing closed.
 - Antigravity classifier and headless runner calls now use the `agy -p <prompt>`
   contract, and the Antigravity classifier default uses
-  `Gemini 3.5 Flash (Minimal)`.
+  `Gemini 3.5 Flash (Low)`.
 - OpenCode runner commands now use the current `--auto` flag instead of the
   removed `--dangerously-skip-permissions` option.
 

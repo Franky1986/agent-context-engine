@@ -1463,7 +1463,7 @@ class AgentContextEngineWindowTests(AgentContextEngineTestCase):
                   started_at, status, input_event_seq_from, input_event_seq_to,
                   input_event_count, pipeline_version, pipeline_status, created_by
                 ) values (
-                  'dream-semantic-fallback', 'semantic-fallback-session', 'antigravity', 'antigravity', 'Gemini 3.5 Flash (Minimal)',
+                  'dream-semantic-fallback', 'semantic-fallback-session', 'antigravity', 'antigravity', 'Gemini 3.5 Flash (Low)',
                   '2026-06-24T10:00:00+00:00', 'running', 1, 2,
                   2, 2, 'running', 'unit_test'
                 )
@@ -1497,7 +1497,7 @@ class AgentContextEngineWindowTests(AgentContextEngineTestCase):
                     narrative_response="Session discussed a concrete follow-up task.",
                     semantic_context={},
                     runner="antigravity",
-                    runner_model="Gemini 3.5 Flash (Minimal)",
+                    runner_model="Gemini 3.5 Flash (Low)",
                     reuse_from_dream_run_id=None,
                     runner_timeout=30,
                     args=None,
@@ -1534,7 +1534,7 @@ class AgentContextEngineWindowTests(AgentContextEngineTestCase):
                   started_at, status, input_event_seq_from, input_event_seq_to,
                   input_event_count, pipeline_version, pipeline_status, created_by
                 ) values (
-                  'dream-reconciliation-fallback', 'reconciliation-fallback-session', 'antigravity', 'antigravity', 'Gemini 3.5 Flash (Minimal)',
+                  'dream-reconciliation-fallback', 'reconciliation-fallback-session', 'antigravity', 'antigravity', 'Gemini 3.5 Flash (Low)',
                   '2026-06-24T10:00:00+00:00', 'running', 1, 2,
                   2, 2, 'running', 'unit_test'
                 )
@@ -1588,7 +1588,7 @@ class AgentContextEngineWindowTests(AgentContextEngineTestCase):
                     semantic_payload=semantic_payload,
                     candidates={"entities": [], "relations": []},
                     runner="antigravity",
-                    runner_model="Gemini 3.5 Flash (Minimal)",
+                    runner_model="Gemini 3.5 Flash (Low)",
                     semantic_id_map=None,
                     reuse_from_dream_run_id=None,
                     runner_timeout=30,
@@ -4980,7 +4980,7 @@ exit 0
             with mock.patch.object(classifier, "run_classifier_llm", side_effect=["Hi! How can I help you today?", repaired]) as run_mock:
                 output, parsed = classifier._classify_with_runner_and_repair(
                     "antigravity",
-                    "Gemini 3.5 Flash (Minimal)",
+                    "Gemini 3.5 Flash (Low)",
                     "classify this",
                     10,
                     stage="pre_action",
@@ -5008,7 +5008,7 @@ exit 0
                 with self.assertRaises(classifier.ClassifierOutputError) as raised:
                     classifier._classify_with_runner_and_repair(
                         "antigravity",
-                        "Gemini 3.5 Flash (Minimal)",
+                        "Gemini 3.5 Flash (Low)",
                         "classify this",
                         10,
                         stage="pre_action",
@@ -5021,7 +5021,7 @@ exit 0
             self.assertIn(noisy_output, raised.exception.output_text)
             self.assertIn("still not json", raised.exception.output_text)
 
-    def test_antigravity_auto_classifier_uses_minimal_model(self) -> None:
+    def test_antigravity_auto_classifier_uses_low_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             load_agent_memory(root)
@@ -5031,7 +5031,7 @@ exit 0
             base = RiskDecision(decision="allow", risk_level="none")
             with mock.patch.dict(os.environ, {"AGENT_MEMORY_CLASSIFIER_MODE": "llm-on-noncritical"}, clear=False):
                 self.assertEqual(classifier.classifier_runner_for_stage("pre_action", "auto", client_type="antigravity", deterministic=base), "antigravity")
-                self.assertEqual(classifier.classifier_model_for_runner("antigravity", "pre_action", "auto"), "Gemini 3.5 Flash (Minimal)")
+                self.assertEqual(classifier.classifier_model_for_runner("antigravity", "pre_action", "auto"), "Gemini 3.5 Flash (Low)")
                 self.assertEqual(classifier.classifier_runner_for_stage("pre_action", "antigravity", client_type="antigravity", deterministic=base), "antigravity")
 
     def test_classifier_runner_commands_use_structured_output_flags(self) -> None:
@@ -15660,6 +15660,7 @@ print("{}")
             self.assertTrue(model_for_runner("codex", None))
             self.assertEqual(model_for_runner("codex", "gpt-5.4"), "gpt-5.4")
             self.assertEqual(model_for_runner("cursor", None), "gpt-5.4-mini-medium")
+            self.assertEqual(model_for_runner("antigravity", None), "Gemini 3.5 Flash (Low)")
             conn = load_agent_memory(root).connect()
             with conn:
                 conn.execute(
@@ -15705,7 +15706,7 @@ print("{}")
             self.assertIn("--auto", opencode_command)
             self.assertNotIn("--dangerously-skip-permissions", opencode_command)
             from agent_context_engine.application.dreaming.runners import antigravity_dream_command
-            antigravity_command = antigravity_dream_command("Gemini 3.5 Flash (Minimal)")
+            antigravity_command = antigravity_dream_command("Gemini 3.5 Flash (Low)")
             self.assertIn("-p", antigravity_command)
             self.assertEqual(antigravity_command[-1], "-p")
             self.assertTrue(codex_stdout_has_tool_events('{"type":"tool_call","tool_name":"exec_command"}\n'))
